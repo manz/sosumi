@@ -103,6 +103,21 @@ State (`ref/dsp/`):
     in place over the residuals; no encoder emits it, so `alacdec --integrate` rewrites the
     first packet's modes to 1 and the reference decodes it (ref and --dsp agree); mono and
     stereo match (x17 f90d010). Not yet: DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
+  - Cost (x17 764ffff, `zig build bench`), bundles per sample per channel, first packets:
+
+    | fixture | total | rice | integrate | predict | unmix | other |
+    |---|---|---|---|---|---|---|
+    | mono.at (order 8) | 794 | 233 | | 442 | 119 | 0 |
+    | tone.at (stereo, matrixed) | 706 | 125 | | 379 | 202 | 0 |
+    | white24.at (24-bit, shifted) | 1168 | 243 | | 660 | 210 | 55 |
+    | clicks.c0.ff (escape) | 200 | | | | 114 | 86 |
+    | clicks.o30.ff (order 30) | 1569 | 260 | | 1176 | 133 | 1 |
+    | mono.at.int | 1045 | 233 | 104 | 589 | 119 | 0 |
+
+    At one bundle per cycle, stereo 44.1 kHz needs 62M bundles/s for tone.at and 138M for
+    order 30; 24-bit 48 kHz needs 112M. The predictor (about 39 bundles per tap at order 30,
+    adaptation included: mulWide, the lo[14] floor, delay-slot nops) and unmix's doubling shifts (sxe, 24 - depth passes) are
+    where it goes. Cycles wait on the clock and cycles per bundle form.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
