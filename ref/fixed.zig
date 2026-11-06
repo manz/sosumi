@@ -83,6 +83,34 @@ pub fn fmul(a: F24, b: F24) F24 {
     return normalize(mul(a.m, b.m), @as(i32, a.e) + b.e);
 }
 
+/// a + b. Exact before the final rounding while the exponents differ by at most 23; beyond
+/// that the smaller operand is rounded into place first.
+pub fn fadd(a: F24, b: F24) F24 {
+    if (a.m == 0) return b;
+    if (b.m == 0) return a;
+    const big = if (a.e >= b.e) a else b;
+    const small = if (a.e >= b.e) b else a;
+    const diff: i32 = @as(i32, big.e) - small.e;
+    const hi: Acc = @as(Acc, big.m) << 23;
+    const lo: Acc = if (diff <= 23)
+        @as(Acc, small.m) << @intCast(23 - diff)
+    else if (diff < 47)
+        roundShift(small.m, @intCast(diff - 23))
+    else
+        0;
+    return normalize(hi + lo, @as(i32, big.e) - 23);
+}
+
+pub fn fsub(a: F24, b: F24) F24 {
+    return fadd(a, b.negate());
+}
+
+/// x * 2^k.
+pub fn scale2(x: F24, k: i32) F24 {
+    if (x.m == 0) return x;
+    return .{ .m = x.m, .e = @intCast(@as(i32, x.e) + k) };
+}
+
 /// F24 constant from a positive real, at compile time.
 pub fn f24(comptime x: f64) F24 {
     @setEvalBranchQuota(10000);
@@ -135,4 +163,18 @@ test "fmul and f24 agree with doubles" {
     const x = fmul(f24(1.5), f24(0.75));
     try testing.expectApproxEqRel(@as(f64, 1.125), x.toFloat(), 1e-6);
     try testing.expectEqual(F24.zero, fmul(F24.zero, f24(3.0)));
+}
+
+test "fadd and fsub across exponent gaps" {
+    try testing.expectEqual(@as(f64, 3), fadd(f24(1.0), f24(2.0)).toFloat());
+    try testing.expectEqual(@as(f64, -1), fsub(f24(1.0), f24(2.0)).toFloat());
+    try testing.expectEqual(F24.zero, fsub(f24(1.5), f24(1.5)));
+    try testing.expectEqual(@as(f64, 1 + 0x1p-20), fadd(f24(1.0), f24(0x1p-20)).toFloat());
+    try testing.expectEqual(@as(f64, 1), fadd(f24(1.0), f24(0x1p-30)).toFloat()); // below the 24-bit mantissa
+    try testing.expectEqual(@as(f64, 1), fadd(f24(1.0), f24(0x1p-60)).toFloat());
+}
+
+test "scale2 shifts the exponent only" {
+    try testing.expectEqual(@as(f64, 12), scale2(f24(3.0), 2).toFloat());
+    try testing.expectEqual(F24.zero, scale2(F24.zero, 5));
 }
