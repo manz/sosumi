@@ -10,6 +10,9 @@ pub const swb = @import("tables/swb.zig");
 pub const iquant = @import("iquant.zig");
 pub const stereo = @import("stereo.zig");
 pub const tns = @import("tns.zig");
+pub const window = @import("window.zig");
+pub const imdct = @import("imdct.zig");
+pub const filterbank = @import("filterbank.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
