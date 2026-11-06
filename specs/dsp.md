@@ -93,8 +93,14 @@ State (`ref/dsp/`):
   - Output: `unmix()`, the decoder's last loop: matrixing with an exact product (mulWide,
     then shift by mix_bits from the two halves), shifted low bytes, the depth's wrap, mono,
     and a gap per frame for more channels. Matches the reference's 32-bit casts on random
-    frames (x17 6d4826d). Next: a whole packet (element header, sub-frame headers, the shifted
-    bytes from the stream) against `alacdec --dsp` on a fixture.
+    frames (x17 6d4826d).
+  - Packet: `alac_packet()` chains the stages: element and sub-frame headers, the
+    coefficients reversed into X, the low bytes (they precede the residuals, so no skip),
+    escape samples, then unmix into the channel's slot. A registers load from s through
+    s -> e -> R -> even A -> any A, every step gated. The first and last packets of mono,
+    tone, white24 (shifted), clicks.c0 (escape) and clicks.o30 (order 30) match the
+    reference's PCM, dumped by `alacdec --dump` (x17 4eaf236). Not yet: integrate (mode != 0),
+    DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17

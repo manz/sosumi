@@ -2,7 +2,10 @@
 //! stream's depth (16 -> 2 bytes, 20/24 -> 3, 32 -> 4), for a byte-exact `cmp` against
 //! afconvert's and ffmpeg's output.
 //!
-//!     alacdec in.m4a out.raw
+//!     alacdec in.m4a out.raw [--dsp] [--dump=pkts.bin]
+//!
+//! --dump writes the config, the first and the last packet and their PCM (little-endian u32
+//! fields; see `Dump`) for x17's packet-level test of the sm1 decoder.
 const std = @import("std");
 const ref = @import("ref");
 
@@ -77,7 +80,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len < 3) {
-        std.debug.print("usage: alacdec in.m4a out.raw [--dsp]\n", .{});
+        std.debug.print("usage: alacdec in.m4a out.raw [--dsp] [--dump=pkts.bin]\n", .{});
         std.process.exit(2);
     }
     const cwd = std.Io.Dir.cwd();
@@ -88,7 +91,14 @@ pub fn main(init: std.process.Init) !void {
     var dec = try ref.alac.decoder.Decoder.init(gpa, cfg);
     defer dec.deinit();
     // --dsp: the whole decoder in measured sm1 operations (ref/dsp/alac)
-    const use_dsp = args.len > 3 and std.mem.eql(u8, args[3], "--dsp");
+    var use_dsp = false;
+    var dump_path: ?[]const u8 = null;
+    for (args[3..]) |a| {
+        if (std.mem.eql(u8, a, "--dsp")) use_dsp = true;
+        if (std.mem.startsWith(u8, a, "--dump=")) dump_path = a["--dump=".len..];
+    }
+    var dump: Dump = .{};
+    defer dump.deinit(gpa);
     var ddec = try ref.dsp.alac.decoder.Decoder.init(gpa, cfg);
     defer ddec.deinit();
     const nch: usize = cfg.channels;
@@ -121,6 +131,7 @@ pub fn main(init: std.process.Init) !void {
                 failed += 1;
                 break :blk 0;
             };
+            if (dump_path != null and (sample == 0 or sample + 1 == t.count)) try dump.add(gpa, pkt, pcm[0 .. n * nch], n);
             const st = if (use_dsp) ddec.last else dec.last;
             inline for (.{ st.verbatim, st.shifted, st.matrixed, st.partial, st.integrated }, 0..) |b, k| cov[k] += @intFromBool(b);
             max_order = @max(max_order, st.max_order);
@@ -138,5 +149,40 @@ pub fn main(init: std.process.Init) !void {
     }
     std.debug.print("  packets with: verbatim {d}, shifted {d}, matrixed {d}, partial {d}, integrated {d}; max order {d}; SCE {d} CPE {d} LFE {d} DSE {d} FIL {d}\n", .{ cov[0], cov[1], cov[2], cov[3], cov[4], max_order, elems[0], elems[1], elems[3], elems[4], elems[6] });
     try cwd.writeFile(io, .{ .sub_path = args[2], .data = raw.items });
+    if (dump_path) |path| try cwd.writeFile(io, .{ .sub_path = path, .data = try dump.finish(gpa, cfg) });
     std.debug.print("{s}: {d} packets, {d} failed, {d} ch, {d} bit, {d} Hz, frame {d}, {d} samples\n", .{ args[1], frames, failed, nch, cfg.bit_depth, cfg.sample_rate, cfg.frame_length, raw.items.len / width / nch });
 }
+
+/// "ALPK", frame_length, bit_depth, pb, mb, kb, channels, packet count; then per packet:
+/// length, bytes, samples per channel, samples * channels i32 PCM. All little-endian.
+const Dump = struct {
+    body: std.ArrayList(u8) = .empty,
+    count: u32 = 0,
+    out: std.ArrayList(u8) = .empty,
+
+    fn put(list: *std.ArrayList(u8), gpa: std.mem.Allocator, v: u32) !void {
+        var b: [4]u8 = undefined;
+        std.mem.writeInt(u32, &b, v, .little);
+        try list.appendSlice(gpa, &b);
+    }
+
+    fn add(self: *Dump, gpa: std.mem.Allocator, pkt: []const u8, pcm: []const i32, n: usize) !void {
+        try put(&self.body, gpa, @intCast(pkt.len));
+        try self.body.appendSlice(gpa, pkt);
+        try put(&self.body, gpa, @intCast(n));
+        for (pcm) |s| try put(&self.body, gpa, @bitCast(s));
+        self.count += 1;
+    }
+
+    fn finish(self: *Dump, gpa: std.mem.Allocator, cfg: ref.alac.config.Config) ![]const u8 {
+        try self.out.appendSlice(gpa, "ALPK");
+        for ([_]u32{ cfg.frame_length, cfg.bit_depth, cfg.pb, cfg.mb, cfg.kb, cfg.channels, self.count }) |v| try put(&self.out, gpa, v);
+        try self.out.appendSlice(gpa, self.body.items);
+        return self.out.items;
+    }
+
+    fn deinit(self: *Dump, gpa: std.mem.Allocator) void {
+        self.body.deinit(gpa);
+        self.out.deinit(gpa);
+    }
+};
