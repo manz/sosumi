@@ -77,8 +77,12 @@ State (`ref/dsp/`):
     reads; `readn` takes up to 24 bits with the width in a register.
   - Rice codeword: x17 `examples/lib/rice.sm`, `rice_get(dst)`, the twin of `rice.get`:
     escapes, zero hi and pre * m (as additions, pre <= 8) match the model on biased random
-    bitstreams, reader position included (x17 9ec89af). Next: the adaptive loop around it
-    (`lg3aMin`, the two-word mean, zero runs).
+    bitstreams, reader position included (x17 9ec89af).
+  - Rice loop: `rice_decompress()`, the twin of `rice.decompress`: lg3a by comparisons, the
+    two-word mean, zero runs, the 0xFFFF clamp and overrun as an error slot. State in Y slots
+    (all 16-bit), residuals one 24-bit X word each through A6 (stx keeps 24 bits, measured).
+    Products are single exact multiplies, round((pb << 16) * (x << 7) / 2^23). Matches the
+    reference on biased random bitstreams (x17 1d286c7). Next: the predictor.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
