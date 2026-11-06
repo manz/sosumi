@@ -103,28 +103,30 @@ State (`ref/dsp/`):
     in place over the residuals; no encoder emits it, so `alacdec --integrate` rewrites the
     first packet's modes to 1 and the reference decodes it (ref and --dsp agree); mono and
     stereo match (x17 f90d010). Not yet: DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
-  - Cost (x17 9bb2286, `zig build bench`): bundles per sample per channel, first packets,
+  - Cost (x17 b88885e, `zig build bench`): bundles per sample per channel, first packets,
     and the load at the fixture's rate. One bundle of any form takes about 37.4 ns on
     silicon (26.7 M/s, MEASURED by Chikuma; the clock is unread, so one bundle per cycle
     is INFERRED). 100% is real time.
 
     | fixture | total | rice | integrate | predict | unmix | other | load |
     |---|---|---|---|---|---|---|---|
-    | mono.at (order 8) | 469 | 233 | | 201 | 35 | 0 | 77% |
-    | tone.at (stereo, matrixed) | 353 | 125 | | 173 | 55 | 0 | 116% |
-    | white24.at (24-bit, 48 kHz) | 670 | 243 | | 309 | 63 | 55 | 241% |
+    | mono.at (order 8) | 410 | 174 | | 201 | 35 | 0 | 68% |
+    | tone.at (stereo, matrixed) | 321 | 93 | | 173 | 55 | 0 | 106% |
+    | white24.at (24-bit, 48 kHz) | 539 | 113 | | 309 | 63 | 55 | 194% |
     | clicks.c0.ff (escape) | 116 | | | | 30 | 86 | 38% |
-    | clicks.o30.ff (order 30) | 951 | 260 | | 641 | 49 | 1 | 314% |
-    | mono.at.int | 564 | 233 | 21 | 275 | 35 | 0 | 93% |
+    | clicks.o30.ff (order 30) | 870 | 179 | | 641 | 49 | 1 | 287% |
+    | mono.at.int | 505 | 174 | 21 | 275 | 35 | 0 | 83% |
 
     Down from 706 bundles for tone.at: a 17-bundle tap (constants held in registers, the
     count tested at the bottom, delay slots fetching ahead), the adaptation split by the
     sign of the residual, sign extension in seven bundles (x - 2 (q << (k - 1)), q =
-    rshr(x, k)) instead of doubling loops. 16-bit stereo is still about 1.2x over real
-    time; order 30 and 24-bit are 2-3x over. No parallelism is measured to lean on: the
-    four lane images hold one sequential program (INFERRED from the layout and branch
-    arithmetic), and the only hardware repeat (0x03 w3[31]) repeats a single bundle. So
-    the rest has to come from fewer bundles: the Rice loop next, then filled delay slots.
+    rshr(x, k)) instead of doubling loops; in Rice, the k search starting from the last k,
+    prefix bits straight off the cache and hi with its bit as one k-bit peek. 16-bit stereo
+    is still just over real time; order 30 and 24-bit are 2-3x over. No parallelism is
+    measured to lean on: the four lane images hold one sequential program (INFERRED from
+    the layout and branch arithmetic), and the only hardware repeat (0x03 w3[31]) repeats
+    a single bundle. So the rest has to come from fewer bundles: filled delay slots, then the predictor's tap
+    (17 bundles, of which the wide product's low half is 4).
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
