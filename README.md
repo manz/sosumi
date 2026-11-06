@@ -6,6 +6,8 @@ The firmware image carries its own sm1 codec programs. They are an oracle for be
 source: their provenance is unknown, and nothing here is transcribed from them. Each decoder is
 written from its format's public reference and checked against what the device measurably does.
 
+    ref/         the reference model in Zig, at sm1's widths (zig build test)
+    docs/        reading list
     specs/       one spec per codec: target scope, what the device is known to do, what is open
       aac.md     the priority: the library is all AAC
       mp3.md
