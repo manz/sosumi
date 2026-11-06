@@ -18,6 +18,7 @@ written from its format's public reference and checked against what the device m
       mp3.md
       alac.md
       ac3.md
+      dsp.md     the plan for porting the models to sm1
 
 Related repositories:
 
