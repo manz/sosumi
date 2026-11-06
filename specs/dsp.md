@@ -82,7 +82,15 @@ State (`ref/dsp/`):
     two-word mean, zero runs, the 0xFFFF clamp and overrun as an error slot. State in Y slots
     (all 16-bit), residuals one 24-bit X word each through A6 (stx keeps 24 bits, measured).
     Products are single exact multiplies, round((pb << 16) * (x << 7) / 2^23). Matches the
-    reference on biased random bitstreams (x17 1d286c7). Next: the predictor.
+    reference on biased random bitstreams (x17 1d286c7).
+  - Predictor: `unpredict()`, the twin of `predictor.unpredict`. Every access ascends: the
+    coefficients sit reversed in X, so the sum and the adaptation (k from order - 1 down)
+    both walk upward with A + 1. Products are `mulWide` (plo + rounded multiply); runtime
+    shifts wrap by doubling, sign extension is that shift plus an exact rounded shift.
+    Matches the reference on random blocks, orders 0..31, widths 8..23, 16-bit coefficient
+    wraps (x17 9ec4ea2). Open on silicon: whether the x02 multiply templates' A slot (A1)
+    runs; the routines avoid A1. Next: unmix and the shifted low bytes, then a whole
+    packet.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
