@@ -9,6 +9,7 @@ pub const huffman = @import("huffman.zig");
 pub const swb = @import("tables/swb.zig");
 pub const iquant = @import("iquant.zig");
 pub const stereo = @import("stereo.zig");
+pub const tns = @import("tns.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

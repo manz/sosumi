@@ -15,7 +15,6 @@ pub const Error = huffman.Error || error{
     SectionOverrun,
     ReservedMsMask,
     PulseInShortWindow,
-    TnsOrderTooHigh,
     TooManyBands,
     ScalefactorOutOfRange,
 };
@@ -153,16 +152,15 @@ pub fn readPulse(r: *bits.BitReader, info: IcsInfo) Error!Pulse {
     return p;
 }
 
-/// TNS_MAX_ORDER for AAC-LC: 12 for long windows, 7 for short.
-pub const tns_max_order_long = 12;
-pub const tns_max_order_short = 7;
-
+/// One TNS filter as transmitted. The order is not clamped here: every transmitted coefficient
+/// is read, and the filter stage applies TNS_MAX_ORDER.
 pub const TnsFilter = struct {
     length: u6 = 0,
     order: u5 = 0,
     direction: bool = false,
     coef_compress: bool = false,
-    coef: [tns_max_order_long]u4 = @splat(0),
+    /// Sign-extended coefficient codes: -8..7 for 4 bits, -4..3 for 3, -2..1 for 2.
+    coef: [31]i4 = @splat(0),
 };
 
 pub const TnsWindow = struct {
@@ -180,7 +178,6 @@ pub fn readTns(r: *bits.BitReader, info: IcsInfo) Error!Tns {
     const n_filt_bits: u6 = if (short) 1 else 2;
     const length_bits: u6 = if (short) 4 else 6;
     const order_bits: u6 = if (short) 3 else 5;
-    const max_order: u32 = if (short) tns_max_order_short else tns_max_order_long;
     var t: Tns = .{};
     for (0..info.numWindows()) |w| {
         const win = &t.windows[w];
@@ -189,14 +186,16 @@ pub fn readTns(r: *bits.BitReader, info: IcsInfo) Error!Tns {
         win.coef_res = @intCast(try r.read(1));
         for (win.filt[0..win.n_filt]) |*f| {
             f.length = @intCast(try r.read(length_bits));
-            const order = try r.read(order_bits);
-            if (order > max_order) return error.TnsOrderTooHigh;
-            f.order = @intCast(order);
-            if (order == 0) continue;
+            f.order = @intCast(try r.read(order_bits));
+            if (f.order == 0) continue;
             f.direction = try r.readFlag();
             f.coef_compress = try r.readFlag();
             const coef_bits: u6 = @as(u6, win.coef_res) + 3 - @intFromBool(f.coef_compress);
-            for (f.coef[0..order]) |*c| c.* = @intCast(try r.read(coef_bits));
+            const sign: i32 = @as(i32, 1) << @intCast(coef_bits - 1);
+            for (f.coef[0..f.order]) |*c| {
+                const v: i32 = @intCast(try r.read(coef_bits));
+                c.* = @intCast(if (v & sign != 0) v - 2 * sign else v);
+            }
         }
     }
     return t;
@@ -427,14 +426,20 @@ test "tns_data long filter with 4-bit coefficients" {
     try testing.expectEqual(@as(u6, 20), f.length);
     try testing.expectEqual(@as(u5, 2), f.order);
     try testing.expect(f.direction);
-    try testing.expectEqualSlices(u4, &.{ 7, 9 }, f.coef[0..2]);
+    try testing.expectEqualSlices(i4, &.{ 7, -7 }, f.coef[0..2]);
     try testing.expectEqual(@as(usize, 0), r.bitsLeft()); // all 24 bits consumed
 }
 
-test "tns order above the LC limit is refused" {
-    var buf: [8]u8 = undefined;
-    var r = bits.BitReader.init(pack(&buf, "01 1 010100 01101"));
-    try testing.expectError(error.TnsOrderTooHigh, readTns(&r, longInfo(10)));
+test "tns reads every transmitted coefficient, even past TNS_MAX_ORDER" {
+    var w: Writer = .{};
+    // n_filt 1, coef_res 0, length 4, order 13, direction 0, compress 1: 13 two-bit codes
+    w.put(0b01_0_000100_01101_0_1, 16);
+    for (0..13) |_| w.put(0b10, 2); // -2
+    var r = bits.BitReader.init(w.bytes());
+    const t = try readTns(&r, longInfo(10));
+    try testing.expectEqual(@as(u5, 13), t.windows[0].filt[0].order);
+    try testing.expectEqual(@as(i4, -2), t.windows[0].filt[0].coef[12]);
+    try testing.expectEqual(@as(usize, 42), r.pos);
 }
 
 const codes = @import("tables/huffman.zig");
