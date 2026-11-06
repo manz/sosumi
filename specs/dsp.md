@@ -74,7 +74,11 @@ State (`ref/dsp/`):
   - Bit reader: x17 `examples/lib/bits.sm`, `getbits(dst, k)` for k in 1..8, streaming 16-bit
     packet words through a cache below 2^23; floor shifts come from the rounded shift. Matches
     an MSB-first reader in the emulator across refills (x17 dafcc90). 16-bit fields are two
-    reads. Next: Rice `get`.
+    reads; `readn` takes up to 24 bits with the width in a register.
+  - Rice codeword: x17 `examples/lib/rice.sm`, `rice_get(dst)`, the twin of `rice.get`:
+    escapes, zero hi and pre * m (as additions, pre <= 8) match the model on biased random
+    bitstreams, reader position included (x17 9ec89af). Next: the adaptive loop around it
+    (`lg3aMin`, the two-word mean, zero runs).
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
