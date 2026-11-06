@@ -145,11 +145,13 @@ fn rightTools(pair: *const ics.ChannelPair, left: *const Coefs, right: *Coefs, o
     }
 }
 
-/// All three tools on a channel pair, in place.
-pub fn applyPair(pair: *const ics.ChannelPair, left: *Coefs, right: *Coefs, offsets: []const u16, rng: *Rng) void {
-    pns(&pair.left, left, offsets, rng);
-    msStereo(pair, left, right, offsets);
-    rightTools(pair, left, right, offsets, rng);
+/// All three tools on a channel pair, in place. Without common_window the two channels may
+/// use different window sequences, so each brings its own band offsets; M/S and correlated
+/// noise only exist with common_window.
+pub fn applyPair(pair: *const ics.ChannelPair, left: *Coefs, right: *Coefs, left_offsets: []const u16, right_offsets: []const u16, rng: *Rng) void {
+    pns(&pair.left, left, left_offsets, rng);
+    msStereo(pair, left, right, left_offsets);
+    rightTools(pair, left, right, right_offsets, rng);
 }
 
 const testing = std.testing;
@@ -191,7 +193,7 @@ test "M/S turns mid and side into left and right where the mask is set" {
     var l = filled(3.0);
     var r = filled(1.0);
     var rng: Rng = .{};
-    applyPair(&p, &l, &r, &offsets_4, &rng);
+    applyPair(&p, &l, &r, &offsets_4, &offsets_4, &rng);
     try testing.expectEqual(@as(f64, 4), l[0].toFloat());
     try testing.expectEqual(@as(f64, 2), r[3].toFloat());
     try testing.expectEqual(@as(f64, 3), l[4].toFloat()); // band 1: mask clear
@@ -206,7 +208,7 @@ test "intensity scales the left band by 0.5^(pos/4) with the codebook's sign" {
         const p = pairOf(channel(&.{1}, &.{100}), channel(&.{c.cb}, &.{4}), 0, &.{false});
         var ll = l;
         var r: Coefs = @splat(F24.zero);
-        applyPair(&p, &ll, &r, &offsets_4, &rng);
+        applyPair(&p, &ll, &r, &offsets_4, &offsets_4, &rng);
         try testing.expectEqual(c.want, r[2].toFloat());
     }
 }
@@ -217,7 +219,7 @@ test "the M/S mask flips the intensity sign only when ms_mask_present is 1" {
         const p = pairOf(channel(&.{1}, &.{100}), channel(&.{15}, &.{4}), c.present, &.{true});
         var l = filled(4.0);
         var r: Coefs = @splat(F24.zero);
-        applyPair(&p, &l, &r, &offsets_4, &rng);
+        applyPair(&p, &l, &r, &offsets_4, &offsets_4, &rng);
         try testing.expectEqual(c.want, r[0].toFloat());
         try testing.expectEqual(@as(f64, 4), l[0].toFloat()); // intensity bands skip M/S
     }
@@ -244,12 +246,12 @@ test "correlated noise copies the left band; otherwise the right gets its own" {
     const r = channel(&.{ics.noise_hcb}, &.{14});
     var cl: Coefs = @splat(F24.zero);
     var cr: Coefs = @splat(F24.zero);
-    applyPair(&pairOf(l, r, 1, &.{true}), &cl, &cr, &offsets_4, &rng);
+    applyPair(&pairOf(l, r, 1, &.{true}), &cl, &cr, &offsets_4, &offsets_4, &rng);
     for (0..4) |i| try testing.expectApproxEqRel(cl[i].toFloat() * 2, cr[i].toFloat(), 1e-6);
 
     cl = @splat(F24.zero);
     cr = @splat(F24.zero);
-    applyPair(&pairOf(l, r, 0, &.{false}), &cl, &cr, &offsets_4, &rng);
+    applyPair(&pairOf(l, r, 0, &.{false}), &cl, &cr, &offsets_4, &offsets_4, &rng);
     try testing.expect(cr[0].toFloat() != cl[0].toFloat() * 2);
     try testing.expectApproxEqRel(@as(f64, 128), bandEnergy(cr[0..4]), 1e-4);
 }
