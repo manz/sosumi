@@ -1,12 +1,14 @@
 //! Huffman decoding for scale factors and spectral codebooks (ISO/IEC 14496-3).
 //!
-//! The reference model decodes by matching the codeword one bit at a time against the table.
-//! Slow, and obviously right; the fast lookup belongs to the sm1 port.
+//! Codewords go through the shared decoder (ref/huffman.zig); this file holds what is AAC's:
+//! unpacking a codebook index into values, sign bits and escapes.
 const std = @import("std");
 const bits = @import("../bits.zig");
 const tables = @import("tables/huffman.zig");
 
-pub const Error = bits.Error || error{ InvalidCodeword, EscapeTooLong };
+const shared = @import("../huffman.zig");
+
+pub const Error = shared.Error || error{EscapeTooLong};
 
 /// Codebook parameters from OpenCORE's `hcbbook_binary` (Apache 2.0): values per codeword,
 /// the radix they are packed in, the offset subtracted from each, and whether the values are
@@ -31,18 +33,7 @@ pub const esc_book = 11;
 pub const esc_flag = 16;
 
 /// Index of the next codeword in `table`.
-pub fn decodeIndex(r: *bits.BitReader, table: []const tables.Code) Error!u16 {
-    var code: u32 = 0;
-    var len: u5 = 0;
-    while (len < 19) {
-        code = (code << 1) | try r.read(1);
-        len += 1;
-        for (table, 0..) |e, i| {
-            if (e.len == len and e.code == code) return @intCast(i);
-        }
-    }
-    return error.InvalidCodeword;
-}
+pub const decodeIndex = shared.decode;
 
 /// Scale factor codeword, as the signed difference (index - 60).
 pub fn decodeScalefactorDelta(r: *bits.BitReader) Error!i16 {
@@ -165,4 +156,10 @@ test "an escape prefix longer than 8 is refused" {
         .{ .code = 0x1ff, .len = 9 },
     }));
     try testing.expectError(error.EscapeTooLong, decodeSpectral(&r, 11, &out));
+}
+
+test "every AAC table is a complete prefix code" {
+    for ([_][]const tables.Code{&tables.scalefactor} ++ tables.spectral) |table| {
+        try testing.expectEqual(@as(u64, 1) << shared.max_len, shared.kraft(table));
+    }
 }
