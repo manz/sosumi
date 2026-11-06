@@ -121,8 +121,10 @@ State (`ref/dsp/`):
     count tested at the bottom, delay slots fetching ahead), the adaptation split by the
     sign of the residual, sign extension in seven bundles (x - 2 (q << (k - 1)), q =
     rshr(x, k)) instead of doubling loops. 16-bit stereo is still about 1.2x over real
-    time; order 30 and 24-bit are 2-3x over. The rest needs bundles that do more work
-    (the four lanes, parallel slots) or fewer: next is the Rice loop.
+    time; order 30 and 24-bit are 2-3x over. No parallelism is measured to lean on: the
+    four lane images hold one sequential program (INFERRED from the layout and branch
+    arithmetic), and the only hardware repeat (0x03 w3[31]) repeats a single bundle. So
+    the rest has to come from fewer bundles: the Rice loop next, then filled delay slots.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
