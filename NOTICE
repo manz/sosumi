@@ -19,3 +19,7 @@ ref/mp3/scalefactors.zig.
 
 PDMP3 (third_party/pdmp3), by Krister Lagerstrom, public domain (Unlicense). Its copy of the
 ISO/IEC 11172-3 synthesis window is converted into ref/mp3/tables/synth_window.zig.
+
+Apple's ALAC reference decoder (third_party/alac), Copyright (c) 2011 Apple Inc., Apache
+License 2.0. ref/alac/ is a port of its decoder (ag_dec.c, dp_dec.c, matrix_dec.c,
+ALACDecoder.cpp).

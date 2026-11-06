@@ -24,4 +24,15 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(compare);
+
+    const alacdec = b.addExecutable(.{
+        .name = "alacdec",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/alacdec/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "ref", .module = ref_mod }},
+        }),
+    });
+    b.installArtifact(alacdec);
 }

@@ -6,6 +6,7 @@ pub const huffman = @import("huffman.zig");
 pub const pow43 = @import("pow43.zig");
 pub const aac = @import("aac/aac.zig");
 pub const mp3 = @import("mp3/mp3.zig");
+pub const alac = @import("alac/alac.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

@@ -15,7 +15,7 @@ AC-3 and Dolby appear nowhere on the page.
 |---|---|---|---|
 | AAC, Protected AAC, video soundtracks | AAC-LC (FairPlay is the reader's, not the codec's) | `aac.md` | reference model done |
 | MP3, MP3 VBR | MPEG-1/2/2.5 Layer III | `mp3.md` | reference model done |
-| Apple Lossless | ALAC | `alac.md` | next |
+| Apple Lossless | ALAC | `alac.md` | reference model done |
 | AIFF, WAV | none expected: PCM, byte order at most | none | whether sm1 is involved is OPEN |
 | Audible AAX, AAX+ | AAC in MP4, Audible DRM in the reader | `aac.md` | covered by AAC, INFERRED; whether files Audible sells today still play on the device is OPEN (the list is from 2009) |
 | Audible formats 2, 3, 4, Enhanced (.aa) | a speech codec for 2 and 3, MP3 for 4 and Enhanced: INFERRED, from general knowledge of the .aa format, unverified | none | lowest priority (audiobooks) |

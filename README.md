@@ -8,9 +8,11 @@ written from its format's public reference and checked against what the device m
 
     ref/         the reference model in Zig, at sm1's widths (zig build test)
     docs/        reading list
-    third_party/ vendored Apache 2.0 sources the tables are derived from
-    tools/       table generators; compare/ checks the model against ffmpeg and afconvert PCM
-                 (tools/compare/gen.sh, then zig build && zig-out/bin/compare in.aac ref.s16)
+    third_party/ vendored permissive sources (Apache 2.0, CC0, public domain), see NOTICE
+    tools/       table generators; compare/ checks the AAC and MP3 models against ffmpeg and
+                 afconvert PCM (tools/compare/gen.sh, then zig build && zig-out/bin/compare
+                 in.aac|in.mp3 ref.s16); alacdec/ decodes an .m4a to raw PCM for a byte-exact
+                 cmp (tools/alacdec/gen.sh)
     specs/       one spec per codec: target scope, what the device is known to do, what is open
       aac.md     the priority: the library is all AAC
       mp3.md

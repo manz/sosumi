@@ -1,7 +1,8 @@
 # ALAC decoder
 
 Status: working draft. The container and config path are read in RetailOS; no ALAC track has
-been traced and the sm1 side is not started.
+been traced and the sm1 side is not started. The reference model (`ref/alac/`) is bit-exact
+against Apple's decoder.
 
 ## Goal and boundary
 
@@ -76,6 +77,25 @@ Apple's reference source decides; the `ffmpeg` binary's PCM is a second referenc
 5. Adaptive linear prediction, with the coefficient update and the sample-width wrap.
 6. Stereo decorrelation, then re-attach the separately coded low bits.
 7. Channel order from the layout; validate counts and the end marker.
+
+## Reference model state
+
+`ref/alac/` ports Apple's reference decoder (`third_party/alac`, **APPLE-REF**). `tools/alacdec`
+reads the .m4a sample tables and writes raw PCM at the stream's depth; `tools/alacdec/gen.sh`
+builds the fixtures, encoded by afconvert and by ffmpeg.
+
+| Fixture set | Result |
+|---|---|
+| 21 files: 16-bit stereo and mono 44.1 kHz, 24-bit 48 and 96 kHz, white noise, 5.1 at 48 kHz; prediction orders 0 to 30 | byte-identical to afconvert's PCM |
+| the same against the `ffmpeg` binary | byte-identical, except 5.1: ffmpeg reorders the channels to WAV order, every channel identical |
+
+Exercised: SCE, CPE, verbatim packets (16 and 24 bit), shifted low bytes, matrixed stereo,
+partial last packets. Never exercised, no encoder at hand writes them: prediction mode != 0 (the
+integrator), LFE elements (Apple's encoder codes LFE as an SCE), DSE and FIL elements, 20- and
+32-bit depth. A 32-bit CPE needs a 33-bit channel and is refused (`UnsupportedWidth`).
+
+Output is in bitstream order, as Apple's `Decode` writes it: for 5.1 that is C, L, R, Ls, Rs,
+LFE. Mapping to speakers is the reader's job (device behaviour **OPEN**).
 
 ## Validation
 
