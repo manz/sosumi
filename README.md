@@ -7,7 +7,7 @@ source: their provenance is unknown, and nothing here is transcribed from them. 
 written from its format's public reference and checked against what the device measurably does.
 
     specs/       one spec per codec: target scope, what the device is known to do, what is open
-      aac.md     not written yet (the codec that matters most: the library is all AAC)
+      aac.md     the priority: the library is all AAC
       mp3.md
       alac.md
       ac3.md
