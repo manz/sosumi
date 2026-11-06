@@ -89,8 +89,12 @@ State (`ref/dsp/`):
     shifts wrap by doubling, sign extension is that shift plus an exact rounded shift.
     Matches the reference on random blocks, orders 0..31, widths 8..23, 16-bit coefficient
     wraps (x17 9ec4ea2). Every x02 multiply also bumps A1 (measured, own-x02mpy-a1), so the
-    routines leave A1 alone. Next: unmix and the shifted low bytes, then a whole
-    packet.
+    routines leave A1 alone.
+  - Output: `unmix()`, the decoder's last loop: matrixing with an exact product (mulWide,
+    then shift by mix_bits from the two halves), shifted low bytes, the depth's wrap, mono,
+    and a gap per frame for more channels. Matches the reference's 32-bit casts on random
+    frames (x17 6d4826d). Next: a whole packet (element header, sub-frame headers, the shifted
+    bytes from the stream) against `alacdec --dsp` on a fixture.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
