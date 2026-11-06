@@ -75,6 +75,10 @@ State (`ref/dsp/`):
   already unpacked (2-bit fields for 4-tuples, 5-bit for pairs), so no divide; pointers carry
   the subtable's base and width. 4544 words for all twelve books, for Y. Matches `ref/aac` on
   every codeword and on biased random bitstreams, values, signs, escapes and reader position.
+  x17 twin: `examples/lib/huffman.sm`, `huff_decode(dst)` (x17 2a2346d), checked against a
+  bit-by-bit matcher on random complete codes, subtables included. About 51 bundles per
+  codeword that resolves at the root, 31 per further step; untuned. OPEN for the tables:
+  whether ldy zero-extends Y words of 0x8000 and up (x17 assumes it; the gate reads 0x1357).
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
