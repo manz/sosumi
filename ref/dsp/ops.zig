@@ -2,9 +2,8 @@
 //! these and nothing else, so each stage maps onto forms that exist (specs/dsp.md, Phase 1).
 //!
 //! Primitives cite the x17 probe that measured them (x17 `src/isa.toml`, `own-*` programs)
-//! and say how far that probe reaches. Where the model leans on a case no probe covered yet,
-//! x17's PROBES.md holds the program that would settle it. Helpers below the primitives are
-//! compositions, written only in primitives.
+//! and say how far that probe reaches; every case the models lean on is gated (x17 de022ba).
+//! Helpers below the primitives are compositions, written only in primitives.
 //!
 //! What is not here because it is not measured: a persistent wide accumulator, a carry flag, a
 //! wrapping arithmetic right shift other than the rounded one, bitwise AND/OR on data, leading
@@ -36,17 +35,17 @@ pub fn addShl(a: Word, b: Word, n: u4) Word {
 }
 
 /// Rounded arithmetic right shift: (a + 2^(n-1)) >> n, n in 0..23. 0x19 ALU op 23 with a
-/// negative count, "b < 0: rounded a >> -b" (isa.toml). own-x19alu gated only a left shift;
-/// the right shift, and half up on negatives, wait on PROBES.md's x19-shift set.
+/// negative count. Gated: own-x19shr-round (0x708 >> 4 = 0x71), own-x19shr-neg (-0x708 >> 4
+/// = -0x70, half up), own-x19shr-23.
 pub fn rshr(a: Word, n: u5) Word {
     if (n == 0) return a;
     const half: i32 = @as(i32, 1) << (n - 1);
     return @intCast((@as(i32, a) + half) >> n);
 }
 
-/// round(a * b / 2^23), half up, signed operands. 0x02 multiply, w1[17] = 0. own-x02mpy
-/// gated positive operands (0x4000 * 0x6000); negative products and their half-up rounding,
-/// which `mulWide` needs, wait on PROBES.md's x02-round set.
+/// round(a * b / 2^23), half up, signed operands. 0x02 multiply, w1[17] = 0, w1[15] = 1,
+/// w1[16] = 0. Gated: own-x02mpy, own-x02mpy-neg, own-x02mpy-halfneg (-0.5 gives 0) and
+/// own-x02mpy-halfpos (0.5 gives 1): the half-up rounding `mulWide` relies on.
 pub fn mulRound23(a: Word, b: Word) Word {
     return @truncate((@as(i48, a) * b + (1 << 22)) >> 23);
 }

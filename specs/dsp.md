@@ -70,11 +70,10 @@ State (`ref/dsp/`):
   - Refused (`error.Unsupported`): depth 32, pb > 127, escapes over 22 bits, and predictor
     widths outside `predictor.supported`. Apple's encoder output never needs them.
 - Still i32: all of AAC and MP3.
-- Evidence gaps the layer leans on: the rounded right shift (0x19 op 23 with a negative
-  count) and the rounded multiply on negative operands are stated in isa.toml but gated only
-  on positive cases. x17's PROBES.md holds the nine programs that settle them; until they run,
-  `ref/dsp` is exact against `ref/` but not yet proven against silicon. x17 executes both
-  rules (x17 3d45faa).
+- Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
+  23, negative count, half up on negatives) and the rounded multiply on negative operands
+  (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17
+  de022ba).
 
 ## Phase 2: x17 must have
 
