@@ -1,4 +1,4 @@
-"""Turns huffdump output (book index length codeword) into ref/tables/huffman.zig."""
+"""Turns huffdump output (book index length codeword) into ref/aac/tables/huffman.zig."""
 import sys
 from collections import defaultdict
 

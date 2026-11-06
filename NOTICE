@@ -7,7 +7,7 @@ Third-party code included in this product is listed below with its licence.
 
 OpenCORE AAC decoder (third_party/opencore-aac), Copyright (C) 1998-2009 PacketVideo.
 Licensed under the Apache License, Version 2.0. Its Huffman codebooks, codebook parameters,
-scale factor band edges and scale factor offsets are derived into ref/tables/huffman.zig,
-ref/tables/swb.zig, ref/huffman.zig and ref/ics.zig. Its TNS_MAX_BANDS table (get_tns.cpp) is
-copied into ref/tns.zig, and its noise generator constants (gen_rand_vector.cpp) are used in
-ref/stereo.zig.
+scale factor band edges and scale factor offsets are derived into ref/aac/tables/huffman.zig,
+ref/aac/tables/swb.zig, ref/aac/huffman.zig and ref/aac/ics.zig. Its TNS_MAX_BANDS table
+(get_tns.cpp) is copied into ref/aac/tns.zig, and its noise generator constants
+(gen_rand_vector.cpp) are used in ref/aac/stereo.zig.

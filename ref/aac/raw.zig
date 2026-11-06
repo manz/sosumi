@@ -1,7 +1,7 @@
 //! raw_data_block element loop (ISO/IEC 14496-3): element headers, and the elements an
 //! AAC-LC decoder only has to parse past (data_stream_element, fill_element).
 const std = @import("std");
-const bits = @import("bits.zig");
+const bits = @import("../bits.zig");
 const ics = @import("ics.zig");
 
 pub const Error = ics.Error || error{ElementNotImplemented};

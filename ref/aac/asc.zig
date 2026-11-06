@@ -1,6 +1,6 @@
 //! AudioSpecificConfig and GASpecificConfig (ISO/IEC 14496-3), AAC-LC only.
 const std = @import("std");
-const bits = @import("bits.zig");
+const bits = @import("../bits.zig");
 
 pub const Error = bits.Error || error{
     UnsupportedObjectType,

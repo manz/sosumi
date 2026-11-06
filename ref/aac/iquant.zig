@@ -7,7 +7,7 @@
 //! each coefficient costs one multiply. Relative error: below 2^-21 for |q| <= 128, below 2^-16
 //! above (linear interpolation of x^(4/3) at x >= 64).
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 const ics = @import("ics.zig");
 
 const F24 = fixed.F24;

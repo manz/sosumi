@@ -58,18 +58,18 @@ pub fn main(init: std.process.Init) !void {
     defer gpa.free(ref_bytes);
     const want: []const i16 = @alignCast(std.mem.bytesAsSlice(i16, ref_bytes[0 .. ref_bytes.len & ~@as(usize, 1)]));
 
-    var stats: std.ArrayList(ref.decoder.ToolStats) = .empty;
+    var stats: std.ArrayList(ref.aac.decoder.ToolStats) = .empty;
     defer stats.deinit(gpa);
     var ours: std.ArrayList(i16) = .empty;
     defer ours.deinit(gpa);
-    var dec: ?ref.decoder.Decoder = null;
+    var dec: ?ref.aac.decoder.Decoder = null;
     var pos: usize = 0;
     var frames: usize = 0;
     var failed: usize = 0;
     var buf: [2048]i16 = undefined;
     while (pos + 7 <= aac.len) {
         const h = try parseAdts(aac[pos..]);
-        if (dec == null) dec = try ref.decoder.Decoder.init(&h.config);
+        if (dec == null) dec = try ref.aac.decoder.Decoder.init(&h.config);
         const au = aac[pos + h.header_len .. pos + h.frame_len];
         const n = @as(usize, dec.?.channels) * 1024;
         dec.?.decode(au, buf[0..n]) catch |e| {

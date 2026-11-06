@@ -6,7 +6,7 @@
 //! coefficient, each window's band normalised to unit energy and scaled by 2^(nrg / 4). ISO
 //! leaves the generator open, so PNS bands match no other decoder sample for sample.
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 const ics = @import("ics.zig");
 const iquant = @import("iquant.zig");
 

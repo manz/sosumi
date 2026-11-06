@@ -8,7 +8,7 @@
 //! the halvings join the exponent. (Halving at every stage cost 9 bits on a pure tone.)
 //! Output: samples in PCM units as Q7 words, saturated.
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 const window = @import("window.zig");
 
 const Word = fixed.Word;

@@ -10,7 +10,7 @@
 //! there, uses the 8 kHz values (INFERRED). TNS_MAX_ORDER for long windows is 12, ISO's AAC-LC
 //! value as we read it; OpenCORE uses 20 at 32 kHz and below (OPEN).
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 const ics = @import("ics.zig");
 const iquant = @import("iquant.zig");
 

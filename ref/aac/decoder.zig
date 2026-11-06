@@ -3,7 +3,7 @@
 //!
 //! Per channel, in ISO/IEC 14496-3 order: dequantisation, PNS / M/S / intensity, TNS, filterbank.
 const std = @import("std");
-const bits = @import("bits.zig");
+const bits = @import("../bits.zig");
 const asc_mod = @import("asc.zig");
 const raw = @import("raw.zig");
 const ics = @import("ics.zig");

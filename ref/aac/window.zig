@@ -2,7 +2,7 @@
 //! the Kaiser-Bessel-derived window (window_shape 1, alpha 4 long and 6 short), in Q23. The
 //! falling half is the rising half reversed. 1.0 saturates to the largest Q23 word.
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 
 const Word = fixed.Word;
 

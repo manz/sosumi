@@ -3,7 +3,7 @@
 //! The reference model decodes by matching the codeword one bit at a time against the table.
 //! Slow, and obviously right; the fast lookup belongs to the sm1 port.
 const std = @import("std");
-const bits = @import("bits.zig");
+const bits = @import("../bits.zig");
 const tables = @import("tables/huffman.zig");
 
 pub const Error = bits.Error || error{ InvalidCodeword, EscapeTooLong };

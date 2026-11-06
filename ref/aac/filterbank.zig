@@ -2,7 +2,7 @@
 //! added to the previous block's second half. The left half of each window uses the previous
 //! frame's window_shape, the right half the current one.
 const std = @import("std");
-const fixed = @import("fixed.zig");
+const fixed = @import("../fixed.zig");
 const ics = @import("ics.zig");
 const iquant = @import("iquant.zig");
 const imdct = @import("imdct.zig");

@@ -3,7 +3,7 @@
 //! Produces the quantised spectrum and the scale factors of each channel; inverse
 //! quantisation and the tools after it come later.
 const std = @import("std");
-const bits = @import("bits.zig");
+const bits = @import("../bits.zig");
 const huffman = @import("huffman.zig");
 const swb = @import("tables/swb.zig");
 

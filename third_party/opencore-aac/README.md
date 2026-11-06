@@ -9,6 +9,6 @@ Used only to derive tables:
 
 - `decode_huff_cw_binary.cpp`, `hcbtables_binary.cpp`, `hcbtables.h`, `s_hcb.h`: run by
   `tools/huffdump` to recover each codebook as (index, length, codeword), giving
-  `ref/tables/huffman.zig`.
-- `sfb.cpp`: scale factor band edges, converted by hand into `ref/tables/swb.zig`.
-- `e_huffmanconst.h`: the scale factor, noise and intensity offsets used in `ref/ics.zig`.
+  `ref/aac/tables/huffman.zig`.
+- `sfb.cpp`: scale factor band edges, converted by hand into `ref/aac/tables/swb.zig`.
+- `e_huffmanconst.h`: the scale factor, noise and intensity offsets used in `ref/aac/ics.zig`.
