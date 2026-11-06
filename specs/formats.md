@@ -17,6 +17,6 @@ AC-3 and Dolby appear nowhere on the page.
 | MP3, MP3 VBR | MPEG-1/2/2.5 Layer III | `mp3.md` | next |
 | Apple Lossless | ALAC | `alac.md` | after MP3 |
 | AIFF, WAV | none expected: PCM, byte order at most | none | whether sm1 is involved is OPEN |
-| Audible AAX, AAX+ | AAC in MP4, Audible DRM in the reader | `aac.md` | covered by AAC, INFERRED |
+| Audible AAX, AAX+ | AAC in MP4, Audible DRM in the reader | `aac.md` | covered by AAC, INFERRED; whether files Audible sells today still play on the device is OPEN (the list is from 2009) |
 | Audible formats 2, 3, 4, Enhanced (.aa) | a speech codec for 2 and 3, MP3 for 4 and Enhanced: INFERRED, from general knowledge of the .aa format, unverified | none | lowest priority (audiobooks) |
 | AC-3 | not an advertised format | `ac3.md` | the device was measured selecting a film's AC-3 track (ipod-re `reports/fairplay.md` §7z), which the spec sheet does not explain: OPEN, parked |
