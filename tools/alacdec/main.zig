@@ -87,7 +87,10 @@ pub fn main(init: std.process.Init) !void {
     const cfg = try ref.alac.config.parse(t.cookie);
     var dec = try ref.alac.decoder.Decoder.init(gpa, cfg);
     defer dec.deinit();
-    dec.dsp_predictor = args.len > 3 and std.mem.eql(u8, args[3], "--dsp");
+    // --dsp: the whole decoder in measured sm1 operations (ref/dsp/alac)
+    const use_dsp = args.len > 3 and std.mem.eql(u8, args[3], "--dsp");
+    var ddec = try ref.dsp.alac.decoder.Decoder.init(gpa, cfg);
+    defer ddec.deinit();
     const nch: usize = cfg.channels;
     const width: usize = (@as(usize, cfg.bit_depth) + 7) / 8;
     const pcm = try gpa.alloc(i32, @as(usize, cfg.frame_length) * nch);
@@ -111,12 +114,14 @@ pub fn main(init: std.process.Init) !void {
         for (0..per) |_| {
             if (sample >= t.count) break;
             const len: usize = if (t.uniform != 0) t.uniform else be32(t.sizes, sample * 4);
-            const n = dec.decode(file[off .. off + len], pcm) catch |e| blk: {
+            const pkt = file[off .. off + len];
+            const res = if (use_dsp) ddec.decode(pkt, pcm) else dec.decode(pkt, pcm);
+            const n = res catch |e| blk: {
                 if (failed < 5) std.debug.print("packet {d}: {s}\n", .{ sample, @errorName(e) });
                 failed += 1;
                 break :blk 0;
             };
-            const st = dec.last;
+            const st = if (use_dsp) ddec.last else dec.last;
             inline for (.{ st.verbatim, st.shifted, st.matrixed, st.partial, st.integrated }, 0..) |b, k| cov[k] += @intFromBool(b);
             max_order = @max(max_order, st.max_order);
             for (st.elements, 0..) |e, k| elems[k] += e;

@@ -117,7 +117,7 @@ pub fn wideAdd(x: Wide, y: Wide) Wide {
     return .{ .hi = add(x.hi, y.hi), .lo = add(x.lo, y.lo) };
 }
 
-/// Carries lo (non-negative, below 2^23) into hi, leaving lo in [0, 2^15).
+/// Carries lo into hi (floor, so a negative lo borrows), leaving lo in [0, 2^15).
 pub fn normalize(w: Wide) Wide {
     const carry = floorShr(w.lo, 15);
     return .{ .hi = add(w.hi, carry), .lo = sub(w.lo, shl(carry, 15)) };

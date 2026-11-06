@@ -10,7 +10,7 @@
 //! (the adaptation's weight times the shifted difference stays below 2^23). Every 16-bit
 //! stream (chan_bits <= 17) qualifies; the rest returns `error.Unsupported`.
 const std = @import("std");
-const ops = @import("ops.zig");
+const ops = @import("../ops.zig");
 
 const Word = ops.Word;
 
@@ -85,7 +85,7 @@ pub fn unpredict(pc: []const i32, out: []i32, coefs: []i16, chan_bits: u6, den_s
 }
 
 const testing = std.testing;
-const ref = @import("../alac/predictor.zig");
+const ref = @import("../../alac/predictor.zig");
 
 fn compare(rnd: std.Random, order: usize, chan_bits: u6, den_shift: u4, n: usize, spread: u5) !void {
     var pc: [256]i32 = undefined;

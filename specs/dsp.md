@@ -55,12 +55,21 @@ State (`ref/dsp/`):
   multiplier returns slices, not a wide result: floor(ab / 2^24) or round(ab / 2^23), plus
   (2ab)[15:0]. No persistent accumulator, carry flag, data AND/OR or leading-zero count is
   measured. `mulWide` gets an exact 16 x 24 product from two multiplies (hi * 2^15 + lo).
-- `alac.zig`: the adaptive predictor and integration. Lo and hi parts sum in separate words;
-  only the low `chan_bits` bits of the prediction reach the output, exact while den_shift +
-  chan_bits <= 32. Bit-exact with `ref/alac` on random blocks, and with Apple on all 21
-  fixtures (`alacdec --dsp`), 24-bit ones included (their shifted low byte keeps chan_bits
-  at 17).
-- Still i32: ALAC's Rice decoder, unmix and the shifted-byte merge; all of AAC and MP3.
+- `bits.zig`: the bit reader. The packet is 16-bit words (x17's host staging; the engine
+  path is OPEN); fields of up to 8 bits come from a 23-bit window, AND-free.
+- `alac/`: the whole ALAC decoder, done.
+  - `predictor.zig`: lo and hi parts sum in separate words; only the low `chan_bits` bits of
+    the prediction reach the output, exact while den_shift + chan_bits <= 32.
+  - `rice.zig`: no leading-zero count, so floor(log2) and the zero run's clz are comparisons;
+    the mean (up to ~2^25) is a two-word value and pb * mb / 2^9 comes from its halves.
+  - `decoder.zig`: unmix with an exact product, low bytes merged by shift and add, all modulo
+    2^24 until the final wrap to the depth (<= 24).
+  - Bit-exact with `ref/alac` on random blocks and random bitstreams, and with Apple on all
+    21 fixtures (`alacdec --dsp`): uncompressed, shifted, matrixed, partial, mono, 5.1,
+    orders 0..30, 16 and 24 bits. Unexercised, as in `ref/alac`: mode != 0, LFE, DSE, FIL.
+  - Refused (`error.Unsupported`): depth 32, pb > 127, escapes over 22 bits, and predictor
+    widths outside `predictor.supported`. Apple's encoder output never needs them.
+- Still i32: all of AAC and MP3.
 - x17 follow-up: the 0x19 ALU's rounded right shift by a negative count is measured
   (isa.toml) but not executed by the emulator yet.
 

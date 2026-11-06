@@ -6,7 +6,6 @@ const bits = @import("../bits.zig");
 const config = @import("config.zig");
 const rice = @import("rice.zig");
 const predictor = @import("predictor.zig");
-const dsp = @import("../dsp/alac.zig");
 
 pub const Error = bits.Error || rice.Error || error{
     InvalidHeader,
@@ -14,8 +13,6 @@ pub const Error = bits.Error || rice.Error || error{
     UnsupportedElement,
     UnsupportedWidth,
     OutputTooSmall,
-    /// `dsp_predictor` is set and the stream's widths are outside the DSP model.
-    Unsupported,
 };
 
 const Tag = enum(u3) { sce = 0, cpe = 1, cce = 2, lfe = 3, dse = 4, pce = 5, fil = 6, end = 7 };
@@ -51,8 +48,6 @@ pub const Stats = struct {
 
 pub const Decoder = struct {
     last: Stats = .{},
-    /// Run the predictor in measured sm1 operations (ref/dsp/alac.zig) instead of i32.
-    dsp_predictor: bool = false,
     cfg: config.Config,
     gpa: std.mem.Allocator,
     pred: []i32,
@@ -88,13 +83,8 @@ pub const Decoder = struct {
         try rice.decompress(r, self.pred[0..n], p, chan_bits);
         self.last.max_order = @max(self.last.max_order, s.order);
         self.last.integrated = self.last.integrated or s.mode != 0;
-        var coefs = s.coefs;
-        if (self.dsp_predictor) {
-            if (s.mode != 0) try dsp.integrate(self.pred[0..n], chan_bits);
-            try dsp.unpredict(self.pred[0..n], dst[0..n], coefs[0..s.order], chan_bits, s.den_shift);
-            return;
-        }
         if (s.mode != 0) predictor.integrate(self.pred[0..n], chan_bits);
+        var coefs = s.coefs;
         predictor.unpredict(self.pred[0..n], dst[0..n], coefs[0..s.order], chan_bits, s.den_shift);
     }
 
