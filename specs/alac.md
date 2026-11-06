@@ -22,7 +22,7 @@ decoder; the output may not.
 - **APPLE-REF**: Apple's released ALAC reference source.
 - **FIRMWARE**: read in RetailOS's ARM code at the cited address.
 - **MEASURED**: observed in a trace, an emulator run or on the device.
-- **FFMPEG**: FFmpeg's decoder; a cross-check only.
+- **FFMPEG**: PCM from the `ffmpeg` binary; a reference output, never proof of device behaviour. Its source is not read.
 - **INFERRED**, **OPEN**.
 
 Findings from other codecs, AAC included, are not evidence for ALAC.
@@ -54,22 +54,20 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
 - Codec mode 3 is ALAC: the ctx+0x58 == 3 case of the setup tail (0x2208FC80) copies
   ctx+0x59..0x5c and prints the line above; `codec_object_alac` 0x220A737C returns the object
   (**FIRMWARE**, ipod-re `ApplySm1IsaFindings.java`).
-- The image's mode-3 object is at 0x2294E08C: three records, sizes 0x22 / 0x6 / 0xBEC units, the
-  smallest of the five images (**FIRMWARE**).
 - Mode 3 is the only mode that fills codec-table entry 3; its entry 2 +0xc is 0x3F
   (**FIRMWARE**, `reports/sm1_spec.md`).
 - Its per-packet tail writes a mode word of 0x801 and the packet length in **bits**
   (**FIRMWARE**).
 - The +0x58 gate (0x220B2648): mode 3 neither releases nor advances the input where modes 0, 1
   and 5 do. chikuma does not model this yet (**FIRMWARE**; `reports/aac_on_silicon.md` §15).
-- Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. The sm1 object exists, so
-  at least part of it runs there (**INFERRED**).
+- Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
+  object, so at least part of it runs there (**INFERRED**).
 - Entry point, buffers, persistent state, error path: **OPEN**. Nothing is traced: the dev
   library holds no ALAC track.
 
 ## Decoding stages
 
-Apple's reference source decides; FFmpeg's `alac.c` cross-checks.
+Apple's reference source decides; the `ffmpeg` binary's PCM is a second reference output.
 
 1. Read the packet's elements (single channel, channel pair, LFE) up to the end marker.
 2. Per element: compressed flag, sample count, shift (extra low bits), stereo parameters.
@@ -93,4 +91,3 @@ Apple's reference source decides; FFmpeg's `alac.c` cross-checks.
 
 - Apple's [ALAC package](https://github.com/macosforge/alac) and its
   [`ALACMagicCookieDescription.txt`](https://github.com/macosforge/alac/blob/master/ALACMagicCookieDescription.txt).
-- FFmpeg [alac.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/alac.c).

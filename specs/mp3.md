@@ -24,7 +24,7 @@ The boundary is fixed by the device, not chosen:
 - **MPEG**: ISO/IEC 11172-3 or 13818-3.
 - **FIRMWARE**: read in RetailOS's ARM code at the cited address.
 - **MEASURED**: observed in a trace, an emulator run or on the device.
-- **FFMPEG**: FFmpeg's decoder; a cross-check, never proof of device behaviour.
+- **FFMPEG**: PCM from the `ffmpeg` binary; a reference output, never proof of device behaviour. Its source is not read.
 - **INFERRED**: the best explanation of the above.
 - **OPEN**: not established.
 
@@ -55,15 +55,14 @@ a file in any of them reaches sm1.
 
 - Codec mode 1 is MP3 (**MEASURED**: playing the MP3 podcast fires `codec_object_mp3`
   0x2209DB60 and no other getter). The mode byte is ctx+0x58.
-- The image's mode-1 codec object is at 0x2291BCB8: four records, sizes 0x24 / 0x50F / 0x49A /
-  0x17A8 units (**FIRMWARE**, ipod-re `reports/sm1_spec.md`).
-- Entry point, X/Y memory layout, reservoir storage, synthesis history and the output ring
-  contract: **OPEN**. The AAC program's are being recovered first; MP3's follow the same
-  method, and AAC findings are not evidence for MP3.
+- The output ring contract is AAC's (`specs/aac.md`, same `audio_output_ready` path,
+  **FIRMWARE**); the per-frame unit count for 1152 samples is **OPEN**.
+- Entry point, reservoir storage and synthesis history are ours to lay out; the open interface
+  questions are the ones listed in `specs/aac.md`.
 
 ## Decoding stages
 
-ISO/IEC 11172-3 is normative; FFmpeg's `mpegaudiodec_template.c` cross-checks.
+ISO/IEC 11172-3 is normative; the `ffmpeg` binary's PCM is the first reference output.
 
 1. Side information (layout differs for MPEG-1 and MPEG-2/2.5; CRC skip if present).
 2. Bit reservoir: assemble main data from `main_data_begin`; define the reset on start, seek and
@@ -103,4 +102,3 @@ frames have to be made; all of them can reach the decoder, per the table above.
 
 - [ISO/IEC 11172-3](https://www.iso.org/standard/22412.html): MPEG-1 Audio.
 - [ISO/IEC 13818-3](https://www.iso.org/standard/26797.html): MPEG-2 Audio, low sampling frequencies.
-- FFmpeg [mpegaudiodec_template.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/mpegaudiodec_template.c).

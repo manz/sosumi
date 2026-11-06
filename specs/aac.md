@@ -27,9 +27,9 @@ that is measured.
 - **MPEG4**: ISO/IEC 14496-3 (and 13818-7 for the shared AAC tools).
 - **FIRMWARE**: read in RetailOS's ARM code at the cited address.
 - **MEASURED**: observed in a trace, an emulator run or on the device.
-- **IMAGE**: behaviour of the image's sm1 program, measured through x17's silicon-gated ISA.
-  An oracle, not a source: its provenance is unknown and nothing is transcribed from it.
-- **FFMPEG**: FFmpeg's decoder; a cross-check only.
+- **IMAGE-IO**: what the image's sm1 program observably consumes and produces at the host
+  interface (packets in, PCM and status out). Its internals never cross into this repository.
+- **FFMPEG**: PCM from the `ffmpeg` binary; a reference output, never proof of device behaviour. Its source is not read.
 - **INFERRED**, **OPEN**.
 
 ## What the device accepts
@@ -67,10 +67,7 @@ The sequence chikuma reproduces from RetailOS (**MEASURED**, ipod-re `reports/aa
    This is the only per-track parameter the program receives from the CPU besides the packets
    (**FIRMWARE**). Whether the program also parses the ASC itself: **OPEN**.
 
-Codec mode 0 is AAC (**MEASURED**: `codec_object_aac` 0x220AFDBC fires on an AAC track). The
-image's mode-0 object is at 0x22924654: four records, stub, X 0x685 units, Y 0x1DC4 units,
-program 2038 rows (**FIRMWARE**). The AAC 44.1 kHz swb_offset table sits in the image at file
-0x92B1D8 (**FIRMWARE**).
+Codec mode 0 is AAC (**MEASURED**: `codec_object_aac` 0x220AFDBC fires on an AAC track).
 
 ## Input contract
 
@@ -104,7 +101,7 @@ and X memory keeps only 24 bits per word.
 
 ## Decoding stages
 
-ISO/IEC 14496-3 (AAC-LC) is normative; FFmpeg's `aacdec` cross-checks.
+ISO/IEC 14496-3 (AAC-LC) is normative; the `ffmpeg` binary's PCM is the first reference output.
 
 1. raw_data_block element loop; channel element to output channel mapping.
 2. ics_info: window sequence and shape, max_sfb, grouping; section data (codebook per band).
@@ -116,19 +113,21 @@ ISO/IEC 14496-3 (AAC-LC) is normative; FFmpeg's `aacdec` cross-checks.
 8. IMDCT (2048 long, 256 short), sine/KBD windowing, overlap-add with the previous frame.
 9. PCM: rounding and saturation to 16 bits, interleave.
 
-What the image's program does at each stage (table formats, fixed-point widths, rounding
-points) is the reverse's job. It is recorded under **IMAGE** as it is measured, never
-transcribed.
+Table formats, fixed-point widths and rounding points are ours to choose, from the standard and
+the ISA. The image's program's choices do not cross the wall.
 
-## State of the sm1 reverse
+## Open interface questions
 
-- The image's AAC program is being decoded instruction by instruction in ipod-re
-  `reports/sm1_isa.md`; the latest entry leaves 327 AAC words undecoded.
-- x17 assembles every measured sm1 form byte-exactly and emulates it; 275 silicon-measured test
-  programs are gated there.
-- Entry point, the X/Y layout of the program's working state, where the overlap and the
-  Huffman tables live, and how it detects element types: **OPEN**, and the next thing to read
-  off the decoded program.
+To be answered by our own probe programs on silicon (the way x17's ISA gates were measured),
+not by reading the image's program:
+
+- Where execution enters after the two-pass load.
+- How a program reads the bytes of the packet the descriptor points at.
+- How a program raises the status header and the interrupt the host waits for.
+- Which X/Y regions the host or the boot ROM may overwrite between packets.
+
+x17 assembles and emulates every measured sm1 form; 275 silicon-measured test programs are gated
+there.
 
 ## Corpus
 
@@ -153,4 +152,3 @@ stereo, PNS and TNS content, have to be made.
 - ISO/IEC 14496-3: MPEG-4 Audio (AAC-LC).
 - ISO/IEC 13818-7: MPEG-2 AAC.
 - ISO/IEC 14496-14 / 14496-1: the MP4 container and the esds descriptor.
-- FFmpeg [aacdec_template.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/aacdec_template.c).

@@ -33,4 +33,3 @@ this spec grows the same sections as `mp3.md`.
 ## References
 
 - ATSC A/52, Digital Audio Compression (AC-3, E-AC-3) Standard.
-- FFmpeg [ac3dec.c](https://github.com/FFmpeg/FFmpeg/blob/master/libavcodec/ac3dec.c).
