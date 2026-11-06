@@ -1,8 +1,10 @@
 //! sm1 operations, as x17's own probe programs measured them. The DSP-shaped models build on
 //! these and nothing else, so each stage maps onto forms that exist (specs/dsp.md, Phase 1).
 //!
-//! Primitives cite the x17 probe that measured them (x17 `src/isa.toml`, `own-*` programs).
-//! Helpers below them are compositions, written only in primitives.
+//! Primitives cite the x17 probe that measured them (x17 `src/isa.toml`, `own-*` programs)
+//! and say how far that probe reaches. Where the model leans on a case no probe covered yet,
+//! x17's PROBES.md holds the program that would settle it. Helpers below the primitives are
+//! compositions, written only in primitives.
 //!
 //! What is not here because it is not measured: a persistent wide accumulator, a carry flag, a
 //! wrapping arithmetic right shift other than the rounded one, bitwise AND/OR on data, leading
@@ -16,7 +18,7 @@ pub const Word = i24;
 // Primitives
 // ---------------------------------------------------------------------------
 
-/// a + b, wrapping at 24 bits. 0x02 third slot, op a+b (own-x02x3).
+/// a + b, wrapping at 24 bits. 0x02 third slot, op a+b (own-x02x3, own-x02coll).
 pub fn add(a: Word, b: Word) Word {
     return a +% b;
 }
@@ -26,43 +28,39 @@ pub fn sub(a: Word, b: Word) Word {
     return a -% b;
 }
 
-/// (a + b) << n, n in 0..15, wrapping at 24 bits. 0x02 third slot, shift w5[5:2] (own-x02x3).
+/// (a + b) << n, n in 0..15, wrapping at 24 bits. 0x02 third slot, shift w5[5:2]. own-x02x3
+/// measured a negative difference shifted and wrapped: (0x222 - 0x333) << 2 = 0xFFFBBC.
 pub fn addShl(a: Word, b: Word, n: u4) Word {
     const s: u24 = @bitCast(a +% b);
     return @bitCast(s << n);
 }
 
 /// Rounded arithmetic right shift: (a + 2^(n-1)) >> n, n in 0..23. 0x19 ALU op 23 with a
-/// negative count, "b < 0: rounded a >> -b" (own-x19alu).
+/// negative count, "b < 0: rounded a >> -b" (isa.toml). own-x19alu gated only a left shift;
+/// the right shift, and half up on negatives, wait on PROBES.md's x19-shift set.
 pub fn rshr(a: Word, n: u5) Word {
     if (n == 0) return a;
     const half: i32 = @as(i32, 1) << (n - 1);
     return @intCast((@as(i32, a) + half) >> n);
 }
 
-/// floor(a * b / 2^24), signed operands. 0x02 multiply, w1[17] = 1, w1[15] = 1, w1[16] = 0
-/// (own-x02mpy, own-x02u24).
-pub fn mulFloor24(a: Word, b: Word) Word {
-    return @intCast((@as(i48, a) * b) >> 24);
-}
-
-/// round(a * b / 2^23), half up. 0x02 multiply, w1[17] = 0 (own-x02mpy).
+/// round(a * b / 2^23), half up, signed operands. 0x02 multiply, w1[17] = 0. own-x02mpy
+/// gated positive operands (0x4000 * 0x6000); negative products and their half-up rounding,
+/// which `mulWide` needs, wait on PROBES.md's x02-round set.
 pub fn mulRound23(a: Word, b: Word) Word {
     return @truncate((@as(i48, a) * b + (1 << 22)) >> 23);
 }
 
-/// (2 * a * b)[15:0], the multiply's low half beside `mulRound23`. 0x02 w4[10:7] (own-x02plo).
+/// (2 * a * b)[15:0], the multiply's low half beside `mulRound23`. 0x02 w4[10:7] (own-x02plo,
+/// positive operands; the low half does not depend on the operands' signedness).
 pub fn mulLo(a: Word, b: Word) u16 {
     return @truncate(@as(u48, @bitCast(@as(i48, a) * b *% 2)));
 }
 
-/// Predicate tests on a word: ptst conditions (own-ptst programs).
+/// The sign test: ptst condition "negative" (own-ptst, own-ptst-pos), the one predicate
+/// condition measured.
 pub fn isNeg(a: Word) bool {
     return a < 0;
-}
-
-pub fn isZero(a: Word) bool {
-    return a == 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +69,11 @@ pub fn isZero(a: Word) bool {
 
 pub fn shl(a: Word, n: u4) Word {
     return addShl(a, 0, n);
+}
+
+/// a == 0: neither a nor -a is negative (-(-2^23) wraps to itself, still negative).
+pub fn isZero(a: Word) bool {
+    return !isNeg(a) and !isNeg(sub(0, a));
 }
 
 /// floor(a / 2^n): the rounded shift of a - 2^(n-1). Exact while a - 2^(n-1) does not wrap.
@@ -124,6 +127,10 @@ pub fn normalize(w: Wide) Wide {
 }
 
 const testing = std.testing;
+
+test "isZero from the sign test alone" {
+    for ([_]Word{ 0, 1, -1, std.math.maxInt(Word), std.math.minInt(Word) }) |x| try testing.expectEqual(x == 0, isZero(x));
+}
 
 test "the rounded shift rounds half up; floorShr floors both signs" {
     try testing.expectEqual(@as(Word, 2), rshr(3, 1));
