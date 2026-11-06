@@ -1,7 +1,7 @@
 # MP3 decoder
 
-Status: working draft. The reader side is read in RetailOS and reproduced in chikuma; the sm1
-side is not started.
+Status: working draft. The reader side is read in RetailOS and reproduced in chikuma. The
+reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; the sm1 side is not started.
 
 ## Goal and boundary
 
@@ -89,6 +89,21 @@ frames have to be made; all of them can reach the decoder, per the table above.
    and on silicon.
 3. Compare per frame, then over stateful sequences: start, steady state, seek, corrupt frame,
    end of stream. Investigate any persistent mismatch rather than widening the tolerance.
+
+## Reference model state
+
+`ref/mp3/` against the `ffmpeg` binary and `afconvert` (Apple's decoder), `tools/compare`:
+
+| Input | Result |
+|---|---|
+| LAME fixtures: MPEG-1 CBR and VBR, mono, MPEG-2 22.05 / 24 kHz, MPEG-2.5 11.025 / 8 kHz | max diff 1 LSB against both |
+| 7 library files, 60 s each (44.1 and 48 kHz, 128 to 320 kbps) | max diff 1 LSB against both |
+
+Exercised: long and short blocks, M/S, scfsi, preflag, scalefac_scale, the bit reservoir.
+Not exercised by any file at hand (LAME writes none of them): intensity stereo (MPEG-1 and
+MPEG-2), mixed blocks, MPEG-2 preflag, CRC-protected frames, free format. ISO/IEC 11172-4
+compliance streams would cover them (OPEN). minimp3's mixed-block band row at MPEG-2.5 8 kHz
+covers 48 coefficients in its long part where the subband count says 72 (OPEN).
 
 ## Prior work in ipod-re
 
