@@ -9,6 +9,7 @@
         "build.zig.zon",
         "ref",
         "LICENSE",
+        "third_party",
         "NOTICE",
     },
 }

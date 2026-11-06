@@ -8,6 +8,8 @@ written from its format's public reference and checked against what the device m
 
     ref/         the reference model in Zig, at sm1's widths (zig build test)
     docs/        reading list
+    third_party/ vendored Apache 2.0 sources the tables are derived from
+    tools/       table generators
     specs/       one spec per codec: target scope, what the device is known to do, what is open
       aac.md     the priority: the library is all AAC
       mp3.md

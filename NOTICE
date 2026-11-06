@@ -4,4 +4,8 @@ Copyright 2026 Emmanuel Peralta
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
 
 Third-party code included in this product is listed below with its licence.
-(None yet.)
+
+OpenCORE AAC decoder (third_party/opencore-aac), Copyright (C) 1998-2009 PacketVideo.
+Licensed under the Apache License, Version 2.0. Its Huffman codebooks, codebook parameters,
+scale factor band edges and scale factor offsets are derived into ref/tables/huffman.zig,
+ref/tables/swb.zig, ref/huffman.zig and ref/ics.zig.

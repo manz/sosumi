@@ -43,7 +43,7 @@ pub fn skipFil(r: *bits.BitReader) bits.Error!void {
 pub const Summary = struct { sce: u32 = 0, cpe: u32 = 0, lfe: u32 = 0, dse: u32 = 0, fil: u32 = 0 };
 
 /// Walks one raw_data_block to its END element. CCE and PCE are not parsed yet.
-pub fn walk(r: *bits.BitReader) Error!Summary {
+pub fn walk(r: *bits.BitReader, freq_index: u4) Error!Summary {
     var s: Summary = .{};
     while (true) {
         const h = try readHeader(r);
@@ -61,15 +61,15 @@ pub fn walk(r: *bits.BitReader) Error!Summary {
                 return s;
             },
             .sce => {
-                _ = try ics.readChannel(r, null);
+                _ = try ics.readChannel(r, null, freq_index);
                 s.sce += 1;
             },
             .lfe => {
-                _ = try ics.readChannel(r, null);
+                _ = try ics.readChannel(r, null, freq_index);
                 s.lfe += 1;
             },
             .cpe => {
-                _ = try ics.readChannelPair(r);
+                _ = try ics.readChannelPair(r, freq_index);
                 s.cpe += 1;
             },
             .cce, .pce => return error.ElementNotImplemented,
@@ -91,7 +91,7 @@ test "the device's priming access unit opens with a CPE, tag 0, common_window se
 test "walk skips a DSE and a FIL and stops at END" {
     // DSE tag 0, no align, 2 bytes AB CD; FIL with 1 byte; END.
     var r = bits.BitReader.init(&.{ 0x80, 0x02, 0xAB, 0xCD, 0xC2, 0x01, 0xC0 });
-    const s = try walk(&r);
+    const s = try walk(&r, 4);
     try testing.expectEqual(@as(u32, 1), s.dse);
     try testing.expectEqual(@as(u32, 1), s.fil);
     try testing.expectEqual(@as(usize, 0), r.bitsLeft());
@@ -99,17 +99,17 @@ test "walk skips a DSE and a FIL and stops at END" {
 
 test "the device's priming access unit walks to END as one CPE" {
     var r = bits.BitReader.init(&.{ 0x21, 0x00, 0x03, 0x40, 0x68, 0x1c });
-    const s = try walk(&r);
+    const s = try walk(&r, 4);
     try testing.expectEqual(@as(u32, 1), s.cpe);
     try testing.expectEqual(@as(usize, 0), r.bitsLeft());
 }
 
 test "walk reports a coupling element as not implemented" {
     var r = bits.BitReader.init(&.{0x40});
-    try testing.expectError(error.ElementNotImplemented, walk(&r));
+    try testing.expectError(error.ElementNotImplemented, walk(&r, 4));
 }
 
 test "a truncated DSE is an end-of-stream error" {
     var r = bits.BitReader.init(&.{ 0x80, 0x05, 0xAB });
-    try testing.expectError(error.EndOfStream, walk(&r));
+    try testing.expectError(error.EndOfStream, walk(&r, 4));
 }

@@ -5,6 +5,8 @@ pub const fixed = @import("fixed.zig");
 pub const asc = @import("asc.zig");
 pub const raw = @import("raw.zig");
 pub const ics = @import("ics.zig");
+pub const huffman = @import("huffman.zig");
+pub const swb = @import("tables/swb.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

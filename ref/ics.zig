@@ -1,12 +1,13 @@
 //! individual_channel_stream and channel_pair_element syntax (ISO/IEC 14496-3), AAC-LC.
 //!
-//! Parses everything that needs no codebook: ics_info, section_data, ms_mask, pulse_data,
-//! tns_data. scale_factor_data and spectral_data need the Huffman tables; until they exist, a
-//! channel whose sections use any codebook other than ZERO_HCB is refused.
+//! Produces the quantised spectrum and the scale factors of each channel; inverse
+//! quantisation and the tools after it come later.
 const std = @import("std");
 const bits = @import("bits.zig");
+const huffman = @import("huffman.zig");
+const swb = @import("tables/swb.zig");
 
-pub const Error = bits.Error || error{
+pub const Error = huffman.Error || error{
     ReservedBitSet,
     PredictionNotInLc,
     GainControlNotInLc,
@@ -15,7 +16,8 @@ pub const Error = bits.Error || error{
     ReservedMsMask,
     PulseInShortWindow,
     TnsOrderTooHigh,
-    NeedsHuffmanTables,
+    TooManyBands,
+    ScalefactorOutOfRange,
 };
 
 pub const WindowSequence = enum(u2) { only_long, long_start, eight_short, long_stop };
@@ -26,6 +28,9 @@ pub const max_bands = 64;
 
 pub const zero_hcb: u4 = 0;
 pub const reserved_hcb: u4 = 12;
+pub const noise_hcb: u4 = 13;
+pub const intensity_hcb2: u4 = 14;
+pub const intensity_hcb: u4 = 15;
 
 pub const IcsInfo = struct {
     window_sequence: WindowSequence,
@@ -40,6 +45,11 @@ pub const IcsInfo = struct {
 
     pub fn numWindows(self: IcsInfo) u4 {
         return if (self.isShort()) 8 else 1;
+    }
+
+    /// swb_offset for this window size at samplingFrequencyIndex `freq_index`.
+    pub fn bandOffsets(self: IcsInfo, freq_index: u4) []const u16 {
+        return if (self.isShort()) swb.short[freq_index] else swb.long[freq_index];
     }
 };
 
@@ -79,15 +89,6 @@ fn applyGrouping(info: *IcsInfo, grouping: u7) void {
 pub const Sections = struct {
     /// Codebook per group and band; bands at or past max_sfb stay ZERO_HCB.
     sfb_cb: [max_groups][max_bands]u4 = @splat(@splat(zero_hcb)),
-
-    pub fn allZero(self: *const Sections, info: IcsInfo) bool {
-        for (0..info.num_window_groups) |g| {
-            for (0..info.max_sfb) |sfb| {
-                if (self.sfb_cb[g][sfb] != zero_hcb) return false;
-            }
-        }
-        return true;
-    }
 };
 
 pub fn readSectionData(r: *bits.BitReader, info: IcsInfo) Error!Sections {
@@ -201,26 +202,104 @@ pub fn readTns(r: *bits.BitReader, info: IcsInfo) Error!Tns {
     return t;
 }
 
+/// Scale factor (spectral books), noise energy (NOISE_HCB) or intensity position
+/// (INTENSITY_HCB, INTENSITY_HCB2) per group and band.
+pub const Scalefactors = [max_groups][max_bands]i16;
+
+/// scale_factor_data(). Offsets from OpenCORE's e_huffmanconst.h (Apache 2.0): scale factors
+/// start at global_gain, noise energy at global_gain - 90 with a first 9-bit PCM value offset
+/// by 256, intensity positions at 0.
+pub fn readScalefactors(r: *bits.BitReader, info: IcsInfo, s: *const Sections, global_gain: u8) Error!Scalefactors {
+    var sf: Scalefactors = @splat(@splat(0));
+    var fac: i16 = global_gain;
+    var is_pos: i16 = 0;
+    var noise: i16 = @as(i16, global_gain) - 90;
+    var noise_pcm = true;
+    for (0..info.num_window_groups) |g| {
+        for (0..info.max_sfb) |sfb| {
+            sf[g][sfb] = switch (s.sfb_cb[g][sfb]) {
+                zero_hcb => 0,
+                intensity_hcb, intensity_hcb2 => blk: {
+                    is_pos += try huffman.decodeScalefactorDelta(r);
+                    break :blk is_pos;
+                },
+                noise_hcb => blk: {
+                    if (noise_pcm) {
+                        noise_pcm = false;
+                        noise += @as(i16, @intCast(try r.read(9))) - 256;
+                    } else {
+                        noise += try huffman.decodeScalefactorDelta(r);
+                    }
+                    break :blk noise;
+                },
+                else => blk: {
+                    fac += try huffman.decodeScalefactorDelta(r);
+                    if (fac < 0 or fac > 255) return error.ScalefactorOutOfRange;
+                    break :blk fac;
+                },
+            };
+        }
+    }
+    return sf;
+}
+
+/// Quantised coefficients, de-interleaved: window w of a short sequence at [w * 128, w * 128 + 128).
+pub const Spectrum = [1024]i16;
+
+/// spectral_data(). Grouped short windows arrive band by band, each band carrying every window
+/// of its group in turn; they are written straight to their window's slot.
+pub fn readSpectrum(r: *bits.BitReader, info: IcsInfo, s: *const Sections, offsets: []const u16) Error!Spectrum {
+    var spec: Spectrum = @splat(0);
+    const win_len: usize = if (info.isShort()) 128 else 1024;
+    var first_win: usize = 0;
+    for (0..info.num_window_groups) |g| {
+        for (0..info.max_sfb) |sfb| {
+            const cb = s.sfb_cb[g][sfb];
+            if (cb == zero_hcb or cb > huffman.esc_book) continue;
+            const dim = huffman.books[cb - 1].dim;
+            for (first_win..first_win + info.group_len[g]) |w| {
+                var k: usize = w * win_len + offsets[sfb];
+                const end = w * win_len + offsets[sfb + 1];
+                while (k < end) : (k += dim) try huffman.decodeSpectral(r, cb, spec[k .. k + dim]);
+            }
+        }
+        first_win += info.group_len[g];
+    }
+    return spec;
+}
+
 pub const Channel = struct {
     global_gain: u8,
     info: IcsInfo,
     sections: Sections,
+    scalefactors: Scalefactors,
     pulse: ?Pulse,
     tns: ?Tns,
+    spectrum: Spectrum,
 };
 
 /// individual_channel_stream(common_window, scale_flag = 0). `common` is the CPE's shared
 /// ics_info when common_window is set.
-pub fn readChannel(r: *bits.BitReader, common: ?IcsInfo) Error!Channel {
+pub fn readChannel(r: *bits.BitReader, common: ?IcsInfo, freq_index: u4) Error!Channel {
     const global_gain: u8 = @intCast(try r.read(8));
     const info = common orelse try readIcsInfo(r);
+    const offsets = info.bandOffsets(freq_index);
+    if (info.max_sfb > offsets.len - 1) return error.TooManyBands;
     const sections = try readSectionData(r, info);
-    // scale_factor_data, and later spectral_data, read nothing when every band is ZERO_HCB.
-    if (!sections.allZero(info)) return error.NeedsHuffmanTables;
+    const scalefactors = try readScalefactors(r, info, &sections, global_gain);
     const pulse: ?Pulse = if (try r.readFlag()) try readPulse(r, info) else null;
     const tns: ?Tns = if (try r.readFlag()) try readTns(r, info) else null;
     if (try r.readFlag()) return error.GainControlNotInLc;
-    return .{ .global_gain = global_gain, .info = info, .sections = sections, .pulse = pulse, .tns = tns };
+    const spectrum = try readSpectrum(r, info, &sections, offsets);
+    return .{
+        .global_gain = global_gain,
+        .info = info,
+        .sections = sections,
+        .scalefactors = scalefactors,
+        .pulse = pulse,
+        .tns = tns,
+        .spectrum = spectrum,
+    };
 }
 
 pub const ChannelPair = struct {
@@ -231,7 +310,7 @@ pub const ChannelPair = struct {
 };
 
 /// channel_pair_element() body, after its tag.
-pub fn readChannelPair(r: *bits.BitReader) Error!ChannelPair {
+pub fn readChannelPair(r: *bits.BitReader, freq_index: u4) Error!ChannelPair {
     const common_window = try r.readFlag();
     var common: ?IcsInfo = null;
     var ms: ?MsMask = null;
@@ -239,8 +318,8 @@ pub fn readChannelPair(r: *bits.BitReader) Error!ChannelPair {
         common = try readIcsInfo(r);
         ms = try readMsMask(r, common.?);
     }
-    const left = try readChannel(r, common);
-    const right = try readChannel(r, common);
+    const left = try readChannel(r, common, freq_index);
+    const right = try readChannel(r, common, freq_index);
     return .{ .common_window = common_window, .ms = ms, .left = left, .right = right };
 }
 
@@ -358,17 +437,99 @@ test "tns order above the LC limit is refused" {
     try testing.expectError(error.TnsOrderTooHigh, readTns(&r, longInfo(10)));
 }
 
-test "a channel with a non-zero codebook needs the Huffman tables" {
-    var buf: [8]u8 = undefined;
-    // global_gain 100, long ics_info max_sfb 1, section cb 1 length 1
-    var r = bits.BitReader.init(pack(&buf, "01100100 0 00 0 000001 0 0001 00001"));
-    try testing.expectError(error.NeedsHuffmanTables, readChannel(&r, null));
+const codes = @import("tables/huffman.zig");
+
+/// MSB-first writer for building channel fixtures from real codewords.
+const Writer = struct {
+    buf: [64]u8 = @splat(0),
+    n: usize = 0,
+
+    fn put(self: *Writer, value: u32, len: u5) void {
+        var k = len;
+        while (k > 0) {
+            k -= 1;
+            if ((value >> k) & 1 == 1) self.buf[self.n >> 3] |= @as(u8, 0x80) >> @intCast(self.n & 7);
+            self.n += 1;
+        }
+    }
+
+    fn code(self: *Writer, c: codes.Code) void {
+        self.put(c.code, c.len);
+    }
+
+    fn bytes(self: *const Writer) []const u8 {
+        return self.buf[0 .. (self.n + 7) / 8];
+    }
+};
+
+const rate_44k: u4 = 4;
+
+test "long channel: one band, scale factor and a book 1 tuple" {
+    var w: Writer = .{};
+    w.put(100, 8); // global_gain
+    w.put(0b0_00_0_000001_0, 11); // ics_info: long, max_sfb 1, no prediction
+    w.put(0b0001_00001, 9); // section: book 1, one band
+    w.code(codes.scalefactor[62]); // +2
+    w.put(0b000, 3); // no pulse, tns, gain control
+    w.code(codes.book1[80]); // (1, 1, 1, 1) over band 0 = 4 coefficients
+    var r = bits.BitReader.init(w.bytes());
+    const ch = try readChannel(&r, null, rate_44k);
+    try testing.expectEqual(@as(i16, 102), ch.scalefactors[0][0]);
+    try testing.expectEqualSlices(i16, &.{ 1, 1, 1, 1, 0 }, ch.spectrum[0..5]);
+}
+
+test "a scale factor above 255 is refused" {
+    var w: Writer = .{};
+    w.put(255, 8);
+    w.put(0b0_00_0_000001_0, 11);
+    w.put(0b0001_00001, 9);
+    w.code(codes.scalefactor[61]); // +1
+    var r = bits.BitReader.init(w.bytes());
+    try testing.expectError(error.ScalefactorOutOfRange, readChannel(&r, null, rate_44k));
+}
+
+test "max_sfb above the rate's band count is refused" {
+    var w: Writer = .{};
+    w.put(100, 8);
+    w.put(0b0_00_0_110010_0, 11); // max_sfb 50, 44.1 kHz has 49
+    var r = bits.BitReader.init(w.bytes());
+    try testing.expectError(error.TooManyBands, readChannel(&r, null, rate_44k));
+}
+
+test "grouped short windows land in their own window slots" {
+    var w: Writer = .{};
+    w.put(100, 8);
+    w.put(0b0_10_0_0001_1111111, 15); // eight_short, max_sfb 1, one group of 8
+    w.put(0b0001_001, 7); // section: book 1, one band
+    w.code(codes.scalefactor[60]); // one scale factor for the group
+    w.put(0b000, 3);
+    for (0..8) |win| w.code(codes.book1[if (win == 3) 80 else 40]);
+    var r = bits.BitReader.init(w.bytes());
+    const ch = try readChannel(&r, null, rate_44k);
+    try testing.expectEqual(@as(i16, 100), ch.scalefactors[0][0]);
+    try testing.expectEqualSlices(i16, &.{ 0, 0, 0, 0 }, ch.spectrum[0..4]);
+    try testing.expectEqualSlices(i16, &.{ 1, 1, 1, 1 }, ch.spectrum[3 * 128 .. 3 * 128 + 4]);
+    try testing.expectEqual(@as(usize, 0), r.bitsLeft() / 8);
+}
+
+test "noise energy starts from a 9-bit PCM value" {
+    var w: Writer = .{};
+    w.put(100, 8);
+    w.put(0b0_00_0_000010_0, 11); // long, max_sfb 2
+    w.put(0b1101_00010, 9); // section: NOISE_HCB over two bands
+    w.put(256 + 5, 9); // first: PCM, +5
+    w.code(codes.scalefactor[57]); // then -3
+    w.put(0b000, 3);
+    var r = bits.BitReader.init(w.bytes());
+    const ch = try readChannel(&r, null, rate_44k);
+    try testing.expectEqual(@as(i16, 15), ch.scalefactors[0][0]);
+    try testing.expectEqual(@as(i16, 12), ch.scalefactors[0][1]);
 }
 
 test "the device's priming access unit is a silent common-window CPE" {
     var r = bits.BitReader.init(&.{ 0x21, 0x00, 0x03, 0x40, 0x68, 0x1c });
     try r.skip(7); // CPE header, tag 0
-    const cpe = try readChannelPair(&r);
+    const cpe = try readChannelPair(&r, rate_44k);
     try testing.expect(cpe.common_window);
     try testing.expectEqual(@as(u2, 0), cpe.ms.?.present);
     try testing.expectEqual(WindowSequence.only_long, cpe.left.info.window_sequence);
