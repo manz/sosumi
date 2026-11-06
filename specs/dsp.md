@@ -80,6 +80,9 @@ State (`ref/dsp/`):
   codeword that resolves at the root, 31 per further step; untuned. ldy sign-extends
   (x17 3d0d2bb, measured by Chikuma), so every table entry stays below 0x8000 (tested), and
   the bit reader's refill adds 2^16 back to a packet word that loads negative.
+  Spectral codewords: one x17 macro per book family (`spec_quad_s/u`, `spec_pair_s/u`,
+  `spec_pair_esc`, x17 f15f180): fields off the leaf, offsets, sign bits, escapes, N > 8 to a
+  fail label. Match the model on random codes, escape failures at N = 9 included.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
