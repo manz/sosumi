@@ -254,6 +254,12 @@ test "every codeword of every book" {
     }
 }
 
+test "every entry stays below 0x8000, since ldy sign-extends" {
+    // x17 sm1_isa.md 409: a Y word of 0x8000 or more loads as negative.
+    for (scalefactor.words) |w| try testing.expect(w < 0x8000);
+    for (spectral) |t| for (t.words) |w| try testing.expect(w < 0x8000);
+}
+
 test "all twelve tables fit in Y with room for buffers" {
     // Y:0..0x2E7F is the safe 16-bit region (specs/questions.md 6): 11904 words.
     var total: usize = scalefactor.words.len;
