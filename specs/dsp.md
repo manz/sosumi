@@ -69,7 +69,30 @@ State (`ref/dsp/`):
     orders 0..30, 16 and 24 bits. Unexercised, as in `ref/alac`: mode != 0, LFE, DSE, FIL.
   - Refused (`error.Unsupported`): depth 32, pb > 127, escapes over 22 bits, and predictor
     widths outside `predictor.supported`. Apple's encoder output never needs them.
-- Still i32: all of AAC and MP3.
+- Still i32: MP3. AAC is next (`ref/dsp/aac/`), planned below.
+- AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
+  (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
+  The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
+  each stage against its `ref/aac` twin within a stated error, and the whole decoder within
+  1 LSB of ffmpeg and afconvert on the fixtures (the Phase 1 gate). x17 then matches the
+  DSP-shaped model bit for bit, as ALAC does. Numeric stages first, since they fix the
+  formats; the bitstream stages are integer and match `ref/aac` exactly.
+  1. `ops.zig` caught up with what x17 has gated since: the whole ptst table (b < 0, b <= 0,
+     b == 0 on s4/s8/s12), floor(ab / 2^24), the undoubled low half with it, 24-bit operands
+     with no saturation to |ab| = 2^41, x19mac (head ALU, multiply and A step in one bundle).
+  2. Dequantisation without F24: a band's exponent is floor(sf / 4), read off the bitstream,
+     no leading-zero count. Mantissa = |q|^(4/3) (|q| <= 8191, below 2^17.3: the pow43
+     direct table and interpolation) times 2^((sf mod 4) / 4) as Q23.
+  3. IMDCT: `cmul` as two rounded products summed (one more LSB per complex product, to be
+     measured end to end); the FFT's block floating point keeps its rule, "any component >=
+     2^21" being a sign test on |x| - 2^21; the block exponent from the band exponents.
+  4. Window and overlap-add with headroom instead of saturation, then the PCM clamp by
+     comparisons.
+  5. M/S, intensity, PNS (its 32-bit LCG as two words), TNS (the LPC filter with exact
+     products, like ALAC's tap).
+  6. Bitstream: section data, scalefactors, Huffman as one table-driven multi-bit lookup
+     shared with MP3, pulse data. Then the whole decoder against the fixtures.
+  Open before step 6: usable X and Y sizes (the tables and two 1024-word overlap buffers).
 - x17 assembly, stage by stage (Phase 3 order aside, ALAC first since its model is done):
   - Bit reader: x17 `examples/lib/bits.sm`, `getbits(dst, k)` for k in 1..8, streaming 16-bit
     packet words through a cache below 2^23; floor shifts come from the rounded shift. Matches
