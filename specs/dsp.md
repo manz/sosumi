@@ -57,6 +57,8 @@ Gate: AAC and MP3 within 1 LSB of ffmpeg and afconvert, as now; ALAC bit-exact.
 3. Cycle counting and `.assert cycles`.
 4. `.include` and macros: the bit reader, Huffman, PCM output and ring publishing are shared by
    all three decoders.
+5. `x17 fmt` at least (a816 format / zig fmt style): one canonical layout for the sources the
+   three decoders share, checked in CI. A linter can follow once the sources exist.
 
 ## Phase 3: order on sm1
 
