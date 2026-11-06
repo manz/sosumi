@@ -3,6 +3,7 @@
 pub const bits = @import("bits.zig");
 pub const fixed = @import("fixed.zig");
 pub const huffman = @import("huffman.zig");
+pub const pow43 = @import("pow43.zig");
 pub const aac = @import("aac/aac.zig");
 
 test {
