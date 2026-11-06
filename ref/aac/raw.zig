@@ -16,7 +16,7 @@ pub const Header = struct {
 };
 
 pub fn readHeader(r: *bits.BitReader) bits.Error!Header {
-    const id: ElementId = @enumFromInt(try r.read(3));
+    const id: ElementId = @fromBackingInt(@intCast(try r.read(3)));
     const tag: u4 = switch (id) {
         .fil, .end => 0,
         else => @intCast(try r.read(4)),

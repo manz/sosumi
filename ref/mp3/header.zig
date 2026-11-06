@@ -104,7 +104,7 @@ pub fn parse(b: []const u8) Error!Header {
         .bitrate_index = bitrate_index,
         .sr_index = sr_index,
         .padding = b[2] & 2 != 0,
-        .mode = @enumFromInt(b[3] >> 6),
+        .mode = @fromBackingInt(@intCast(b[3] >> 6)),
         .mode_ext = @intCast((b[3] >> 4) & 3),
     };
 }

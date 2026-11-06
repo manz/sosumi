@@ -55,7 +55,7 @@ pub const IcsInfo = struct {
 pub fn readIcsInfo(r: *bits.BitReader) Error!IcsInfo {
     if (try r.readFlag()) return error.ReservedBitSet;
     var info: IcsInfo = .{
-        .window_sequence = @enumFromInt(try r.read(2)),
+        .window_sequence = @fromBackingInt(@intCast(try r.read(2))),
         .window_shape = @intCast(try r.read(1)),
         .max_sfb = 0,
         .num_window_groups = 1,

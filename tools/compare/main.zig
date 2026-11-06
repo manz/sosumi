@@ -224,8 +224,8 @@ pub fn main(init: std.process.Init) !void {
             const t = stats.items[f];
             const p = if (f > 0) stats.items[f - 1] else t;
             std.debug.print("  frame {d}: max {d}  win {s}/{s} cw {} ms {d} pns {} is {} tns {}/{} pulse {}/{}  (prev win {s}/{s} pns {} is {} tns {}/{})\n", .{
-                f, fmax, @tagName(t.window[0]), @tagName(t.window[1]), t.common_window, t.ms, t.pns, t.intensity, t.tns[0], t.tns[1], t.pulse[0], t.pulse[1],
-                @tagName(p.window[0]), @tagName(p.window[1]), p.pns, p.intensity, p.tns[0], p.tns[1],
+                f,                     fmax,                  @tagName(t.window[0]), @tagName(t.window[1]), t.common_window, t.ms,     t.pns, t.intensity, t.tns[0], t.tns[1], t.pulse[0], t.pulse[1],
+                @tagName(p.window[0]), @tagName(p.window[1]), p.pns,                 p.intensity,           p.tns[0],        p.tns[1],
             });
         }
     }
