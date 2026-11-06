@@ -92,7 +92,9 @@ State (`ref/dsp/`):
      products, like ALAC's tap).
   6. Bitstream: section data, scalefactors, Huffman as one table-driven multi-bit lookup
      shared with MP3, pulse data. Then the whole decoder against the fixtures.
-  Open before step 6: usable X and Y sizes (the tables and two 1024-word overlap buffers).
+  Memory (`questions.md` 6): 8192 X words and 11904 16-bit Y words; the buffers take 4.4K X,
+  leaving ~3.7K for tables. The rounded multiply saturates at -1 x -1 (x17 e12c88e), the
+  one product that would not fit, so Q23 twiddles may use -1.
 - x17 assembly, stage by stage (Phase 3 order aside, ALAC first since its model is done):
   - Bit reader: x17 `examples/lib/bits.sm`, `getbits(dst, k)` for k in 1..8, streaming 16-bit
     packet words through a cache below 2^23; floor shifts come from the rounded shift. Matches
