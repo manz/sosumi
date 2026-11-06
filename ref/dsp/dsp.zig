@@ -3,6 +3,7 @@
 pub const ops = @import("ops.zig");
 pub const bits = @import("bits.zig");
 pub const alac = @import("alac/alac.zig");
+pub const aac = @import("aac/aac.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

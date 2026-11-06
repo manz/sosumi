@@ -55,6 +55,14 @@ pub const Reader = struct {
         return v;
     }
 
+    /// k (1..8) bits at the current position, without consuming them. Bits past the end read
+    /// as zero; the `skip` that consumes them checks the length.
+    pub fn peek(self: *Reader, k: u4) Word {
+        const p = self.pos;
+        defer self.pos = p;
+        return self.piece(k);
+    }
+
     pub fn readFlag(self: *Reader) Error!bool {
         return !ops.isZero(try self.read(1));
     }

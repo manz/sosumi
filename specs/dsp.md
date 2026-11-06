@@ -69,7 +69,12 @@ State (`ref/dsp/`):
     orders 0..30, 16 and 24 bits. Unexercised, as in `ref/alac`: mode != 0, LFE, DSE, FIL.
   - Refused (`error.Unsupported`): depth 32, pb > 127, escapes over 22 bits, and predictor
     widths outside `predictor.supported`. Apple's encoder output never needs them.
-- Still i32: MP3. AAC is next (`ref/dsp/aac/`), planned below.
+- Still i32: MP3. AAC is under way in `ref/dsp/aac/`, planned below.
+- `aac/huffman.zig`: every codebook as a tree of 16-bit lookup tables, root 8 bits, each step
+  a peek of at most 8 bits and one entry read. Leaves carry the codeword length and the values
+  already unpacked (2-bit fields for 4-tuples, 5-bit for pairs), so no divide; pointers carry
+  the subtable's base and width. 4544 words for all twelve books, for Y. Matches `ref/aac` on
+  every codeword and on biased random bitstreams, values, signs, escapes and reader position.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
