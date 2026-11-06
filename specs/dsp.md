@@ -99,8 +99,10 @@ State (`ref/dsp/`):
     escape samples, then unmix into the channel's slot. A registers load from s through
     s -> e -> R -> even A -> any A, every step gated. The first and last packets of mono,
     tone, white24 (shifted), clicks.c0 (escape) and clicks.o30 (order 30) match the
-    reference's PCM, dumped by `alacdec --dump` (x17 4eaf236). Not yet: integrate (mode != 0),
-    DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
+    reference's PCM, dumped by `alacdec --dump` (x17 4eaf236). Integrate (mode != 0) runs
+    in place over the residuals; no encoder emits it, so `alacdec --integrate` rewrites the
+    first packet's modes to 1 and the reference decodes it (ref and --dsp agree); mono and
+    stereo match (x17 f90d010). Not yet: DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17

@@ -5,7 +5,9 @@
 //!     alacdec in.m4a out.raw [--dsp] [--dump=pkts.bin]
 //!
 //! --dump writes the config, the first and the last packet and their PCM (little-endian u32
-//! fields; see `Dump`) for x17's packet-level test of the sm1 decoder.
+//! fields; see `Dump`) for x17's packet-level test of the sm1 decoder. --integrate rewrites
+//! the first packet's sub-frame modes to 1 before decoding it, for a mode != 0 case no
+//! encoder emits.
 const std = @import("std");
 const ref = @import("ref");
 
@@ -92,10 +94,12 @@ pub fn main(init: std.process.Init) !void {
     defer dec.deinit();
     // --dsp: the whole decoder in measured sm1 operations (ref/dsp/alac)
     var use_dsp = false;
+    var integrate = false;
     var dump_path: ?[]const u8 = null;
     for (args[3..]) |a| {
         if (std.mem.eql(u8, a, "--dsp")) use_dsp = true;
         if (std.mem.startsWith(u8, a, "--dump=")) dump_path = a["--dump=".len..];
+        if (std.mem.eql(u8, a, "--integrate")) integrate = true;
     }
     var dump: Dump = .{};
     defer dump.deinit(gpa);
@@ -125,6 +129,7 @@ pub fn main(init: std.process.Init) !void {
             if (sample >= t.count) break;
             const len: usize = if (t.uniform != 0) t.uniform else be32(t.sizes, sample * 4);
             const pkt = file[off .. off + len];
+            if (integrate and sample == 0) setModes(pkt);
             const res = if (use_dsp) ddec.decode(pkt, pcm) else dec.decode(pkt, pcm);
             const n = res catch |e| blk: {
                 if (failed < 5) std.debug.print("packet {d}: {s}\n", .{ sample, @errorName(e) });
@@ -186,3 +191,26 @@ const Dump = struct {
         self.out.deinit(gpa);
     }
 };
+
+fn getBits(b: []const u8, at: usize, n: u5) u32 {
+    var v: u32 = 0;
+    for (0..n) |i| v = v << 1 | (b[(at + i) / 8] >> @intCast(7 - (at + i) % 8)) & 1;
+    return v;
+}
+
+fn setBits(b: []u8, at: usize, n: u5, v: u32) void {
+    for (0..n) |i| {
+        const bit: u8 = @intCast(v >> @intCast(n - 1 - i) & 1);
+        const sh: u3 = @intCast(7 - (at + i) % 8);
+        b[(at + i) / 8] = b[(at + i) / 8] & ~(@as(u8, 1) << sh) | bit << sh;
+    }
+}
+
+/// Mode 1 in the sub-frame headers of a leading SCE or CPE that is neither partial nor
+/// escaped: the headers start at bit 39 (tag, instance, 12 bits, flags, mix fields).
+fn setModes(pkt: []u8) void {
+    const tag = getBits(pkt, 0, 3);
+    if (tag > 1 or getBits(pkt, 19, 1) != 0 or getBits(pkt, 22, 1) != 0) return;
+    setBits(pkt, 39, 4, 1);
+    if (tag == 1) setBits(pkt, 39 + 16 + 16 * @as(usize, getBits(pkt, 50, 5)), 4, 1);
+}
