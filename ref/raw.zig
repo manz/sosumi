@@ -2,8 +2,9 @@
 //! AAC-LC decoder only has to parse past (data_stream_element, fill_element).
 const std = @import("std");
 const bits = @import("bits.zig");
+const ics = @import("ics.zig");
 
-pub const Error = bits.Error || error{ElementNotImplemented};
+pub const Error = ics.Error || error{ElementNotImplemented};
 
 /// id_syn_ele values.
 pub const ElementId = enum(u3) { sce, cpe, cce, lfe, dse, pce, fil, end };
@@ -39,9 +40,9 @@ pub fn skipFil(r: *bits.BitReader) bits.Error!void {
     try r.skip(count * 8);
 }
 
-pub const Summary = struct { dse: u32 = 0, fil: u32 = 0 };
+pub const Summary = struct { sce: u32 = 0, cpe: u32 = 0, lfe: u32 = 0, dse: u32 = 0, fil: u32 = 0 };
 
-/// Walks one raw_data_block to its END element. Channel elements are not decoded yet.
+/// Walks one raw_data_block to its END element. CCE and PCE are not parsed yet.
 pub fn walk(r: *bits.BitReader) Error!Summary {
     var s: Summary = .{};
     while (true) {
@@ -59,7 +60,19 @@ pub fn walk(r: *bits.BitReader) Error!Summary {
                 r.byteAlign();
                 return s;
             },
-            .sce, .cpe, .cce, .lfe, .pce => return error.ElementNotImplemented,
+            .sce => {
+                _ = try ics.readChannel(r, null);
+                s.sce += 1;
+            },
+            .lfe => {
+                _ = try ics.readChannel(r, null);
+                s.lfe += 1;
+            },
+            .cpe => {
+                _ = try ics.readChannelPair(r);
+                s.cpe += 1;
+            },
+            .cce, .pce => return error.ElementNotImplemented,
         }
     }
 }
@@ -84,8 +97,15 @@ test "walk skips a DSE and a FIL and stops at END" {
     try testing.expectEqual(@as(usize, 0), r.bitsLeft());
 }
 
-test "walk reports a channel element as not implemented" {
+test "the device's priming access unit walks to END as one CPE" {
     var r = bits.BitReader.init(&.{ 0x21, 0x00, 0x03, 0x40, 0x68, 0x1c });
+    const s = try walk(&r);
+    try testing.expectEqual(@as(u32, 1), s.cpe);
+    try testing.expectEqual(@as(usize, 0), r.bitsLeft());
+}
+
+test "walk reports a coupling element as not implemented" {
+    var r = bits.BitReader.init(&.{0x40});
     try testing.expectError(error.ElementNotImplemented, walk(&r));
 }
 
