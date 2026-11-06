@@ -49,6 +49,21 @@ operations and is checked stage by stage against today's model:
 
 Gate: AAC and MP3 within 1 LSB of ffmpeg and afconvert, as now; ALAC bit-exact.
 
+State (`ref/dsp/`):
+
+- `ops.zig`: the measured operations the layer may use, each citing its x17 probe. The
+  multiplier returns slices, not a wide result: floor(ab / 2^24) or round(ab / 2^23), plus
+  (2ab)[15:0]. No persistent accumulator, carry flag, data AND/OR or leading-zero count is
+  measured. `mulWide` gets an exact 16 x 24 product from two multiplies (hi * 2^15 + lo).
+- `alac.zig`: the adaptive predictor and integration. Lo and hi parts sum in separate words;
+  only the low `chan_bits` bits of the prediction reach the output, exact while den_shift +
+  chan_bits <= 32. Bit-exact with `ref/alac` on random blocks, and with Apple on all 21
+  fixtures (`alacdec --dsp`), 24-bit ones included (their shifted low byte keeps chan_bits
+  at 17).
+- Still i32: ALAC's Rice decoder, unmix and the shifted-byte merge; all of AAC and MP3.
+- x17 follow-up: the 0x19 ALU's rounded right shift by a negative count is measured
+  (isa.toml) but not executed by the emulator yet.
+
 ## Phase 2: x17 must have
 
 1. The assembler: labels, `bcc` with its two delay slots, `.const`, tables placed in X and Y.

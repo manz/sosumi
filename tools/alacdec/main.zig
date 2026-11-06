@@ -77,7 +77,7 @@ pub fn main(init: std.process.Init) !void {
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len < 3) {
-        std.debug.print("usage: alacdec in.m4a out.raw\n", .{});
+        std.debug.print("usage: alacdec in.m4a out.raw [--dsp]\n", .{});
         std.process.exit(2);
     }
     const cwd = std.Io.Dir.cwd();
@@ -87,6 +87,7 @@ pub fn main(init: std.process.Init) !void {
     const cfg = try ref.alac.config.parse(t.cookie);
     var dec = try ref.alac.decoder.Decoder.init(gpa, cfg);
     defer dec.deinit();
+    dec.dsp_predictor = args.len > 3 and std.mem.eql(u8, args[3], "--dsp");
     const nch: usize = cfg.channels;
     const width: usize = (@as(usize, cfg.bit_depth) + 7) / 8;
     const pcm = try gpa.alloc(i32, @as(usize, cfg.frame_length) * nch);
