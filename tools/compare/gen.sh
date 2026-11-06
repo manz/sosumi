@@ -40,3 +40,17 @@ for s in sweep clicks pink; do
     $F -i $b.aac -f s16le $b.ffmpeg.s16
   done
 done
+
+# MP3 (LAME): CBR joint stereo, VBR, mono, MPEG-2 and MPEG-2.5 rates
+mp3() { # name source extra-args
+  $F -i $T/$2.wav $3 -c:a libmp3lame $T/$1.mp3
+  $F -i $T/$1.mp3 -f s16le $T/$1.mp3.ffmpeg.s16
+  afconvert -f WAVE -d LEI16 $T/$1.mp3 $T/$1.mp3.apple.wav
+  python3 -I tools/compare/wavdata.py $T/$1.mp3.apple.wav $T/$1.mp3.apple.s16
+}
+for s in tone sweep pink clicks mono; do mp3 $s.cbr $s "-b:a 128k"; done
+mp3 clicks.vbr clicks "-q:a 2"
+mp3 sweep.m2 sweep "-ar 22050 -b:a 64k"
+mp3 clicks.m2 clicks "-ar 24000 -b:a 64k"
+mp3 sweep.m25 sweep "-ar 11025 -b:a 32k"
+mp3 clicks.m25_8k clicks "-ar 8000 -b:a 24k"

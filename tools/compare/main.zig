@@ -1,8 +1,8 @@
-//! Decodes an ADTS AAC-LC file with the reference model and compares it with a reference
+//! Decodes an ADTS AAC-LC file, or an MP3 file (by extension), with the reference model and compares it with a reference
 //! decode (raw s16le, interleaved, same channel count), e.g. from the ffmpeg binary or
 //! afconvert. Optionally writes our PCM as a WAV for listening.
 //!
-//!     compare in.aac ref.s16 [ours.wav]
+//!     compare in.aac|in.mp3 ref.s16 [ours.wav]
 const std = @import("std");
 const ref = @import("ref");
 
@@ -62,12 +62,49 @@ pub fn main(init: std.process.Init) !void {
     defer stats.deinit(gpa);
     var ours: std.ArrayList(i16) = .empty;
     defer ours.deinit(gpa);
-    var dec: ?ref.aac.decoder.Decoder = null;
-    var pos: usize = 0;
+    var mp3_stats: [7]usize = @splat(0);
+    var chans: usize = 0;
+    var rate: u32 = 0;
     var frames: usize = 0;
     var failed: usize = 0;
+    if (std.mem.endsWith(u8, args[1], ".mp3")) {
+        var mp3: ref.mp3.decoder.Decoder = .{};
+        var pos: usize = 0;
+        if (aac.len > 10 and std.mem.eql(u8, aac[0..3], "ID3")) {
+            const size = (@as(usize, aac[6]) << 21) | (@as(usize, aac[7]) << 14) | (@as(usize, aac[8]) << 7) | aac[9];
+            pos = 10 + size + @as(usize, if (aac[5] & 0x10 != 0) 10 else 0);
+        }
+        var pcm: [2304]i16 = undefined;
+        while (pos + 4 <= aac.len) {
+            const h = ref.mp3.header.parse(aac[pos..]) catch {
+                pos += 1;
+                continue;
+            };
+            const len = h.frameLen();
+            if (pos + len > aac.len) break;
+            const n = @as(usize, h.samples()) * h.channels();
+            chans = h.channels();
+            rate = h.sampleRate();
+            const f = mp3.decode(aac[pos .. pos + len], &pcm) catch |e| blk: {
+                if (failed < 5) std.debug.print("frame {d}: {s}\n", .{ frames, @errorName(e) });
+                failed += 1;
+                @memset(pcm[0..n], 0);
+                break :blk null;
+            };
+            if (f) |fr| {
+                if (!fr.decoded) failed += 1;
+                const t = mp3.last;
+                inline for (.{ t.short, t.mixed, t.ms, t.intensity, t.scfsi, t.preflag, t.scalefac_scale }, 0..) |b, k| mp3_stats[k] += @intFromBool(b);
+            }
+            try ours.appendSlice(gpa, pcm[0..n]);
+            pos += len;
+            frames += 1;
+        }
+    }
+    var dec: ?ref.aac.decoder.Decoder = null;
+    var pos: usize = 0;
     var buf: [2048]i16 = undefined;
-    while (pos + 7 <= aac.len) {
+    while (chans == 0 and pos + 7 <= aac.len) {
         const h = try parseAdts(aac[pos..]);
         if (dec == null) dec = try ref.aac.decoder.Decoder.init(&h.config);
         const au = aac[pos + h.header_len .. pos + h.frame_len];
@@ -82,15 +119,19 @@ pub fn main(init: std.process.Init) !void {
         pos += h.frame_len;
         frames += 1;
     }
-    const d = dec orelse return error.Empty;
-    const chans: usize = d.channels;
+    if (dec) |d| {
+        chans = d.channels;
+        rate = rate;
+    }
+    if (chans == 0) return error.Empty;
 
-    // best alignment within +-2 frames (reference decoders may trim or pad the start)
+    // best alignment within +-4096 samples (reference decoders trim encoder delay and LAME's
+    // Info frame: 2257 samples for an MPEG-1 LAME file)
     const got = ours.items;
     var best_off: isize = 0;
     var best_err: f64 = std.math.inf(f64);
-    var off: isize = -2048;
-    while (off <= 2048) : (off += 1) {
+    var off: isize = -4096;
+    while (off <= 4096) : (off += 1) {
         var e: f64 = 0;
         var i: usize = 0;
         const step = chans * 64;
@@ -123,9 +164,12 @@ pub fn main(init: std.process.Init) !void {
         count += 1;
     }
     const snr = if (noise == 0) std.math.inf(f64) else 10 * std.math.log10(sig / noise);
-    std.debug.print("{s}: {d} frames, {d} failed, {d} ch, {d} Hz, offset {d}\n", .{ args[1], frames, failed, chans, d.config.sample_rate, best_off });
+    std.debug.print("{s}: {d} frames, {d} failed, {d} ch, {d} Hz, offset {d}\n", .{ args[1], frames, failed, chans, rate, best_off });
     std.debug.print("  vs {s}: SNR {d:.1} dB, max |diff| {d}, |diff|>1 in {d:.3}% of {d} samples\n", .{ args[2], snr, max_diff, 100 * @as(f64, @floatFromInt(over1)) / @as(f64, @floatFromInt(@max(count, 1))), count });
 
+    if (stats.items.len == 0) {
+        std.debug.print("  mp3 tools: short {d}, mixed {d}, ms {d}, intensity {d}, scfsi {d}, preflag {d}, scalefac_scale {d} frames\n", .{ mp3_stats[0], mp3_stats[1], mp3_stats[2], mp3_stats[3], mp3_stats[4], mp3_stats[5], mp3_stats[6] });
+    }
     // tool coverage, and the level match on frames with noise bands (their waveforms are
     // decoder-specific by design)
     var n_short: usize = 0;
@@ -165,7 +209,7 @@ pub fn main(init: std.process.Init) !void {
     std.debug.print("\n", .{});
 
     // the worst frames, with the tools they used (frame f's PCM depends on frames f and f - 1)
-    if (init.environ_map.get("VERBOSE") != null) {
+    if (init.environ_map.get("VERBOSE") != null and stats.items.len > 0) {
         var shown: usize = 0;
         for (0..frames) |f| {
             var fmax: u32 = 0;
@@ -187,7 +231,7 @@ pub fn main(init: std.process.Init) !void {
     }
 
     if (args.len > 3) {
-        const w = try wav(gpa, got, @intCast(chans), d.config.sample_rate);
+        const w = try wav(gpa, got, @intCast(chans), rate);
         defer gpa.free(w);
         try cwd.writeFile(io, .{ .sub_path = args[3], .data = w });
     }
