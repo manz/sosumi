@@ -18,3 +18,6 @@ Related repositories:
     ipod-re   the reverse engineering: RetailOS, the codec path, sm1 measurements (reports/)
 
 Addresses in the specs are ipod-re's Ghidra project addresses unless marked `rt` (runtime).
+
+Licensed under Apache 2.0 (`LICENSE`). sosumi is a clean-room implementation; `docs/cleanroom.md` sets
+out which sources it may use.
