@@ -8,4 +8,5 @@ test {
     _ = @import("test/stereo.zig");
     _ = @import("test/pns.zig");
     _ = @import("test/tns.zig");
+    _ = @import("test/imdct.zig");
 }
