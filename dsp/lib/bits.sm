@@ -1,4 +1,4 @@
-; Audited from x17 8ca5ba4 examples/lib/bits.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 2f5d48b examples/lib/bits.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/bits.zig; ISO/IEC 14496-3 bit order (bslbf, MSB first). ISA: x17 docs/sm1/reference.md entries named below.
 ; MSB-first bit reader over a packet staged in Y as 16-bit words (x17's host model).
 ; The twin of ref/dsp/bits.zig, streaming instead of random access:
