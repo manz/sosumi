@@ -25,7 +25,8 @@ Related repositories:
     x17       the sm1 assembler and emulator, with the silicon-gated ISA
     ipod-re   the reverse engineering: RetailOS, the codec path, sm1 measurements (reports/)
 
-Addresses in the specs are ipod-re's Ghidra project addresses unless marked `rt` (runtime).
+Addresses in the specs are the device's CPU addresses as ipod-re records them; `rt` marks a
+runtime address.
 
 Licensed under Apache 2.0 (`LICENSE`). sosumi is a clean-room implementation; `docs/cleanroom.md` sets
 out which sources it may use.
