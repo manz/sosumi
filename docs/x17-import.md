@@ -64,3 +64,18 @@ memory and are not yet checked against the standard's text (OPEN).
 | tns.sm | 2f5d48b | `ref/dsp/aac/tns.zig` | **Moved** to `dsp/lib/tns.sm`. The lattice on Q23 reflection coefficients, the (-2^22, 2^22) bound with put-back, halve and retry up to 48 times, then zero the run: all the twin's. Its table is the twin's `refl` (coef_res 0 at TN_K + 0..7, 1 at TN_K + 8..23). TN_REC is our flattening of tns_data(). No citations to rewrite, no `x02.v`. Tests (`dsp/test/tns.zig`) build `ics.Tns`, flatten it to TN_REC and check words, exponent, halvings and runs zeroed against `apply` with the real 44.1 kHz offsets and TNS limits; x17's used made-up offsets and its own model. |
 | imdct.sm | 2f5d48b | `ref/dsp/aac/imdct.zig` | **Moved** to `dsp/lib/imdct.sm`. Normalisation to [2^21, 2^22), pre-twiddle into a bit-reversed n2/2-point FFT, per-stage scaling, post-twiddle, fold and one saturating output shift: all the twin's. Its tables are the twin's `Tables(n2)` (`pre`, `post`, `rev`); TW is the twin's `fft` laid out stage by stage. Citation added for the `x19` shift. No `x02.v` (only `x02.ainc` / `x02.mpy`, whose side effects the header documents). Tests (`dsp/test/imdct.zig`) run long and short blocks, six shapes each (halving, doublings, silence, a lone peak, a large last coefficient), against `imdct`; x17's rebuilt the tables and the model by hand. |
 | window.sm | dd66f03 | `ref/dsp/aac/window.zig` | **Moved** to `dsp/lib/window.sm`. The w / 4 Q23 halves, the four sequences' layouts, the rounded shift by 5 before the clamp and the overlap hand-on are the twin's `block` and `synth`. The macros take constant table addresses, so the glue copies each shape's rising halves into fixed slots. No citations to rewrite, no `x02.v`. Tests (`dsp/test/window.zig`) run every sequence for every previous/current shape pair with the twin's real sine and KBD halves, quiet, clipping and at the clamp's edges; x17's used random window values and its own model. |
+
+## Silicon follow-ups
+
+Reported by the dirty side after the moves, 2026-11-08; the stage tests run on x17's emulator
+model and do not see them:
+
+- **x19.xrd's X read index is being re-measured** (OPEN): silicon may index A by
+  4 * w1[2:0] + head[31:30], not w3[19:15]. 56 `x19.xrd` uses across imdct, window, dequant,
+  pns, tns and stereo. x17 is to change the encoding so the source keeps its meaning; when it
+  lands, rebuild and re-run, and recheck any lib whose text would change.
+- **ldy through e2 returns junk** (x17 fba720e refuses it): no lib here loads through e2; the
+  tests pass against x17 fba720e.
+- **X in mode 0 is 0..0x1BFF** (`specs/questions.md` 6): stereo.sm (ST_T), pns.sm (PN_T,
+  PN_SEED, PN_RNG) and tns.sm (TN_K, TN_KC, TN_B) put tables at X:0x1F00 and up, outside the
+  window. Their layout has to move before the silicon fit; the emulator runs are unaffected.
