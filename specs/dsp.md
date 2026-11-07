@@ -106,7 +106,8 @@ State (`ref/dsp/`):
   Tables for x17: pre and post n4 complex each, FFT n4/2, reversal n4 (long 2.8K words).
   x17 twin: `examples/lib/imdct.sm`, `imdct(...)` (x17 125458a), bit-exact with the model on
   long blocks: halving, doublings, silence, a lone positive peak, noise under one large
-  last coefficient. About 255K bundles a long block (82% of a channel-frame), 31K for silence.
+  last coefficient. About 255K bundles a long block (82% of a channel-frame), 31K for silence;
+  short windows (n2 = 128, same routine) 26K each, 208K for the eight (x17 4756ce1).
   Each stage tracks its outputs' max and min branch-free (psel at 24 bits, measured) as it
   stores, and the next stage applies the scaling with one rounded shift as it loads, so no
   block scan between stages. The twiddles sit stage by stage in X; the reversal is a Y table.
