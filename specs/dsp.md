@@ -111,6 +111,16 @@ State (`ref/dsp/`):
   Each stage tracks its outputs' max and min branch-free (psel at 24 bits, measured) as it
   stores, and the next stage applies the scaling with one rounded shift as it loads, so no
   block scan between stages. The twiddles sit stage by stage in X; the reversal is a Y table.
+- `aac/window.zig`: window and overlap-add from the IMDCT's Q7 words. The window tables hold
+  w / 4 in Q23, so one rounded multiply gives Q5 words; at most three windowed terms meet at a
+  position (an illegal long-only to eight-short transition), each below 2^21, so the plain
+  24-bit adds never wrap and need no saturation. PCM = clamp(rshr(overlap + block, 5)), the
+  shift first so the clamp's comparisons stay within 2^18. Within 1 PCM step of double
+  precision from the same words over every transition, clipping included. x17 twin:
+  `examples/lib/window.sm` (x17 1084f7b, 80c5cba), bit-exact: `win_long` (fused, 40K bundles),
+  `win_start` / `win_stop` (58K) and `win_short` (72K), built from product, quarter, zero and
+  accumulate runs into a scratch block, then one PCM and overlap pass. PCM leaves as 16-bit Y
+  words.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
