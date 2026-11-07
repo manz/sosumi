@@ -43,11 +43,11 @@ const direct = blk: {
     }
     break :blk .{ .m = m, .e = e };
 };
-const direct_m: [129]Word = direct.m;
-const direct_e: [129]Word = direct.e;
+pub const direct_m: [129]Word = direct.m;
+pub const direct_e: [129]Word = direct.e;
 
 /// round(j^(4/3) * 2^13), j = 64..128: the reference's interpolation table.
-const interp: [65]Word = blk: {
+pub const interp: [65]Word = blk: {
     @setEvalBranchQuota(100000);
     var t: [65]Word = undefined;
     for (&t, 64..) |*x, j| x.* = @intFromFloat(@round(std.math.pow(f64, @floatFromInt(j), 4.0 / 3.0) * 8192.0));
@@ -55,7 +55,7 @@ const interp: [65]Word = blk: {
 };
 
 /// round(2^(rem / 3 + b / 4) * 2^21), indexed rem * 4 + b: below 2^22.42.
-const gain: [12]Word = blk: {
+pub const gain: [12]Word = blk: {
     var t: [12]Word = undefined;
     for (0..3) |rem| for (0..4) |b| {
         const x = @as(f64, @floatFromInt(rem)) / 3.0 + @as(f64, @floatFromInt(b)) / 4.0;
@@ -65,8 +65,8 @@ const gain: [12]Word = blk: {
 };
 
 /// floor(4s / 3) - 13 and s mod 3, for s = 1..7.
-const interp_e = [8]Word{ 0, 1 - 13, 2 - 13, 4 - 13, 5 - 13, 6 - 13, 8 - 13, 9 - 13 };
-const interp_rem = [8]Word{ 0, 1, 2, 0, 1, 2, 0, 1 };
+pub const interp_e = [8]Word{ 0, 1 - 13, 2 - 13, 4 - 13, 5 - 13, 6 - 13, 8 - 13, 9 - 13 };
+pub const interp_rem = [8]Word{ 0, 1, 2, 0, 1, 2, 0, 1 };
 
 /// |q|^(4/3) as m * 2^e, and the third-power leftover for the gain index.
 const Mant = struct { m: Word, e: Word, rem: Word };

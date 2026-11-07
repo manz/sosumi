@@ -4,4 +4,5 @@ test {
     _ = @import("test/pcm.zig");
     _ = @import("test/huffman.zig");
     _ = @import("test/sections.zig");
+    _ = @import("test/dequant.zig");
 }

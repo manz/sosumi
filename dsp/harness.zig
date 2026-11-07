@@ -10,6 +10,7 @@ const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/pcm.sm", .text = @embedFile("lib/pcm.sm") },
     .{ .path = "lib/huffman.sm", .text = @embedFile("lib/huffman.sm") },
     .{ .path = "lib/sections.sm", .text = @embedFile("lib/sections.sm") },
+    .{ .path = "lib/dequant.sm", .text = @embedFile("lib/dequant.sm") },
 };
 
 fn load(ctx: ?*anyopaque, gpa: std.mem.Allocator, path: []const u8) anyerror!?[]u8 {
