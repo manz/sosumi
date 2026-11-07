@@ -2,7 +2,9 @@
 //! decode (raw s16le, interleaved, same channel count), e.g. from the ffmpeg binary or
 //! afconvert. Optionally writes our PCM as a WAV for listening.
 //!
-//!     compare in.aac|in.mp3 ref.s16 [ours.wav]
+//!     compare in.aac|in.mp3 ref.s16 [ours.wav] [--dsp]
+//!
+//! --dsp decodes AAC with ref/dsp/aac, the decoder in measured sm1 operations.
 const std = @import("std");
 const ref = @import("ref");
 
@@ -43,10 +45,107 @@ fn wav(gpa: std.mem.Allocator, pcm: []const i16, channels: u16, rate: u32) ![]u8
     return out;
 }
 
+/// STAGES=<frame>: one access unit through both AAC pipelines, the DSP block's distance from
+/// the reference's coefficients after each stage, relative to the reference's peak (noise bands
+/// differ by design), then the windowed blocks in PCM steps. Pairs only.
+fn stages(au: []const u8, fi: u4) !void {
+    const A = ref.aac;
+    const D = ref.dsp.aac;
+    var r = ref.bits.BitReader.init(au);
+    while (true) {
+        const h = try A.raw.readHeader(&r);
+        switch (h.id) {
+            .end => return,
+            .dse => try A.raw.skipDse(&r),
+            .fil => try A.raw.skipFil(&r),
+            .cpe => {
+                const pair = try A.ics.readChannelPair(&r, fi);
+                const lo = pair.left.info.bandOffsets(fi);
+                const ro = pair.right.info.bandOffsets(fi);
+                var rl = A.iquant.dequantChannel(&pair.left, fi);
+                var rr = A.iquant.dequantChannel(&pair.right, fi);
+                var dl = D.decoder.dequantise(&pair.left, lo);
+                var dr = D.decoder.dequantise(&pair.right, ro);
+                report("dequant", &rl, &dl, &rr, &dr);
+                var rng: A.stereo.Rng = .{};
+                A.stereo.applyPair(&pair, &rl, &rr, lo, ro, &rng);
+                var drng: D.pns.Rng = .{};
+                D.pns.channel(&pair.left, lo, &dl, &drng);
+                D.stereo.applyPair(&pair, &dl, &dr, lo, ro);
+                D.pns.right(&pair, &dl, ro, &dr, &drng);
+                report("stereo", &rl, &dl, &rr, &dr);
+                if (pair.left.tns) |*t| {
+                    A.tns.apply(&pair.left, &rl, fi);
+                    _ = D.tns.apply(t, pair.left.info, fi, &dl);
+                }
+                if (pair.right.tns) |*t| {
+                    A.tns.apply(&pair.right, &rr, fi);
+                    _ = D.tns.apply(t, pair.right.info, fi, &dr);
+                }
+                report("tns", &rl, &dl, &rr, &dr);
+                for ([_]*const A.ics.Channel{ &pair.left, &pair.right }, [_]*const A.iquant.Coefs{ &rl, &rr }, [_]*const D.dequant.Block{ &dl, &dr }) |ch, rc, dc| {
+                    const shape = ch.info.window_shape;
+                    var rb: [2048]ref.fixed.Word = undefined;
+                    A.filterbank.block(&.{ .prev_shape = shape }, ch.info, rc, &rb);
+                    var db: [2048]ref.dsp.ops.Word = undefined;
+                    if (ch.info.isShort()) {
+                        var t: [8][256]ref.dsp.ops.Word = undefined;
+                        for (&t, 0..) |*o, w| D.imdct.imdct(128, dc.w[w * 128 ..][0..128], dc.e, o);
+                        D.window.block(shape, shape, ch.info.window_sequence, .{ .short = &t }, &db);
+                    } else {
+                        var t: [2048]ref.dsp.ops.Word = undefined;
+                        D.imdct.imdct(1024, &dc.w, dc.e, &t);
+                        D.window.block(shape, shape, ch.info.window_sequence, .{ .long = &t }, &db);
+                    }
+                    var worst: f64 = 0;
+                    var at: usize = 0;
+                    var peak: f64 = 0;
+                    for (rb, db, 0..) |a, b, k| {
+                        const d = @abs(@as(f64, @floatFromInt(a)) / 128 - @as(f64, @floatFromInt(b)) / 32);
+                        peak = @max(peak, @abs(@as(f64, @floatFromInt(a)) / 128));
+                        if (d > worst) {
+                            worst = d;
+                            at = k;
+                        }
+                    }
+                    std.debug.print("  window {s}: max {d:.1} PCM at {d}, peak {d:.0}\n", .{ @tagName(ch.info.window_sequence), worst, at, peak });
+                }
+            },
+            else => return,
+        }
+    }
+}
+
+fn report(tag: []const u8, rl: *const ref.aac.iquant.Coefs, dl: *const ref.dsp.aac.dequant.Block, rr: *const ref.aac.iquant.Coefs, dr: *const ref.dsp.aac.dequant.Block) void {
+    std.debug.print("  {s}:", .{tag});
+    for ([_]*const ref.aac.iquant.Coefs{ rl, rr }, [_]*const ref.dsp.aac.dequant.Block{ dl, dr }) |a, b| {
+        var peak: f64 = 0;
+        var err: f64 = 0;
+        var at: usize = 0;
+        for (a, b.w, 0..) |x, w, k| {
+            const v = x.toFloat();
+            const d = std.math.ldexp(@as(f64, @floatFromInt(w)), b.e);
+            peak = @max(peak, @abs(v));
+            if (@abs(v - d) > err) {
+                err = @abs(v - d);
+                at = k;
+            }
+        }
+        std.debug.print("  e {d} rel {e:.2} at {d}", .{ b.e, err / @max(peak, 1e-30), at });
+    }
+    std.debug.print("\n", .{});
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
+    const all = try init.minimal.args.toSlice(init.arena.allocator());
+    var kept: std.ArrayList([:0]const u8) = .empty;
+    var use_dsp = false;
+    for (all) |a| {
+        if (std.mem.eql(u8, a, "--dsp")) use_dsp = true else try kept.append(init.arena.allocator(), a);
+    }
+    const args = kept.items;
     if (args.len < 3) {
         std.debug.print("usage: compare in.aac ref.s16 [ours.wav]\n", .{});
         std.process.exit(2);
@@ -102,20 +201,26 @@ pub fn main(init: std.process.Init) !void {
         }
     }
     var dec: ?ref.aac.decoder.Decoder = null;
+    var dsp: ?ref.dsp.aac.decoder.Decoder = null;
     var pos: usize = 0;
     var buf: [2048]i16 = undefined;
     while (chans == 0 and pos + 7 <= aac.len) {
         const h = try parseAdts(aac[pos..]);
         if (dec == null) dec = try ref.aac.decoder.Decoder.init(&h.config);
+        if (use_dsp and dsp == null) dsp = try ref.dsp.aac.decoder.Decoder.init(&h.config);
         const au = aac[pos + h.header_len .. pos + h.frame_len];
+        if (init.environ_map.get("STAGES")) |sf| {
+            if (frames == try std.fmt.parseInt(usize, sf, 10)) try stages(au, @intCast((h.config[0] & 7) << 1 | h.config[1] >> 7));
+        }
         const n = @as(usize, dec.?.channels) * 1024;
-        dec.?.decode(au, buf[0..n]) catch |e| {
+        const res = if (dsp) |*d| d.decode(au, buf[0..n]) else dec.?.decode(au, buf[0..n]);
+        res catch |e| {
             if (failed < 5) std.debug.print("frame {d}: {s}\n", .{ frames, @errorName(e) });
             failed += 1;
             @memset(buf[0..n], 0);
         };
         try ours.appendSlice(gpa, buf[0..n]);
-        try stats.append(gpa, dec.?.last);
+        try stats.append(gpa, if (dsp) |d| d.last else dec.?.last);
         pos += h.frame_len;
         frames += 1;
     }

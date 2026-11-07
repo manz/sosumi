@@ -7,6 +7,7 @@ pub const window = @import("window.zig");
 pub const stereo = @import("stereo.zig");
 pub const tns = @import("tns.zig");
 pub const pns = @import("pns.zig");
+pub const decoder = @import("decoder.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
