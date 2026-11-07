@@ -5,4 +5,5 @@ test {
     _ = @import("test/huffman.zig");
     _ = @import("test/sections.zig");
     _ = @import("test/dequant.zig");
+    _ = @import("test/stereo.zig");
 }

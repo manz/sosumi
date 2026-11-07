@@ -20,7 +20,7 @@ const Word = ops.Word;
 const Block = dequant.Block;
 
 /// round(2^(22 - b / 4)), b = 0..3.
-const quarter: [4]Word = blk: {
+pub const quarter: [4]Word = blk: {
     var t: [4]Word = undefined;
     for (&t, 0..) |*x, b| x.* = @intFromFloat(@round(std.math.pow(f64, 2.0, 22.0 - @as(f64, @floatFromInt(b)) / 4.0)));
     break :blk t;
