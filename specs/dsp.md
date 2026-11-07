@@ -130,9 +130,9 @@ State (`ref/dsp/`):
   x17 twin: `examples/lib/stereo.sm`, `stereo_pair()` (x17 7218a61), bit-exact on random pairs:
   per-band kinds, a flat (start, len, band) run list, then the exponent moves and the two passes;
   up to 52K bundles a pair, most of it the moves.
-- Open risk: x19 op 23 right shifts past 23 are unmeasured, and the ALAC predictor, unmix, sxe
-  and the IMDCT lean on them (an emulator that refuses them fails those five tests). Probe
-  queued with Chikuma.
+- x19 op 23 past 23: the ALAC predictor, unmix, sxe and the IMDCT lean on right shifts beyond
+  23. Measured by Chikuma (x17 pins them): every count past +-23 shifts fully out, 0 on the
+  right (no wrap mod 32 or 64) and saturation on the left.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
