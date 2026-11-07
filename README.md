@@ -1,6 +1,7 @@
 # sosumi
 
-Audio decoders for the iPod Classic 6G's sm1 DSP, written in x17 assembly and loaded by chikuma.
+Audio decoders for the iPod Classic 6G's sm1 DSP, written in x17 assembly and loaded by
+the host firmware.
 
 The firmware image carries its own sm1 codec programs. They are an oracle for behaviour, not
 source: their provenance is unknown, and nothing here is transcribed from them. Each decoder is
@@ -23,10 +24,8 @@ written from its format's public reference and checked against what the device m
 Related repositories:
 
     x17       the sm1 assembler and emulator, with the silicon-gated ISA
-    ipod-re   the reverse engineering: RetailOS, the codec path, sm1 measurements (reports/)
 
-Addresses in the specs are the device's CPU addresses as ipod-re records them; `rt` marks a
-runtime address.
+Addresses in the specs are sm1 X/Y word addresses.
 
 Licensed under Apache 2.0 (`LICENSE`). sosumi is a clean-room implementation; `docs/cleanroom.md` sets
 out which sources it may use.
