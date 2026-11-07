@@ -141,6 +141,18 @@ State (`ref/dsp/`):
   `tns_channel()` (x17 19bef0f), bit-exact on random channels and on the give-up case; it walks the parsed
   fields and finds the ranges itself. A long block costs 70K to 250K bundles without halvings,
   up to 720K with several (scalar, about 16 bundles a stage and sample).
+- `aac/pns.zig`: noise from its own 24-bit LCG (x = 0x7655 x + 0x3C6EF3 mod 2^24, a sample is
+  rshr(x, 1)), so the product is exact as a low half plus a rounded high half. A band is scaled
+  up until its peak is >= 2^21, its energy summed as rshr(rnd(v^2 / 2^23), s) with s even so
+  the sum fits, normalised into [2^21, 2^23) by comparisons, and 1 / (4 sqrt m) taken from six
+  seeds and three Newton steps (within 4 LSB). The gain rnd(z T[b]), T[b] = 2^(22 + b/4), puts
+  the band at exponent p + q - 20 - s/2, energy 2^(nrg/2) within 2e-5 relative over lengths 1 to
+  1024. Correlated right noise (M/S on, both bands noise) is the left band times T[b] at
+  eL + q + 1, as intensity. The block then moves to the largest exponent, as in stereo.
+  x17 twin: `examples/lib/pns.sm`, `pns_channel()` (x17 f6a411a), bit-exact on random channels
+  and pairs' rights, long and short, generator state included. About 60 bundles a noise word over
+  a fixed ~20K (the run list, the block's move): 20K to 50K a channel, 82K for one band over the
+  whole window.
 - x19 op 23 past 23: the ALAC predictor, unmix, sxe and the IMDCT lean on right shifts beyond
   23. Measured by Chikuma (x17 pins them): every count past +-23 shifts fully out, 0 on the
   right (no wrap mod 32 or 64) and saturation on the left.
