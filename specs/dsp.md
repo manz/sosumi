@@ -97,6 +97,13 @@ State (`ref/dsp/`):
   exact value and `ref/aac` on random channels; pulses match exactly. x17 twin:
   `examples/lib/dequant.sm`, `dq_channel` (x17 f9dbdec), bit-exact with the model on random
   long and short channels; ~70K bundles for 49 dense long bands, up to ~83K short (22-27%).
+- `aac/imdct.zig`: the dequantiser's words normalised to a largest |x| in [2^21, 2^22) by
+  comparisons, then pre-twiddle, N/4-point FFT, post-twiddle and fold as `ref/aac`. `cmul` is two
+  rounded products; a stage quarters its inputs from 2^22 and halves them from 2^21 (the
+  reference halves its sums, which can grow past 2^23), so a + w b stays below 2^22.3; the bit
+  reversal is a table. Against double precision the error grows with loudness: 0.5 Q7 at a
+  2^10 peak, 73 Q7 (0.57 PCM step) at 2^21.7, where `ref/aac` gives 41; 36 Q7 from `ref/aac`.
+  Tables for x17: pre and post n4 complex each, FFT n4/2, reversal n4 (long 2.8K words).
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
