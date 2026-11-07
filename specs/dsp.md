@@ -83,6 +83,10 @@ State (`ref/dsp/`):
   Spectral codewords: one x17 macro per book family (`spec_quad_s/u`, `spec_pair_s/u`,
   `spec_pair_esc`, x17 f15f180): fields off the leaf, offsets, sign bits, escapes, N > 8 to a
   fail label. Match the model on random codes, escape failures at N = 9 included.
+- `aac/sections.zig`: section data and scale factors into flat band arrays (band g * max_sfb
+  + sfb, 120 words of book and of scale factor at most); book tests, the 0..255 range and the
+  section overrun are sign tests. Matches `ref/aac` on built streams and random bytes, errors
+  and reader position included.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
