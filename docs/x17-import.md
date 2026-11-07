@@ -70,10 +70,10 @@ memory and are not yet checked against the standard's text (OPEN).
 Reported by the dirty side after the moves, 2026-11-08; the stage tests run on x17's emulator
 model and do not see them:
 
-- **x19.xrd's X read index is being re-measured** (OPEN): silicon may index A by
-  4 * w1[2:0] + head[31:30], not w3[19:15]. 56 `x19.xrd` uses across imdct, window, dequant,
-  pns, tns and stereo. x17 is to change the encoding so the source keeps its meaning; when it
-  lands, rebuild and re-run, and recheck any lib whose text would change.
+- **x19.xrd's X read index**: silicon reads A<{w1[2:0], head[31:30]}>; x17 185c2fa assembles
+  `x19.xrd s, #k` to it, so the source keeps its meaning. No lib text changed, and the tests
+  pass against x17 bb264cb, which also refuses `x19.xrd #0/#31` and `stx A0/A31` (none here)
+  and keeps an x02 X read into s0 out of the bundle (none here).
 - **ldy through e2 returns junk** (x17 fba720e refuses it): no lib here loads through e2; the
   tests pass against x17 fba720e.
 - **X in mode 0 is 0..0x1BFF** (`specs/questions.md` 6): stereo.sm (ST_T), pns.sm (PN_T,
