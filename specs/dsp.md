@@ -104,6 +104,12 @@ State (`ref/dsp/`):
   reversal is a table. Against double precision the error grows with loudness: 0.5 Q7 at a
   2^10 peak, 73 Q7 (0.57 PCM step) at 2^21.7, where `ref/aac` gives 41; 36 Q7 from `ref/aac`.
   Tables for x17: pre and post n4 complex each, FFT n4/2, reversal n4 (long 2.8K words).
+  x17 twin: `examples/lib/imdct.sm`, `imdct(...)` (x17 125458a), bit-exact with the model on
+  long blocks: halving, doublings, silence, a lone positive peak, noise under one large
+  last coefficient. About 255K bundles a long block (82% of a channel-frame), 31K for silence.
+  Each stage tracks its outputs' max and min branch-free (psel at 24 bits, measured) as it
+  stores, and the next stage applies the scaling with one rounded shift as it loads, so no
+  block scan between stages. The twiddles sit stage by stage in X; the reversal is a Y table.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
