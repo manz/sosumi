@@ -255,7 +255,8 @@ test "every codeword of every book" {
 }
 
 test "every entry stays below 0x8000, since ldy sign-extends" {
-    // x17 sm1_isa.md 409: a Y word of 0x8000 or more loads as negative.
+    // x17 docs/sm1/reference.md, `ldy` (silicon probe own-ldysx): a Y word of 0x8000 or more
+    // loads as negative.
     for (scalefactor.words) |w| try testing.expect(w < 0x8000);
     for (spectral) |t| for (t.words) |w| try testing.expect(w < 0x8000);
 }
