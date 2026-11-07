@@ -89,6 +89,12 @@ State (`ref/dsp/`):
   and reader position included. x17 twin: `examples/lib/sections.sm`, `aac_sections` and
   `aac_scalefactors` (x17 1b6ffc1), band lists in Y, running values in Y across huff_decode;
   about 130 bundles per band on random codes, ~6.5K for 49 long bands (2% of a channel-frame).
+- `aac/dequant.zig`: no F24. A channel comes out as words and one exponent (w * 2^e), the
+  exponent from each band's largest |q|, every word below 2^22.42 and the largest at least
+  2^19. |q|^(4/3) is a normalised direct table to 128, then the reference's Q13
+  interpolation with s found by comparisons and the step as one rounded multiply; the gain is
+  a 12-entry Q21 table and one more. Within 2 LSB of the word plus 2^-15 relative of both the
+  exact value and `ref/aac` on random channels; pulses match exactly.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
