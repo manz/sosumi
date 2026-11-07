@@ -94,7 +94,9 @@ State (`ref/dsp/`):
   2^19. |q|^(4/3) is a normalised direct table to 128, then the reference's Q13
   interpolation with s found by comparisons and the step as one rounded multiply; the gain is
   a 12-entry Q21 table and one more. Within 2 LSB of the word plus 2^-15 relative of both the
-  exact value and `ref/aac` on random channels; pulses match exactly.
+  exact value and `ref/aac` on random channels; pulses match exactly. x17 twin:
+  `examples/lib/dequant.sm`, `dq_channel` (x17 f9dbdec), bit-exact with the model on random
+  long and short channels; ~70K bundles for 49 dense long bands, up to ~83K short (22-27%).
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
