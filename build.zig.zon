@@ -3,11 +3,15 @@
     .fingerprint = 0xe89b578f15e0f164,
     .version = "0.0.0",
     .minimum_zig_version = "0.17.0",
-    .dependencies = .{},
+    .dependencies = .{
+        // the sm1 assembler and emulator; a path until x17 has a public URL
+        .x17 = .{ .path = "../x17" },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "ref",
+        "dsp",
         "LICENSE",
         "third_party",
         "NOTICE",

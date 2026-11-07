@@ -13,7 +13,21 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the reference model tests");
     const ref_t = b.addTest(.{ .root_module = ref_mod });
     test_step.dependOn(&b.addRunArtifact(ref_t).step);
-    test_step.dependOn(&b.addSystemCommand(&.{"sh", "tools/provenance/check.sh"}).step);
+    test_step.dependOn(&b.addSystemCommand(&.{ "sh", "tools/provenance/check.sh" }).step);
+
+    // the stage libraries in dsp/lib, run in x17's emulator against ref/dsp
+    const x17 = b.dependency("x17", .{ .target = target, .optimize = optimize });
+    const dsp_t = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("dsp/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "ref", .module = ref_mod },
+            .{ .name = "asm", .module = x17.module("asm") },
+            .{ .name = "emu", .module = x17.module("emu") },
+        },
+    }) });
+    test_step.dependOn(&b.addRunArtifact(dsp_t).step);
 
     const compare = b.addExecutable(.{
         .name = "compare",

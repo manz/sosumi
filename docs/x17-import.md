@@ -44,4 +44,4 @@ ALAC afterwards: rice, predictor, unmix, alac.
 
 | File | x17 commit | Twin | Verdict |
 |---|---|---|---|
-| bits.sm | 8ca5ba4 | `ref/dsp/bits.zig` | Substance matches the twin: MSB-first reads from 16-bit Y words, floor by the rounded right shift. Constants are ISA opcodes and ptst/jmp encodings. Fails point 3: cites `fact 409`, `377/387/389`, `94`; rewrite to `reference.md` `ldy` (own-ldysx), `ptst` (own-ptst-*), `jmp` (own-jmp). Not moved yet (waits on the module export). |
+| bits.sm | 8ca5ba4 | `ref/dsp/bits.zig` | **Moved** to `dsp/lib/bits.sm`. Substance matches the twin: MSB-first reads from 16-bit Y words, floor by the rounded right shift. Constants are ISA opcodes and ptst/jmp encodings. Citations rewritten to `reference.md` `ldy` (own-ldysx), `ptst` (own-ptst-c1-*, c10..c31), `jmp` (own-jmp), `x19`. Tests (`dsp/test/bits.zig`) check getbits and readn against `ref/dsp/bits.zig`'s Reader; x17's version used its own hand reader, and covered no readn. |
