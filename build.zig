@@ -25,6 +25,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "ref", .module = ref_mod },
             .{ .name = "asm", .module = x17.module("asm") },
             .{ .name = "emu", .module = x17.module("emu") },
+            .{ .name = "host", .module = x17.module("host") },
         },
     }) });
     test_step.dependOn(&b.addRunArtifact(dsp_t).step);

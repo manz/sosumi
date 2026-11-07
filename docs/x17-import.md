@@ -32,11 +32,16 @@ A file moves only when every point holds:
 
 Whatever fails a point is rewritten in sosumi from the twin, not patched in x17.
 
+Known hazard to check in every stage: an `x02.v s0, A0, ...` bundle with nothing to read loads
+X:[A0] into s0, and the same bundle's multiply slots see that write. It is harmless only where
+X:0 is guaranteed zero; otherwise the read goes to a dead register (x17 3015397 did this for
+predictor.sm).
+
 ## Order
 
 The AAC path first, each lib after what it calls:
 
-    bits, mem, add, pcm -> huffman -> sections -> dequant -> stereo -> pns -> tns -> imdct -> window
+    bits, mem, pcm -> huffman -> sections -> dequant -> stereo -> pns -> tns -> imdct -> window
 
 ALAC afterwards: rice, predictor, unmix, alac.
 
@@ -44,4 +49,7 @@ ALAC afterwards: rice, predictor, unmix, alac.
 
 | File | x17 commit | Twin | Verdict |
 |---|---|---|---|
-| bits.sm | 8ca5ba4 | `ref/dsp/bits.zig` | **Moved** to `dsp/lib/bits.sm`. Substance matches the twin: MSB-first reads from 16-bit Y words, floor by the rounded right shift. Constants are ISA opcodes and ptst/jmp encodings. Citations rewritten to `reference.md` `ldy` (own-ldysx), `ptst` (own-ptst-c1-*, c10..c31), `jmp` (own-jmp), `x19`. Tests (`dsp/test/bits.zig`) check getbits and readn against `ref/dsp/bits.zig`'s Reader; x17's version used its own hand reader, and covered no readn. |
+| bits.sm | 2f5d48b | `ref/dsp/bits.zig` | **Moved** to `dsp/lib/bits.sm`. Substance matches the twin: MSB-first reads from 16-bit Y words, floor by the rounded right shift. Constants are ISA opcodes and ptst/jmp encodings. Citations rewritten to `reference.md` `ldy` (own-ldysx), `ptst` (own-ptst-c1-*, c10..c31), `jmp` (own-jmp), `x19`. Tests (`dsp/test/bits.zig`) check getbits and readn against `ref/dsp/bits.zig`'s Reader; x17's version used its own hand reader, and covered no readn. |
+| mem.sm | c900697 | none | **Moved** to `dsp/lib/mem.sm`. Y-slot and A-register plumbing, no arithmetic of a stage. Citations added for `x17.mve`, `x19.a3`, `x12.aset`, `x03.agu`. No test of its own in x17; covered by the stages that include it, which come with them. |
+| pcm.sm | 2f5d48b | none | **Moved** to `dsp/lib/pcm.sm`. 16-bit passthrough, WAV and AIFF byte order. Ring shape, entry flags and status word follow `specs/aac.md`'s output contract; Y:0x3FFF / 0x4000 are x17's host stub, Y:0xFD81 and Y:0x3FF0 are ours. Test (`dsp/test/pcm.zig`) feeds three packets through x17's host model and reads the ring back. |
+| add.sm | 2f5d48b | none | Not moved: only x17's `examples/macros.sm` uses it; no codec lib does. |
