@@ -1,4 +1,7 @@
 .zig-cache/
 zig-out/
 zig-pkg/
-testdata/
+testdata/*
+!testdata/aac/
+testdata/aac/*
+!testdata/aac/*.pkts
