@@ -19,8 +19,8 @@ const F24 = fixed.F24;
 pub const max_order_long = 12;
 pub const max_order_short = 7;
 
-const max_bands_long = [13]u8{ 31, 31, 34, 40, 42, 51, 46, 46, 42, 42, 42, 39, 39 };
-const max_bands_short = [13]u8{ 9, 9, 10, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
+pub const max_bands_long = [13]u8{ 31, 31, 34, 40, 42, 51, 46, 46, 42, 42, 42, 39, 39 };
+pub const max_bands_short = [13]u8{ 9, 9, 10, 14, 14, 14, 14, 14, 14, 14, 14, 14, 14 };
 
 fn sinTable(comptime coef_res: u1) [16]F24 {
     @setEvalBranchQuota(10000);
@@ -37,7 +37,7 @@ fn sinTable(comptime coef_res: u1) [16]F24 {
     return t;
 }
 
-const sin_tables = [2][16]F24{ sinTable(0), sinTable(1) };
+pub const sin_tables = [2][16]F24{ sinTable(0), sinTable(1) };
 
 fn reflection(coef_res: u1, c: i4) F24 {
     const half: i32 = if (coef_res == 1) 8 else 4;

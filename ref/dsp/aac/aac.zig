@@ -5,6 +5,7 @@ pub const dequant = @import("dequant.zig");
 pub const imdct = @import("imdct.zig");
 pub const window = @import("window.zig");
 pub const stereo = @import("stereo.zig");
+pub const tns = @import("tns.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
