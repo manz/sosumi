@@ -1,5 +1,6 @@
 //! AAC-LC (ISO/IEC 14496-3).
 pub const asc = @import("asc.zig");
+pub const adts = @import("adts.zig");
 pub const raw = @import("raw.zig");
 pub const ics = @import("ics.zig");
 pub const huffman = @import("huffman.zig");

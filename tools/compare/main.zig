@@ -8,24 +8,6 @@
 const std = @import("std");
 const ref = @import("ref");
 
-const Adts = struct { config: [2]u8, header_len: usize, frame_len: usize };
-
-fn parseAdts(b: []const u8) !Adts {
-    if (b.len < 7 or b[0] != 0xFF or b[1] & 0xF6 != 0xF0) return error.NotAdts;
-    const protection_absent = b[1] & 1 == 1;
-    const profile: u8 = b[2] >> 6; // audio object type - 1
-    const freq: u8 = (b[2] >> 2) & 0xF;
-    const chans: u8 = ((b[2] & 1) << 2) | (b[3] >> 6);
-    const frame_len: usize = (@as(usize, b[3] & 3) << 11) | (@as(usize, b[4]) << 3) | (b[5] >> 5);
-    if (b[6] & 3 != 0) return error.MultipleRawBlocks;
-    const aot = profile + 1;
-    return .{
-        .config = .{ (aot << 3) | (freq >> 1), ((freq & 1) << 7) | (chans << 3) },
-        .header_len = if (protection_absent) 7 else 9,
-        .frame_len = frame_len,
-    };
-}
-
 fn wav(gpa: std.mem.Allocator, pcm: []const i16, channels: u16, rate: u32) ![]u8 {
     const data_len: u32 = @intCast(pcm.len * 2);
     var out = try gpa.alloc(u8, 44 + data_len);
@@ -205,12 +187,12 @@ pub fn main(init: std.process.Init) !void {
     var pos: usize = 0;
     var buf: [2048]i16 = undefined;
     while (chans == 0 and pos + 7 <= aac.len) {
-        const h = try parseAdts(aac[pos..]);
+        const h = try ref.aac.adts.parse(aac[pos..]);
         if (dec == null) dec = try ref.aac.decoder.Decoder.init(&h.config);
         if (use_dsp and dsp == null) dsp = try ref.dsp.aac.decoder.Decoder.init(&h.config);
         const au = aac[pos + h.header_len .. pos + h.frame_len];
         if (init.environ_map.get("STAGES")) |sf| {
-            if (frames == try std.fmt.parseInt(usize, sf, 10)) try stages(au, @intCast((h.config[0] & 7) << 1 | h.config[1] >> 7));
+            if (frames == try std.fmt.parseInt(usize, sf, 10)) try stages(au, h.freqIndex());
         }
         const n = @as(usize, dec.?.channels) * 1024;
         const res = if (dsp) |*d| d.decode(au, buf[0..n]) else dec.?.decode(au, buf[0..n]);
