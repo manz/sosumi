@@ -142,7 +142,7 @@ fn shiftSat(v: Word, sh: i32) Word {
     // |v| >= 2^(23 - sh) overflows; v = -2^(23 - sh) exactly fits, which the test leaves out
     // (a one-LSB saturation, never reached by IMDCT outputs, which are rounded products).
     if (atLeast(v, @intCast(23 - sh))) return top;
-    return ops.shl(v, @intCast(sh));
+    return shlLong(v, @intCast(sh));
 }
 
 /// v << s for s in 0..22: two shifts, since one takes 0..15.
@@ -332,4 +332,12 @@ test "outputs past the word saturate, as the reference's do" {
         if (o == word_max or o == word_min) hit = true;
     }
     try testing.expect(hit);
+}
+
+test "left shifts past 15 saturate or shift exactly" {
+    try testing.expectEqual(@as(Word, 3 << 18), shiftSat(3, 18));
+    try testing.expectEqual(@as(Word, -5 << 20), shiftSat(-5, 20));
+    try testing.expectEqual(word_max, shiftSat(8, 20));
+    try testing.expectEqual(word_min, shiftSat(-9, 20));
+    try testing.expectEqual(@as(Word, 1 << 22), shiftSat(1, 22));
 }
