@@ -13,6 +13,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run the reference model tests");
     const ref_t = b.addTest(.{ .root_module = ref_mod });
     test_step.dependOn(&b.addRunArtifact(ref_t).step);
+    test_step.dependOn(&b.addSystemCommand(&.{"sh", "tools/provenance/check.sh"}).step);
 
     const compare = b.addExecutable(.{
         .name = "compare",
