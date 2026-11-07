@@ -121,6 +121,18 @@ State (`ref/dsp/`):
   `win_start` / `win_stop` (58K) and `win_short` (72K), built from product, quarter, zero and
   accumulate runs into a scratch block, then one PCM and overlap pass. PCM leaves as 16-bit Y
   words.
+- `aac/stereo.zig`: M/S and intensity on the dequantiser's blocks. M/S moves both live channels
+  to max(eL, eR) + 1 (rounded shifts, 0 from 24 on), so m +- s are plain adds; intensity is one
+  rounded multiply by 2^(22 - b/4) at the band exponent eL + 1 - floor(pos / 4), the right block
+  taking the largest of its own and its intensity bands'. A channel with no spectral book only
+  takes the new exponent. Within 4 LSB of the result plus 2^-14 relative of the reference on
+  random pairs, long and short. PNS waits for a stage of its own (square root, reciprocal).
+  x17 twin: `examples/lib/stereo.sm`, `stereo_pair()` (x17 7218a61), bit-exact on random pairs:
+  per-band kinds, a flat (start, len, band) run list, then the exponent moves and the two passes;
+  up to 52K bundles a pair, most of it the moves.
+- Open risk: x19 op 23 right shifts past 23 are unmeasured, and the ALAC predictor, unmix, sxe
+  and the IMDCT lean on them (an emulator that refuses them fails those five tests). Probe
+  queued with Chikuma.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
