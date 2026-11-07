@@ -5,6 +5,7 @@ pub const raw = @import("raw.zig");
 pub const ics = @import("ics.zig");
 pub const huffman = @import("huffman.zig");
 pub const swb = @import("tables/swb.zig");
+pub const huffman_tables = @import("tables/huffman.zig");
 pub const iquant = @import("iquant.zig");
 pub const stereo = @import("stereo.zig");
 pub const tns = @import("tns.zig");
