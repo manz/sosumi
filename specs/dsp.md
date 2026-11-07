@@ -7,7 +7,7 @@ nothing runs on sm1 yet.
 
 Allowed: this repository's `ref/` and `specs/`, the forms x17 has measured with our own probe
 programs (`isa.toml`, evidence MEASURED), and the interface facts the dirty side returns through
-`specs/questions.md`. The image's sm1 programs, their disassembly and anything derived from how
+`specs/questions.md`. The device's sm1 programs and anything derived from how
 they work never cross into this repository (`docs/cleanroom.md`).
 
 ## Phase 0: measure the machine
@@ -78,7 +78,7 @@ State (`ref/dsp/`):
   x17 twin: `examples/lib/huffman.sm`, `huff_decode(dst)` (x17 2a2346d), checked against a
   bit-by-bit matcher on random complete codes, subtables included. About 51 bundles per
   codeword that resolves at the root, 31 per further step; untuned. ldy sign-extends
-  (x17 3d0d2bb, measured by Chikuma), so every table entry stays below 0x8000 (tested), and
+  (x17 3d0d2bb, measured on silicon), so every table entry stays below 0x8000 (tested), and
   the bit reader's refill adds 2^16 back to a packet word that loads negative.
   Spectral codewords: one x17 macro per book family (`spec_quad_s/u`, `spec_pair_s/u`,
   `spec_pair_esc`, x17 f15f180): fields off the leaf, offsets, sign bits, escapes, N > 8 to a
@@ -154,7 +154,7 @@ State (`ref/dsp/`):
   a fixed ~20K (the run list, the block's move): 20K to 50K a channel, 82K for one band over the
   whole window.
 - x19 op 23 past 23: the ALAC predictor, unmix, sxe and the IMDCT lean on right shifts beyond
-  23. Measured by Chikuma (x17 pins them): every count past +-23 shifts fully out, 0 on the
+  23. Measured on silicon (x17 pins them): every count past +-23 shifts fully out, 0 on the
   right (no wrap mod 32 or 64) and saturation on the left.
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
@@ -216,7 +216,7 @@ State (`ref/dsp/`):
     stereo match (x17 f90d010). Not yet: DSE/FIL elements, more than 2 channels (the X layout), the silicon memory map.
   - Cost (x17 d694cec, `zig build bench`): bundles per sample per channel, first packets,
     and the load at the fixture's rate. One bundle of any form takes about 37.4 ns on
-    silicon (26.7 M/s, MEASURED by Chikuma; the clock is unread, so one bundle per cycle
+    silicon (26.7 M/s, MEASURED on silicon; the clock is unread, so one bundle per cycle
     is INFERRED). 100% is real time.
 
     | fixture | total | rice | integrate | predict | unmix | other | load |
@@ -231,13 +231,13 @@ State (`ref/dsp/`):
     16-bit stereo now runs under real time. The predictor's tap is six bundles a term
     (four x02 bundles plus pcond and a jmp, down from 17): each x02 bundle carries an X read,
     an A step, a multiply and an add, and each product is exact as floor((c << 8) d / 2^24)
-    2^16 plus the undoubled cd[15:0] (x02 with w1[17] = 1, measured by Chikuma). pcond
+    2^16 plus the undoubled cd[15:0] (x02 with w1[17] = 1, measured on silicon). pcond
     ends the loop on the coefficient pointer itself, so no counter. Earlier: the adaptation
     split by the sign of the residual, sign extension in seven bundles, and in Rice the k
     search from the last k and prefix bits straight off the cache. Order 30 and 24-bit stay
     over: next are the adaptation loop (now the larger half of predict) and Rice. The tap's
     one-bundle combinations (X read with the old A, the x3 add reading before the writes,
-    pcond c30) are x17's model; their silicon run is pending with Chikuma.
+    pcond c30) are x17's model; their silicon run is pending.
 - Evidence: every case the layer leans on is gated in x17. The rounded right shift (0x19 op
   23, negative count, half up on negatives) and the rounded multiply on negative operands
   (half up at -0.5 and 0.5) were measured on silicon by PROBES.md's nine programs (x17

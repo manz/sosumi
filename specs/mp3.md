@@ -1,11 +1,10 @@
 # MP3 decoder
 
-Status: working draft. The reader side is read in RetailOS and reproduced in chikuma. The
-reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; the sm1 side is not started.
+Status: working draft. The reader side is known as host interface facts. The reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; the sm1 side is not started.
 
 ## Goal and boundary
 
-Decode MPEG audio Layer III frames into PCM on sm1, from whole frames handed over by chikuma's
+Decode MPEG audio Layer III frames into PCM on sm1, from whole frames handed over by the host's
 reader. MP3 is lossy: correctness means conformance to the MPEG decoding rules, plus matching
 the device's output wherever that is measured.
 
@@ -13,16 +12,16 @@ The boundary is fixed by the device, not chosen:
 
 - The reader cuts the file into frames. It skips the ID3v2 tag, finds the sync word, parses
   the header and passes **one whole frame per packet**, padding byte included (**MEASURED**:
-  417 and 418 bytes for a 128 kbps / 44.1 kHz stream, `audio_feed_chunk` 0x22006AD0, the same
-  feeder AAC goes through).
+  417 and 418 bytes for a 128 kbps / 44.1 kHz stream, through the same feeder AAC goes
+  through).
 - The decoder therefore owns everything from side information onward, including the bit
-  reservoir (`main_data_begin`). The ARM reader never touches main data (**INFERRED** from the
-  reader's code; nothing in it reads past the header).
+  reservoir (`main_data_begin`). The ARM reader never touches main data (**INFERRED**; nothing
+  in the reader reads past the header).
 
 ## Evidence labels
 
 - **MPEG**: ISO/IEC 11172-3 or 13818-3.
-- **FIRMWARE**: read in RetailOS's ARM code at the cited address.
+- **FIRMWARE**: host behaviour, handed over as an interface fact.
 - **MEASURED**: observed in a trace, an emulator run or on the device.
 - **FFMPEG**: PCM from the `ffmpeg` binary; a reference output, never proof of device behaviour. Its source is not read.
 - **INFERRED**: the best explanation of the above.
@@ -30,8 +29,7 @@ The boundary is fixed by the device, not chosen:
 
 ## What the device accepts
 
-From `mp3_header_decode` 0x22265A40 and `mp3_frame_length` 0x222657A8 (**FIRMWARE**; named by
-ipod-re's `ApplyMp3ReaderFindings.java`):
+The host's header parse and frame-length rule (**FIRMWARE**):
 
 | Property | Device rule | Evidence |
 |---|---|---|
@@ -46,16 +44,16 @@ ipod-re's `ApplyMp3ReaderFindings.java`):
 | Sync search | one 0x1000-byte block, gives up at offset 0xFFF | FIRMWARE |
 | Output | 16-bit PCM declared by the reader | FIRMWARE |
 | CRC-protected frames | whether sm1 checks or skips the CRC | OPEN |
-| Seek | Xing TOC, else VBRI, else bytes × ms / duration, then resync (`mp3_seek_ms` 0x222661A0) | FIRMWARE |
+| Seek | Xing TOC, else VBRI, else bytes × ms / duration, then resync | FIRMWARE |
 
 The decoder must handle MPEG-1, MPEG-2 and MPEG-2.5 Layer III: the device admits all three, so
 a file in any of them reaches sm1.
 
 ## The sm1 side
 
-- Codec mode 1 is MP3 (**MEASURED**: playing the MP3 podcast fires `codec_object_mp3`
-  0x2209DB60 and no other getter). The mode byte is ctx+0x58.
-- The output ring contract is AAC's (`specs/aac.md`, same `audio_output_ready` path,
+- Codec mode 1 is MP3 (**MEASURED**: playing the MP3 podcast selects mode 1 and no
+  other). The mode byte is ctx+0x58.
+- The output ring contract is AAC's (`specs/aac.md`, the same host output path,
   **FIRMWARE**); the per-frame unit count for 1152 samples is **OPEN**.
 - Entry point, reservoir storage and synthesis history are ours to lay out; the open interface
   questions are the ones listed in `specs/aac.md`.
@@ -85,8 +83,7 @@ frames have to be made; all of them can reach the decoder, per the table above.
 
 1. Reference PCM per fixture from at least two independent decoders (FFmpeg plus one
    standards-oriented decoder), versions recorded.
-2. Device output where it can be captured: RetailOS on QEMU (ipod-re's DAC capture tooling)
-   and on silicon.
+2. Device output where it can be captured: on QEMU (DAC capture) and on silicon.
 3. Compare per frame, then over stateful sequences: start, steady state, seek, corrupt frame,
    end of stream. Investigate any persistent mismatch rather than widening the tolerance.
 
@@ -105,13 +102,10 @@ MPEG-2), mixed blocks, MPEG-2 preflag, CRC-protected frames, free format. ISO/IE
 compliance streams would cover them (OPEN). minimp3's mixed-block band row at MPEG-2.5 8 kHz
 covers 48 coefficients in its long part where the subband count says 72 (OPEN).
 
-## Prior work in ipod-re
+## Host facts
 
-- `reports/sm1_spec.md`, "THE MP3 PATH, TRACED AND REPRODUCED": the reader chain and the trace.
-- chikuma `drivers/mp3.{h,c}`: ID3v2 skip, sync search, header parse, whole-frame packets;
-  `ui/tests/test_mp3.c` walks 400 frames of the real podcast.
-- `reports/sm1_audio_engine.md`: the QEMU model's output buffer is one decoded frame (1152
-  samples for MP3).
+- The QEMU model's output buffer is one decoded frame (1152 samples for MP3) (**MEASURED**).
+- The host's reader test walks 400 frames of the real podcast (**MEASURED**).
 
 ## References
 

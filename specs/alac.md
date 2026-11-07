@@ -1,7 +1,7 @@
 # ALAC decoder
 
-Status: working draft. The container and config path are read in RetailOS; no ALAC track has
-been traced and the sm1 side is not started. The reference model (`ref/alac/`) is bit-exact
+Status: working draft. The container and config path are known as host interface facts; no
+ALAC track has been traced and the sm1 side is not started. The reference model (`ref/alac/`) is bit-exact
 against Apple's decoder.
 
 ## Goal and boundary
@@ -10,9 +10,9 @@ Decode an ALAC packet into the original signed PCM on sm1. ALAC is lossless: dec
 must equal the encoded ones exactly. sm1's intermediate values may differ from a software
 decoder; the output may not.
 
-- RetailOS's m4a reader walks `moov > trak > mdia > minf > stbl` and its sample-entry dispatch
-  admits exactly `mp4a` and `alac` (`m4a_sample_entry_dispatch` 0x2213D04C, which hands the
-  parameters to `audio_codec_setup` 0x2208F458) (**FIRMWARE**).
+- The host's m4a reader walks `moov > trak > mdia > minf > stbl` and its sample-entry dispatch
+  admits exactly `mp4a` and `alac`, then hands the parameters to the host's codec setup
+  (**FIRMWARE**).
 - Packet boundaries come from `stsz`/`stsc`/`stco` in that reader, so the decoder receives whole
   packets plus the config (**FIRMWARE** for the reader; the per-packet hand-over is **INFERRED**
   from the AAC path, which uses the same feeder).
@@ -21,7 +21,7 @@ decoder; the output may not.
 
 - **APPLE-DOC**: Apple's ALAC package documentation.
 - **APPLE-REF**: Apple's released ALAC reference source.
-- **FIRMWARE**: read in RetailOS's ARM code at the cited address.
+- **FIRMWARE**: host behaviour, handed over as an interface fact.
 - **MEASURED**: observed in a trace, an emulator run or on the device.
 - **FFMPEG**: PCM from the `ffmpeg` binary; a reference output, never proof of device behaviour. Its source is not read.
 - **INFERRED**, **OPEN**.
@@ -34,7 +34,7 @@ Findings from other codecs, AAC included, are not evidence for ALAC.
 pb, mb, kb, channel count, max run, max frame bytes, average bit rate, sample rate
 (**APPLE-DOC**). Apple's defaults are pb = 40, mb = 10, kb = 14 (**APPLE-DOC**).
 
-What the device does with it (**FIRMWARE**, rt 0x08084640, ipod-re `reports/m4a_decoder.md`):
+What the host does with it (**FIRMWARE**):
 
     cfg+0x59  bit depth   printed: "alac: bit depth = %d, pb = 0x%X, mb = 0x%X, kb = 0x%X"
     cfg+0x5a  pb          -> ctx+0x06
@@ -52,15 +52,14 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
 
 ## The sm1 side
 
-- Codec mode 3 is ALAC: the ctx+0x58 == 3 case of the setup tail (0x2208FC80) copies
-  ctx+0x59..0x5c and prints the line above; `codec_object_alac` 0x220A737C returns the object
-  (**FIRMWARE**, ipod-re `ApplySm1IsaFindings.java`).
+- Codec mode 3 is ALAC: the host's setup copies ctx+0x59..0x5c for ctx+0x58 == 3 and prints
+  the line above (**FIRMWARE**).
 - Mode 3 is the only mode that fills codec-table entry 3; its entry 2 +0xc is 0x3F
-  (**FIRMWARE**, `reports/sm1_spec.md`).
+  (**FIRMWARE**).
 - Its per-packet tail writes a mode word of 0x801 and the packet length in **bits**
   (**FIRMWARE**).
-- The +0x58 gate (0x220B2648): mode 3 neither releases nor advances the input where modes 0, 1
-  and 5 do. chikuma does not model this yet (**FIRMWARE**; `reports/aac_on_silicon.md` §15).
+- The host's +0x58 gate: mode 3 neither releases nor advances the input where modes 0, 1
+  and 5 do (**FIRMWARE**).
 - Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
   object, so at least part of it runs there (**INFERRED**).
 - Entry point, buffers, persistent state, error path: **OPEN**. Nothing is traced: the dev
@@ -102,7 +101,7 @@ LFE. Mapping to speakers is the reader's job (device behaviour **OPEN**).
 1. Make ALAC fixtures (the dev library has none): mono and stereo, 16 and 24 bit, uncompressed
    and compressed packets, the default and a non-default frame length.
 2. Reference PCM from Apple's released decoder; FFmpeg as a second opinion.
-3. Trace one ALAC track on RetailOS (QEMU first) to confirm mode 3 fires and to capture the
+3. Trace one ALAC track on the device (QEMU first) to confirm mode 3 fires and to capture the
    feeder's packet hand-over.
 4. Compare sm1 output exactly. On a mismatch, find the first divergent stage; never relax the
    lossless requirement.
