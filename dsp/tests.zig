@@ -7,4 +7,5 @@ test {
     _ = @import("test/dequant.zig");
     _ = @import("test/stereo.zig");
     _ = @import("test/pns.zig");
+    _ = @import("test/tns.zig");
 }
