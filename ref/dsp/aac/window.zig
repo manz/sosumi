@@ -5,7 +5,7 @@
 //! Q5 word. The two bits of headroom cover any position's sum: at most three windowed terms (a
 //! long-only block followed by eight short ones, an illegal sequence, overlaps two short halves
 //! with the previous tail), each below 2^21, so the plain 24-bit adds never wrap and need no
-//! saturation. PCM is one rounded shift by 5 and a clamp by comparisons.
+//! saturation. PCM is one rounded shift by 5, then a clamp by comparisons.
 const std = @import("std");
 const ops = @import("../ops.zig");
 const ref_window = @import("../../aac/window.zig");
@@ -75,18 +75,14 @@ pub fn block(prev: u1, cur: u1, seq: ics.WindowSequence, t: Imdct, buf: *[2048]W
     }
 }
 
-/// PCM from the overlap and the block's first half; the second half becomes the overlap.
+/// PCM from the overlap and the block's first half; the second half becomes the overlap. The
+/// rounded shift comes first: its result is within 2^18, so the clamp's comparisons cannot wrap.
 pub fn synth(st: *State, cur: u1, buf: *const [2048]Word, out: *[1024]i16) void {
-    const lo: Word = -(1 << (15 + frac));
-    const hi: Word = (1 << (15 + frac)) - (1 << (frac - 1)) - 1;
     for (out, st.overlap, buf[0..1024]) |*o, a, b| {
-        // clamp before the shift, by comparisons, so the rounded shift stays in 16 bits; the
-        // sign picks the bound, so neither difference can wrap
-        var v = ops.add(a, b);
-        if (ops.isNeg(v)) {
-            if (ops.isNeg(ops.sub(v, lo))) v = lo;
-        } else if (ops.isNeg(ops.sub(hi, v))) v = hi;
-        o.* = @intCast(ops.rshr(v, frac));
+        var v = ops.rshr(ops.add(a, b), frac);
+        if (ops.isNeg(ops.sub(32767, v))) v = 32767;
+        if (ops.isNeg(ops.sub(v, -32768))) v = -32768;
+        o.* = @intCast(v);
     }
     st.overlap = buf[1024..2048].*;
     st.prev_shape = cur;
