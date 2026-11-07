@@ -2,4 +2,5 @@
 test {
     _ = @import("test/bits.zig");
     _ = @import("test/pcm.zig");
+    _ = @import("test/huffman.zig");
 }
