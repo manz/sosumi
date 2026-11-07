@@ -86,7 +86,9 @@ State (`ref/dsp/`):
 - `aac/sections.zig`: section data and scale factors into flat band arrays (band g * max_sfb
   + sfb, 120 words of book and of scale factor at most); book tests, the 0..255 range and the
   section overrun are sign tests. Matches `ref/aac` on built streams and random bytes, errors
-  and reader position included.
+  and reader position included. x17 twin: `examples/lib/sections.sm`, `aac_sections` and
+  `aac_scalefactors` (x17 1b6ffc1), band lists in Y, running values in Y across huff_decode;
+  about 130 bundles per band on random codes, ~6.5K for 49 long bands (2% of a channel-frame).
 - AAC plan. `ref/aac` leans on three things sm1 has not shown: a 48-bit sum of products
   (`cmul`), a normalise behind F24 (dequantisation, stereo tools, TNS) and saturating adds.
   The DSP-shaped AAC drops all three. Checking is two-level, since the arithmetic differs:
