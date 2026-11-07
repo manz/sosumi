@@ -130,6 +130,17 @@ State (`ref/dsp/`):
   x17 twin: `examples/lib/stereo.sm`, `stereo_pair()` (x17 7218a61), bit-exact on random pairs:
   per-band kinds, a flat (start, len, band) run list, then the exponent moves and the two passes;
   up to 52K bundles a pair, most of it the moves.
+- `aac/tns.zig`: the all-pole filter as a lattice on the Q23 reflection coefficients (the
+  step-up's direct-form coefficients reach C(12, 6), past any Q23 word): two rounded multiplies
+  a stage, every value kept inside (-2^22, 2^22) so the adds cannot wrap. A value outside puts the
+  run back, halves the whole block (exponent + 1) and filters again; past 48 halvings the run is
+  zeroed (a legal stream reaches that: twelve stages at k = -0.9957 have a DC gain near 2^94).
+  Against double precision: encoder-like filters within 2^-15 of the block's peak, and in both
+  classes closer than `ref/aac`'s F24 direct form (1.9e-5 vs 5.0e-5; full-range codes 1.3e-2 vs
+  1.9e-2, ill-conditioned for any 24-bit arithmetic). x17 twin: `examples/lib/tns.sm`,
+  `tns_channel()` (x17 19bef0f), bit-exact on random channels and on the give-up case; it walks the parsed
+  fields and finds the ranges itself. A long block costs 70K to 250K bundles without halvings,
+  up to 720K with several (scalar, about 16 bundles a stage and sample).
 - x19 op 23 past 23: the ALAC predictor, unmix, sxe and the IMDCT lean on right shifts beyond
   23. Measured by Chikuma (x17 pins them): every count past +-23 shifts fully out, 0 on the
   right (no wrap mod 32 or 64) and saturation on the left.
