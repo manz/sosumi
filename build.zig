@@ -33,6 +33,11 @@ pub fn build(b: *std.Build) void {
         const file = b.fmt("{s}.pkts", .{name});
         dsp_t.root_module.addAnonymousImport(file, .{ .root_source_file = b.path(b.fmt("testdata/aac/{s}", .{file})) });
     }
+    // the packets alacdec dumped, for alac_packet's test
+    for ([_][]const u8{ "mono.at", "tone.at", "white24.at", "clicks.c0.ff", "clicks.o30.ff", "mono.at.int", "tone.at.int" }) |name| {
+        const file = b.fmt("{s}.pkts", .{name});
+        dsp_t.root_module.addAnonymousImport(file, .{ .root_source_file = b.path(b.fmt("testdata/alac/{s}", .{file})) });
+    }
     test_step.dependOn(&b.addRunArtifact(dsp_t).step);
 
     const compare = b.addExecutable(.{

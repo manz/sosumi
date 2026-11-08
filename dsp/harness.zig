@@ -17,6 +17,10 @@ const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/imdct.sm", .text = @embedFile("lib/imdct.sm") },
     .{ .path = "lib/window.sm", .text = @embedFile("lib/window.sm") },
     .{ .path = "lib/aac.sm", .text = @embedFile("lib/aac.sm") },
+    .{ .path = "lib/rice.sm", .text = @embedFile("lib/rice.sm") },
+    .{ .path = "lib/predictor.sm", .text = @embedFile("lib/predictor.sm") },
+    .{ .path = "lib/unmix.sm", .text = @embedFile("lib/unmix.sm") },
+    .{ .path = "lib/alac.sm", .text = @embedFile("lib/alac.sm") },
 };
 
 fn load(ctx: ?*anyopaque, gpa: std.mem.Allocator, path: []const u8) anyerror!?[]u8 {

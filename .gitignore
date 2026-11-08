@@ -5,3 +5,6 @@ testdata/*
 !testdata/aac/
 testdata/aac/*
 !testdata/aac/*.pkts
+!testdata/alac/
+testdata/alac/*
+!testdata/alac/*.pkts
