@@ -12,4 +12,5 @@ test {
     _ = @import("test/window.zig");
     _ = @import("test/aac.zig");
     _ = @import("test/alac.zig");
+    _ = @import("test/size.zig");
 }
