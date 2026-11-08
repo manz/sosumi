@@ -194,37 +194,31 @@ even:   stx A6, s8
         nop()
         ; mb += pb * nd - floor(pb * mb / 2^9), with
         ; floor(pb * mb / 2^9) = (pb * hi) << 6 + floor(pb * lo / 2^9)
-grow:   ldy s6, e7
-        x19.alu s6, s6, s15, #SHIFT ; pb << 16
-        ldi s11, #7
-        alu s5, s7, s14, #OP_SUB ; nd - 1 < 2^16 (nd reaches 2^16)
-        x19.alu s5, s5, s11, #SHIFT
-        x02.mpy s1, s6, s5      ; pb * (nd - 1)
-        ldy s5, e7
-        alu s1, s1, s5, #OP_ADD ; pb * nd
+        ; mb' = mb + pb nd - floor(pb mb / 2^9), mb = hi 2^15 + lo, lo in [0, 2^15), hi < 2^10
+        ; (mb < 2^9 * 2^16): x18.mpy's integer products (x17 reference.md x18.mpy: P mod 2^24
+        ; and the signed P >> 24, operands >= 0), floor(pb mb / 2^9) = pb hi 2^6 +
+        ; floor(pb lo / 2^9), the last the high half of (pb 2^15) lo.
+grow:   ldy s6, e7              ; pb
+        x18.mpy s1, s0, s6, s7  ; pb nd < 2^23
         ldy s7, e1              ; hi
         ldy s8, e12             ; lo
-        x19.alu s2, s7, s11, #SHIFT
-        x02.mpy s3, s6, s2
         ldi s5, #6
-        x19.alu s3, s3, s5, #SHIFT ; (pb * hi) << 6
-        x19.alu s2, s8, s11, #SHIFT
-        x02.mpy s4, s6, s2
-        floorshr(s4, s4, 9)
-        alu s3, s3, s4, #OP_ADD ; decay
-        alu s1, s1, s3, #OP_SUB ; x = pb * nd - decay
-        floorshr(s3, s1, 15)    ; x hi
+        x19.alu s5, s6, s5, #SHIFT
+        x18.mpy s3, s0, s5, s7  ; pb hi 2^6 < 2^23
         ldi s5, #15
-        x19.alu s4, s3, s5, #SHIFT ; (x hi) << 15, |x hi| <= 2^8
-        alu s4, s1, s4, #OP_SUB ; x lo
-        alu s1, s7, s3, #OP_ADD ; hi + x hi
-        alu s2, s8, s4, #OP_ADD ; lo + x lo, below 2^16
-        floorshr(s3, s2, 15)    ; carry, 0 or 1
-        alu s1, s1, s3, #OP_ADD
-        x19.alu s3, s3, s5, #SHIFT ; carry << 15 (s5 = 15)
+        x19.alu s5, s6, s5, #SHIFT
+        x18.mpy s0, s4, s5, s8  ; floor(pb lo / 2^9)
+        alu s1, s1, s3, #OP_SUB
+        alu s1, s1, s4, #OP_SUB ; x = pb nd - decay
+        alu s2, s8, s1, #OP_ADD ; lo + x, |.| < 2^23
+        ldi s5, #0x7FFF
+        x18.and s3, s2, s5      ; lo'
         alu s2, s2, s3, #OP_SUB
+        ldi s5, #-15
+        x19.alu s2, s2, s5, #SHIFT ; the carry: an exact multiple of 2^15, so exact
+        alu s1, s7, s2, #OP_ADD ; hi'
         x17.sty e1, #1, #0
-        x17.sty e12, #2, #0
+        x17.sty e12, #3, #0
         ; a zero run follows when mb < 128 and samples are left
 zchk:   ldi s5, #0
         x17.sty e3, #5, #0      ; zmode = 0
