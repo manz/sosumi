@@ -16,9 +16,16 @@ const pk_status = pk + 7;
 
 pub const Error = error{ Unsupported, Status } || host.Error || std.mem.Allocator.Error;
 
+pub const Site = h.Site;
+
 /// alac_packet, assembled from the audited libs (caller frees).
 pub fn program(gpa: std.mem.Allocator) ![]u32 {
-    return h.assemble(gpa,
+    return programSites(gpa, null);
+}
+
+/// `program`, also listing each bundle's source line when `sites` is set.
+pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(Site)) ![]u32 {
+    return h.assembleSites(gpa,
         \\.include "lib/bits.sm"
         \\.include "lib/rice.sm"
         \\.include "lib/predictor.sm"
@@ -29,7 +36,7 @@ pub fn program(gpa: std.mem.Allocator) ![]u32 {
         \\        alac_packet()
         \\        x17.halt
         \\
-    );
+    , sites);
 }
 
 /// What alac.sm decodes: 16-bit output, at most two channels, frames up to 4096.
@@ -78,6 +85,11 @@ pub const Player = struct {
         self.status = self.host.state.y_mem.get(pk_status) orelse 0;
         if (self.status != 0) return error.Status;
         return self.host.pcm.items;
+    }
+
+    /// Counts, from now on, the bundles run at each syllable (x17 emulator `State.profile`).
+    pub fn profile(self: *Player, counts: []u64) void {
+        self.host.state.profile = counts;
     }
 
     /// Samples per channel of the last packet.

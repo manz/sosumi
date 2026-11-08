@@ -18,7 +18,12 @@ pub const frame_len = 1024;
 
 /// aac_packet, assembled from the audited libs (caller frees).
 pub fn program(gpa: std.mem.Allocator) ![]u32 {
-    return h.assemble(gpa,
+    return programSites(gpa, null);
+}
+
+/// `program`, also listing each bundle's source line when `sites` is set.
+pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u32 {
+    return h.assembleSites(gpa,
         \\.include "lib/bits.sm"
         \\.include "lib/mem.sm"
         \\.include "lib/huffman.sm"
@@ -34,7 +39,7 @@ pub fn program(gpa: std.mem.Allocator) ![]u32 {
         \\        aac_packet()
         \\        x17.halt
         \\
-    );
+    , sites);
 }
 
 /// What aac.sm decodes: AAC-LC the device accepts, one or two channels, 1024-sample frames.
@@ -108,6 +113,11 @@ pub const Player = struct {
         try stageTables(&p.state, gpa, asc.freq_index);
         try h.putY(&p.state, gpa, ak_nch, @intCast(nch));
         return p;
+    }
+
+    /// Counts, from now on, the bundles run at each syllable (x17 emulator `State.profile`).
+    pub fn profile(self: *Player, counts: []u64) void {
+        self.state.profile = counts;
     }
 
     pub fn deinit(self: *Player) void {

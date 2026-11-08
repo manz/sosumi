@@ -4,10 +4,14 @@
 //!
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
+//!     dspplay in.m4a --profile
 //!
 //! One emulator, packets in order, as the device runs them. The summary gives the device's
 //! speed from the bundles run, at 37.4 ns a bundle (x17 handbook §1): below 1x real time the
 //! program is too slow for the chip, and the emulator, about as fast, stutters with it.
+//!
+//! --profile writes no audio either: it counts the bundles run at each source line and prints
+//! the busiest lines, the macro calls they sit in, and how full the bundles run are.
 //!
 //! --check writes no audio: it decodes every packet with the ref/dsp twin too and reports each
 //! frame whose samples differ, then a summary; it exits 1 on any difference.
@@ -62,15 +66,105 @@ const Tally = struct {
     }
 };
 
+const Mode = enum { play, check, profile };
+
+fn usage() noreturn {
+    std.debug.print("usage: dspplay in.m4a|in.aac [--check | --profile]\n", .{});
+    std.process.exit(2);
+}
+
+/// Bundles run per source line, kept while a track plays.
+const Profile = struct {
+    sites: std.ArrayList(dsp.Site) = .empty,
+    counts: []u64 = &.{},
+
+    fn deinit(self: *Profile, gpa: std.mem.Allocator) void {
+        self.sites.deinit(gpa);
+        gpa.free(self.counts);
+    }
+
+    const Row = struct { key: []const u8, bundles: u64, syllables: u64, text: []const u8 };
+
+    fn add(gpa: std.mem.Allocator, m: *std.StringArrayHashMapUnmanaged(Row), key: []u8, n: u64, len: u64, text: []const u8) !void {
+        const g = try m.getOrPut(gpa, key);
+        if (g.found_existing) gpa.free(key) else g.value_ptr.* = .{ .key = key, .bundles = 0, .syllables = 0, .text = text };
+        g.value_ptr.bundles += n;
+        g.value_ptr.syllables += n * len;
+    }
+
+    fn top(m: *std.StringArrayHashMapUnmanaged(Row), title: []const u8, total: u64, packets: usize, rows: usize) void {
+        const Ctx = struct {
+            v: []const Row,
+            pub fn lessThan(c: @This(), a: usize, b: usize) bool {
+                return c.v[a].bundles > c.v[b].bundles;
+            }
+        };
+        m.sort(Ctx{ .v = m.values() });
+        std.debug.print("\n{s}\n  bundles/pkt     %  syl/bundle  where\n", .{title});
+        for (m.values()[0..@min(rows, m.count())]) |r| {
+            if (r.bundles == 0) break;
+            std.debug.print("  {d:>11} {d:>5.1}  {d:>10.2}  {s}  {s}\n", .{
+                r.bundles / @max(1, packets),
+                100 * @as(f64, @floatFromInt(r.bundles)) / @as(f64, @floatFromInt(total)),
+                @as(f64, @floatFromInt(r.syllables)) / @as(f64, @floatFromInt(r.bundles)),
+                r.key,
+                r.text,
+            });
+        }
+    }
+
+    fn report(self: *Profile, gpa: std.mem.Allocator, packets: usize) !void {
+        var lines: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        var calls: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        var idle: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        var files: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        defer for ([_]*std.StringArrayHashMapUnmanaged(Row){ &lines, &calls, &idle, &files }) |m| {
+            for (m.keys()) |k| gpa.free(k);
+            m.deinit(gpa);
+        };
+        var total: u64 = 0;
+        var syl: u64 = 0;
+        var nops: u64 = 0;
+        const items = self.sites.items;
+        for (items, 0..) |*st, i| {
+            const n = self.counts[st.pc];
+            if (n == 0) continue;
+            const end = if (i + 1 < items.len) items[i + 1].pc else self.counts.len;
+            const len: u64 = end - st.pc;
+            total += n;
+            syl += n * len;
+            const text = st.text.get();
+            // nop() is `alu s0, s0, s0, #0` (bits.sm): a bundle that does nothing
+            if (std.mem.startsWith(u8, std.mem.trimStart(u8, text, " "), "alu s0, s0, s0, #0")) {
+                nops += n;
+                try add(gpa, &idle, try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.call_file.get(), st.call_line }), n, len, "");
+            }
+            try add(gpa, &lines, try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.file.get(), st.line }), n, len, text);
+            try add(gpa, &files, try gpa.dupe(u8, st.file.get()), n, len, "");
+            const ck = if (st.call_line != 0) try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.call_file.get(), st.call_line }) else try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.file.get(), st.line });
+            try add(gpa, &calls, ck, n, len, "");
+        }
+        if (total == 0) return;
+        std.debug.print("\nprofile: {d} bundles/packet, {d:.2} syllables per bundle (7 at most), nop bundles {d:.1}%\n", .{
+            total / @max(1, packets),
+            @as(f64, @floatFromInt(syl)) / @as(f64, @floatFromInt(total)),
+            100 * @as(f64, @floatFromInt(nops)) / @as(f64, @floatFromInt(total)),
+        });
+        top(&files, "by file", total, packets, 12);
+        top(&lines, "busiest source lines", total, packets, 30);
+        top(&calls, "busiest macro calls (the line that expanded them)", total, packets, 15);
+        top(&idle, "nop bundles by the line that wrote them", total, packets, 15);
+    }
+};
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
     const args = try init.minimal.args.toSlice(init.arena.allocator());
-    const check = args.len == 3 and std.mem.eql(u8, args[2], "--check");
-    if (args.len < 2 or (args.len == 3 and !check) or args.len > 3) {
-        std.debug.print("usage: dspplay in.m4a|in.aac [--check]\n", .{});
-        std.process.exit(2);
-    }
+    var mode: Mode = .play;
+    if (args.len == 3) {
+        mode = if (std.mem.eql(u8, args[2], "--check")) .check else if (std.mem.eql(u8, args[2], "--profile")) .profile else usage();
+    } else if (args.len != 2) usage();
     const file = try std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .limited(1 << 31));
     defer gpa.free(file);
 
@@ -81,18 +175,18 @@ pub fn main(init: std.process.Init) !void {
 
     if (ref.aac.adts.parse(file)) |hd| {
         var u: Units = .{ .adts = .{ .file = file } };
-        return playAac(gpa, w, &hd.config, &u, check);
+        return playAac(gpa, w, &hd.config, &u, mode);
     } else |_| {}
     var packets = try mp4.Packets.init(file);
     std.debug.print("{s}: {d} packets\n", .{ args[1], packets.t.count });
     if (packets.t.codec == .aac) {
         var u: Units = .{ .mp4 = &packets };
-        return playAac(gpa, w, packets.t.cookie, &u, check);
+        return playAac(gpa, w, packets.t.cookie, &u, mode);
     }
-    return playAlac(gpa, w, &packets, check);
+    return playAlac(gpa, w, &packets, mode);
 }
 
-fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, check: bool) !void {
+fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, mode: Mode) !void {
     const cfg = try ref.alac.config.parse(packets.t.cookie);
     const nch: usize = cfg.channels;
     std.debug.print("ALAC, {d} ch, {d} bit, {d} Hz, frame {d}\n", .{ nch, cfg.bit_depth, cfg.sample_rate, cfg.frame_length });
@@ -100,12 +194,20 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, ch
         std.debug.print("alac_packet decodes 16-bit, 1 or 2 channel tracks with frames up to 4096\n", .{});
         std.process.exit(1);
     }
-    if (!check) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{cfg.sample_rate});
+    const check = mode == .check;
+    if (mode == .play) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{cfg.sample_rate});
 
-    const prog = try dsp.program(gpa);
+    var prof: Profile = .{};
+    defer prof.deinit(gpa);
+    const prog = try dsp.programSites(gpa, if (mode == .profile) &prof.sites else null);
     defer gpa.free(prog);
     var player = try dsp.Player.init(gpa, prog, cfg);
     defer player.deinit();
+    if (mode == .profile) {
+        prof.counts = try gpa.alloc(u64, prog.len);
+        @memset(prof.counts, 0);
+        player.profile(prof.counts);
+    }
     var twin = try ref.dsp.alac.decoder.Decoder.init(gpa, cfg);
     defer twin.deinit();
     const want = try gpa.alloc(i32, @as(usize, cfg.frame_length) * nch);
@@ -135,10 +237,12 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, ch
             }
             continue;
         }
+        if (mode == .profile) continue;
         // the player went away (a closed pipe): stop quietly
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(cfg.sample_rate, check, "ref/dsp/alac");
+    if (mode == .profile) try prof.report(gpa, t.packets);
 }
 
 /// An AAC track's access units in order, from an .m4a's packets or an ADTS stream's frames.
@@ -160,7 +264,7 @@ const Units = union(enum) {
     }
 };
 
-fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units: *Units, check: bool) !void {
+fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units: *Units, mode: Mode) !void {
     var r = ref.bits.BitReader.init(config);
     const asc = try ref.aac.asc.parse(&r);
     const nch: usize = asc.channel_config;
@@ -169,13 +273,21 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
         std.debug.print("aac_packet decodes AAC-LC, 1 or 2 channels, 1024-sample frames, rates from 48 kHz down\n", .{});
         std.process.exit(1);
     }
-    if (!check) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{asc.sample_rate});
+    const check = mode == .check;
+    if (mode == .play) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{asc.sample_rate});
     const n = dsp.aac.frame_len * nch;
 
-    const prog = try dsp.aac.program(gpa);
+    var prof: Profile = .{};
+    defer prof.deinit(gpa);
+    const prog = try dsp.aac.programSites(gpa, if (mode == .profile) &prof.sites else null);
     defer gpa.free(prog);
     var player = try dsp.aac.Player.init(gpa, prog, asc);
     defer player.deinit();
+    if (mode == .profile) {
+        prof.counts = try gpa.alloc(u64, prog.len);
+        @memset(prof.counts, 0);
+        player.profile(prof.counts);
+    }
     var twin = try ref.dsp.aac.decoder.Decoder.init(config);
     var want: [2 * dsp.aac.frame_len]i16 = undefined;
     const silence = try gpa.alloc(i16, n);
@@ -203,7 +315,9 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
             }
             continue;
         }
+        if (mode == .profile) continue;
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(asc.sample_rate, check, "ref/dsp/aac");
+    if (mode == .profile) try prof.report(gpa, t.packets);
 }
