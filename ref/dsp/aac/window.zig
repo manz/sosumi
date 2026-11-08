@@ -10,6 +10,7 @@ const std = @import("std");
 const ops = @import("../ops.zig");
 const ref_window = @import("../../aac/window.zig");
 const ics = @import("../../aac/ics.zig");
+const sine = @import("sine.zig");
 
 const Word = ops.Word;
 
@@ -23,9 +24,46 @@ fn quarter(comptime n: usize, rise: [n]Word) [n]Word {
     return t;
 }
 
-/// Rising halves, w / 4 in Q23, by window_shape.
-pub const long = [2][1024]Word{ quarter(1024, ref_window.long[0]), quarter(1024, ref_window.long[1]) };
-pub const short = [2][128]Word{ quarter(128, ref_window.short[0]), quarter(128, ref_window.short[1]) };
+/// The sine rise from the shared table (docs/aac-mode0.md): sin((2n + 1) pi / 4096) long,
+/// sin((16n + 8) pi / 4096) short.
+fn sineLong() [1024]Word {
+    return sine.odd;
+}
+
+fn sineShort() [128]Word {
+    @setEvalBranchQuota(100000);
+    var t: [128]Word = undefined;
+    for (&t, 0..) |*e, n| e.* = sine.four[4 * n + 2];
+    return t;
+}
+
+/// The KBD rise as Y holds it: w / 4 to 16 significant bits, (w / 4) / 2^6 rounded, the top
+/// (2^15, the rise reaching 1) saturated to 2^15 - 1.
+fn kbdY(comptime n: usize, rise: [n]Word) [n]i16 {
+    @setEvalBranchQuota(100000);
+    var t: [n]i16 = undefined;
+    for (&t, quarter(n, rise)) |*d, w| d.* = @intCast(@min(ops.rshr(w, kbd_shift), std.math.maxInt(i16)));
+    return t;
+}
+
+fn fromY(comptime n: usize, y: [n]i16) [n]Word {
+    @setEvalBranchQuota(100000);
+    var t: [n]Word = undefined;
+    for (&t, y) |*d, v| d.* = ops.shl(v, kbd_shift);
+    return t;
+}
+
+/// The KBD words' shift back to w / 4 in Q23.
+pub const kbd_shift = 6;
+
+/// The KBD rises, 16-bit, for Y: long (alpha 4) and short (alpha 6).
+pub const kbd_long_y = kbdY(1024, ref_window.long[1]);
+pub const kbd_short_y = kbdY(128, ref_window.short[1]);
+
+/// Rising halves, w / 4 in Q23, by window_shape: the sine shape from the shared 24-bit table,
+/// KBD from its 16-bit Y words.
+pub const long = [2][1024]Word{ quarter(1024, sineLong()), fromY(1024, kbd_long_y) };
+pub const short = [2][128]Word{ quarter(128, sineShort()), fromY(128, kbd_short_y) };
 
 pub const State = struct {
     overlap: [1024]Word = @splat(0),
@@ -136,7 +174,9 @@ fn randomBlock(rnd: std.Random, amp: i32, seq: ics.WindowSequence, l: *[2048]Wor
     return .{ .long = l };
 }
 
-test "window and overlap within 1 PCM step of double precision" {
+/// The worst |PCM - double precision| over every transition, with `shapes` picking each frame's
+/// window_shape.
+fn worstStep(shapes: enum { sine, both }) f64 {
     var prng = std.Random.DefaultPrng.init(0x3D1);
     const rnd = prng.random();
     // every transition, legal or not, both shapes, loud enough to clip
@@ -147,7 +187,7 @@ test "window and overlap within 1 PCM step of double precision" {
     var s: [8][256]Word = undefined;
     var worst: f64 = 0;
     for (seqs, 0..) |seq, f| {
-        const cur: u1 = @intCast(f & 1);
+        const cur: u1 = if (shapes == .sine) 0 else @intCast(f & 1);
         const amp: i32 = if (f == 9) (1 << 23) - 1 else 1 << 21; // one clipping frame
         const t = randomBlock(rnd, amp, seq, &l, &s);
         var buf: [2048]Word = undefined;
@@ -159,7 +199,22 @@ test "window and overlap within 1 PCM step of double precision" {
         direct(&dst, prev, cur, seq, t, &want);
         for (pcm, want) |p, w| worst = @max(worst, @abs(@as(f64, @floatFromInt(p)) - w));
     }
-    try testing.expect(worst <= 1.0);
+    return worst;
+}
+
+test "window and overlap: sine within 1 PCM step of double precision, KBD within 2" {
+    // KBD's 16-bit halves (docs/aac-mode0.md) are off by at most 2^-16; two full-scale terms
+    // add up to one step more.
+    const s = worstStep(.sine);
+    const b = worstStep(.both);
+    std.testing.expect(s <= 1.0) catch |e| {
+        std.log.err("sine {d}", .{s});
+        return e;
+    };
+    std.testing.expect(b <= 2.0) catch |e| {
+        std.log.err("both {d}", .{b});
+        return e;
+    };
 }
 
 test "the worst-case sum fits 24 bits" {

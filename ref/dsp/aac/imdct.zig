@@ -18,7 +18,7 @@
 const std = @import("std");
 const ops = @import("../ops.zig");
 const ref = @import("../../aac/imdct.zig");
-const window = @import("../../aac/window.zig");
+const sine = @import("sine.zig");
 
 const Word = ops.Word;
 const word_max: Word = std.math.maxInt(Word);
@@ -28,34 +28,36 @@ pub const pcm_frac = ref.pcm_frac;
 
 pub const Cx = struct { re: Word, im: Word };
 
-fn expj(comptime theta: f64) Cx {
-    return .{ .re = window.q23Sat(@cos(theta)), .im = window.q23Sat(@sin(theta)) };
+/// exp(-j m pi / 4096), from the shared sine table (m in [0, 4096]).
+fn expk(m: usize) Cx {
+    return .{ .re = sine.cos(m), .im = ops.sub(0, sine.sin(m)) };
 }
 
-/// The tables an x17 routine loads: twiddles in Q23 and the bit-reversal permutation.
+/// The tables an x17 routine loads: twiddles in Q23, all read from `sine` (docs/aac-mode0.md),
+/// and the bit-reversal permutation.
 pub fn Tables(comptime n2: usize) type {
     return struct {
         pub const n4 = n2 / 2;
         pub const stages = std.math.log2_int(usize, n4);
-        /// exp(-j pi (n + 1/4) / n2)
+        /// exp(-j pi (n + 1/4) / n2): m = (4n + 1) * 1024 / n2
         pub const pre: [n4]Cx = blk: {
             @setEvalBranchQuota(200000);
             var t: [n4]Cx = undefined;
-            for (&t, 0..) |*e, n| e.* = expj(-std.math.pi * (@as(f64, @floatFromInt(n)) + 0.25) / n2);
+            for (&t, 0..) |*e, n| e.* = expk((4 * n + 1) * (1024 / n2));
             break :blk t;
         };
-        /// exp(-j pi k / n2)
+        /// exp(-j pi k / n2): m = k * 4096 / n2
         pub const post: [n4]Cx = blk: {
             @setEvalBranchQuota(200000);
             var t: [n4]Cx = undefined;
-            for (&t, 0..) |*e, k| e.* = expj(-std.math.pi * @as(f64, @floatFromInt(k)) / n2);
+            for (&t, 0..) |*e, k| e.* = expk(k * (4096 / n2));
             break :blk t;
         };
-        /// exp(-j 2 pi k / n4)
+        /// exp(-j 2 pi k / n4): m = k * 8192 / n4
         pub const fft: [n4 / 2]Cx = blk: {
             @setEvalBranchQuota(200000);
             var t: [n4 / 2]Cx = undefined;
-            for (&t, 0..) |*e, k| e.* = expj(-2 * std.math.pi * @as(f64, @floatFromInt(k)) / n4);
+            for (&t, 0..) |*e, k| e.* = expk(k * (8192 / n4));
             break :blk t;
         };
         /// rev[i]: i with its `stages` bits reversed.
