@@ -1,8 +1,11 @@
 # ALAC decoder
 
 Status: working draft. The container and config path are known as host interface facts; no
-ALAC track has been traced and the sm1 side is not started. The reference model (`ref/alac/`) is bit-exact
-against Apple's decoder.
+ALAC track has been traced. The reference model (`ref/alac/`) is bit-exact against Apple's
+decoder. `dsp/lib/alac.sm` decodes 16-bit, 1 or 2 channel packets on sm1 under x17's host model,
+bit for bit against `ref/dsp/alac` (`dspplay --check`); its speed is in `dspplay`'s summary.
+How the device splits ALAC between the host and sm1, and which streams it accepts, are
+`specs/questions.md` 11 and 12.
 
 ## Goal and boundary
 
