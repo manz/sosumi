@@ -4,7 +4,7 @@
 //!
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
-//!     dspplay in.m4a --profile
+//!     dspplay in.m4a --profile[=rows]
 //!
 //! One emulator, packets in order, as the device runs them. The summary gives the device's
 //! speed from the bundles run, at 37.4 ns a bundle (x17 handbook §1): below 1x real time the
@@ -68,8 +68,11 @@ const Tally = struct {
 
 const Mode = enum { play, check, profile };
 
+/// Rows per table in --profile's report (--profile=N).
+var profile_rows: usize = 15;
+
 fn usage() noreturn {
-    std.debug.print("usage: dspplay in.m4a|in.aac [--check | --profile]\n", .{});
+    std.debug.print("usage: dspplay in.m4a|in.aac [--check | --profile[=rows]]\n", .{});
     std.process.exit(2);
 }
 
@@ -113,12 +116,14 @@ const Profile = struct {
         }
     }
 
-    fn report(self: *Profile, gpa: std.mem.Allocator, packets: usize) !void {
+    fn report(self: *Profile, gpa: std.mem.Allocator, packets: usize, rows: usize) !void {
         var lines: std.StringArrayHashMapUnmanaged(Row) = .empty;
         var calls: std.StringArrayHashMapUnmanaged(Row) = .empty;
         var idle: std.StringArrayHashMapUnmanaged(Row) = .empty;
         var files: std.StringArrayHashMapUnmanaged(Row) = .empty;
-        defer for ([_]*std.StringArrayHashMapUnmanaged(Row){ &lines, &calls, &idle, &files }) |m| {
+        var size_files: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        var size_calls: std.StringArrayHashMapUnmanaged(Row) = .empty;
+        defer for ([_]*std.StringArrayHashMapUnmanaged(Row){ &lines, &calls, &idle, &files, &size_files, &size_calls }) |m| {
             for (m.keys()) |k| gpa.free(k);
             m.deinit(gpa);
         };
@@ -126,11 +131,19 @@ const Profile = struct {
         var syl: u64 = 0;
         var nops: u64 = 0;
         const items = self.sites.items;
+        var size: u64 = 0;
+        var size_nops: u64 = 0;
         for (items, 0..) |*st, i| {
-            const n = self.counts[st.pc];
-            if (n == 0) continue;
             const end = if (i + 1 < items.len) items[i + 1].pc else self.counts.len;
             const len: u64 = end - st.pc;
+            // program size: syllables per file, and per the call that expanded them
+            size += len;
+            if (std.mem.startsWith(u8, std.mem.trimStart(u8, st.text.get(), " "), "alu s0, s0, s0, #0")) size_nops += len;
+            try add(gpa, &size_files, try gpa.dupe(u8, st.file.get()), len, 1, "");
+            const sk = if (st.call_line != 0) try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.call_file.get(), st.call_line }) else try std.fmt.allocPrint(gpa, "{s}:{d}", .{ st.file.get(), st.line });
+            try add(gpa, &size_calls, sk, len, 1, "");
+            const n = self.counts[st.pc];
+            if (n == 0) continue;
             total += n;
             syl += n * len;
             const text = st.text.get();
@@ -151,9 +164,12 @@ const Profile = struct {
             100 * @as(f64, @floatFromInt(nops)) / @as(f64, @floatFromInt(total)),
         });
         top(&files, "by file", total, packets, 12);
-        top(&lines, "busiest source lines", total, packets, 30);
-        top(&calls, "busiest macro calls (the line that expanded them)", total, packets, 15);
-        top(&idle, "nop bundles by the line that wrote them", total, packets, 15);
+        top(&lines, "busiest source lines", total, packets, 2 * rows);
+        top(&calls, "busiest macro calls (the line that expanded them)", total, packets, rows);
+        top(&idle, "nop bundles by the line that wrote them", total, packets, rows);
+        std.debug.print("\nprogram: {d} syllables, {d} of them nops\n", .{ size, size_nops });
+        top(&size_files, "syllables by file (first column; ignore the rest)", size, 1, 20);
+        top(&size_calls, "syllables by the call that expanded them", size, 1, rows);
     }
 };
 
@@ -163,7 +179,8 @@ pub fn main(init: std.process.Init) !void {
     const args = try init.minimal.args.toSlice(init.arena.allocator());
     var mode: Mode = .play;
     if (args.len == 3) {
-        mode = if (std.mem.eql(u8, args[2], "--check")) .check else if (std.mem.eql(u8, args[2], "--profile")) .profile else usage();
+        mode = if (std.mem.eql(u8, args[2], "--check")) .check else if (std.mem.startsWith(u8, args[2], "--profile")) .profile else usage();
+        if (std.mem.startsWith(u8, args[2], "--profile=")) profile_rows = std.fmt.parseInt(usize, args[2]["--profile=".len..], 10) catch usage();
     } else if (args.len != 2) usage();
     const file = try std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .limited(1 << 31));
     defer gpa.free(file);
@@ -242,7 +259,7 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, mo
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(cfg.sample_rate, check, "ref/dsp/alac");
-    if (mode == .profile) try prof.report(gpa, t.packets);
+    if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
 }
 
 /// An AAC track's access units in order, from an .m4a's packets or an ADTS stream's frames.
@@ -319,5 +336,5 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(asc.sample_rate, check, "ref/dsp/aac");
-    if (mode == .profile) try prof.report(gpa, t.packets);
+    if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
 }
