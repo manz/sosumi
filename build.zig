@@ -40,6 +40,31 @@ pub fn build(b: *std.Build) void {
     }
     test_step.dependOn(&b.addRunArtifact(dsp_t).step);
 
+    // ALAC on sm1, played through x17's host model
+    const dspplay = b.addExecutable(.{
+        .name = "dspplay",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/dspplay/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "ref", .module = ref_mod },
+                .{ .name = "dsp", .module = b.createModule(.{
+                    .root_source_file = b.path("dsp/player.zig"),
+                    .target = target,
+                    .optimize = optimize,
+                    .imports = &.{
+                        .{ .name = "ref", .module = ref_mod },
+                        .{ .name = "asm", .module = x17.module("asm") },
+                        .{ .name = "emu", .module = x17.module("emu") },
+                        .{ .name = "host", .module = x17.module("host") },
+                    },
+                }) },
+            },
+        }),
+    });
+    b.installArtifact(dspplay);
+
     const compare = b.addExecutable(.{
         .name = "compare",
         .root_module = b.createModule(.{
