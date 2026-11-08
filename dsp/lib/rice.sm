@@ -153,31 +153,14 @@ top:    ldy s7, e4
         ldi s5, #3
         alu s1, s1, s5, #OP_ADD ; y = q + 3
         ldy s8, e8              ; kb
-        ldy s2, e6              ; k from the last sample (y >= 3, so k >= 1 holds)
-lgd:    x19.alu s7, s14, s2, #SHIFT ; 2^k
-        alu s12, s1, s7, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; y < 2^k: down one
-        jmp #IF_NOT, #3, lg
-        alu s5, s2, s14, #OP_SUB ; (delay slot) k - 1
-        nop()
-        alu s2, s5, s0, #OP_ADD
-        jmp #ALWAYS, #0, lgd
-        nop()
-        nop()
-lg:     alu s5, s2, s14, #OP_ADD ; t = k + 1
-        alu s12, s8, s5, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; t > kb: stop
-        jmp #3, #3, lgdone
-        x19.alu s7, s14, s5, #SHIFT ; (delay slot) 2^t
-        alu s12, s1, s7, #OP_SUB ; (delay slot) y - 2^t
-        ptst p3, s0, #LT12, #PTST ; y < 2^t: stop
-        jmp #3, #3, lgdone
-        nop()
-        nop()
-        alu s2, s5, s0, #OP_ADD ; k = t
-        jmp #ALWAYS, #0, lg
-        nop()
-        nop()
+        ; k = min(lg(y), kb): lg(y) = 22 - norm(y) for y > 0 at 24 bits (x17 reference.md x01
+        ; norm, own-x01norm: norm(1) = 22, norm(0x100) = 14), the min by x01.selneg (m = 7)
+        x01.norm s2, s1
+        ldi s5, #22
+        alu s2, s5, s2, #OP_SUB ; lg(y)
+        alu s2, s2, s8, #OP_SUB ; lg - kb
+        x01.selneg s2, s2, #0   ; min(lg - kb, 0)
+        alu s2, s2, s8, #OP_ADD ; k
 lgdone: x17.sty e6, #2, #0      ; keep k
         x19.alu s1, s14, s2, #SHIFT
         alu s1, s1, s14, #OP_SUB ; m = 2^k - 1
