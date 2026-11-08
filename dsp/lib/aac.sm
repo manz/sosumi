@@ -123,23 +123,20 @@
 .const IMS_IN  = 0x0200         ; the short IMDCT's 128 words in (Z uses 0 .. 127)
 .const IMS_OUT = 0x0280         ; its 256 samples out
 
-; Y[DST ..] = Y[SRC ..], N words. Uses s2, s3, s4, s13, e7, e8.
+; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ldn loads and steps e8 (x17
+; reference.md x19.ldn, 705), x17.styi stores and steps e7 (658), both in the back edge's slots.
+; Uses s3, s4, e7, e8.
 .macro ak_ycopy(DST, SRC, N) {
-        ldi s13, #SRC - 1
-        x17.mve e7, s13
-        ldi s13, #DST - 1
-        x17.mve e8, s13
-        ldi s2, #N
-cp:     ldy s3, e7
-        x18.eagu e7, e7, #AGU_INC
-        x17.sty e8, #3, #0
-        x18.eagu e8, e8, #AGU_INC
-        alu s2, s2, s14, #OP_SUB
-        alu s4, s2, s0, #OP_ADD
+        lde e8, #SRC
+        lde e7, #DST
+        ldi s4, #N - 1
+        x19.ldn s3, #4, e8, #2
+        x17.styi e7, #3, #0, e7
+cp:     alu s4, s4, s14, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, cp
-        nop()
-        nop()
+        x19.ldn s3, #4, e8, #2  ; (delay slot) the next word
+        x17.styi e7, #3, #0, e7 ; (delay slot)
 }
 
 ; X[A8 ..] = X[A4 ..], s6 words (s6 > 0), three bundles a word: x03's counted loop (x17
@@ -1338,8 +1335,8 @@ ak_pd0:
 ak_st:  ak_stereo()
 ak_nost:
         ak_xcopyf(XL, ST_L, 1024) ; right to PN_W, left to PN_L
-        ak_xcopy(PN_W, ST_R, 1024)
-        ak_xcopy(PN_L, XL, 1024)
+        ak_xcopyf(PN_W, ST_R, 1024)
+        ak_xcopyf(PN_L, XL, 1024)
         yld(s4, AK_CW)
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, ak_pnr0
@@ -1361,7 +1358,7 @@ ak_pnr: ak_ycopy(FIN, STR, R_HEAD)
 
 ak_left:                        ; a pair's left: keep its words, parse the right
         ak_ycopy(STL, CUR, R_SIZE)
-        ak_xcopy(XL, DQ_OUT, 1024)
+        ak_xcopyf(XL, DQ_OUT, 1024)
         ak_rload()
         ldi s3, #2
         yst(AK_PH)
@@ -1409,7 +1406,7 @@ ak_fin: ak_finish()
         jmp #IF_NOT, #3, ak_done
         nop()
         nop()
-        ak_xcopy(DQ_OUT, PN_L, 1024) ; the left's tail
+        ak_xcopyf(DQ_OUT, PN_L, 1024) ; the left's tail
         ak_ycopy(FIN, STL, R_HEAD)
         yld(s3, AK_SLOT)
         yst(AK_FSL)
