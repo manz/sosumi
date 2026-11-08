@@ -63,6 +63,7 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
   (**FIRMWARE**).
 - The host's +0x58 gate: mode 3 neither releases nor advances the input where modes 0, 1
   and 5 do (**FIRMWARE**).
+- Per packet the host hands the engine compressed bits (mode and length in bits, **INFERRED**); no host stage before the run found; after the run and the read-back **OPEN** (`specs/questions.md` 11).
 - Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
   object, so at least part of it runs there (**INFERRED**).
 - Entry point, buffers, persistent state, error path: **OPEN**. Nothing is traced: the dev
