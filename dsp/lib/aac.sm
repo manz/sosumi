@@ -62,6 +62,8 @@
 .const AK_IMI   = AK + 28       ; short IMDCT: the next window's words
 .const AK_IMO   = AK + 29       ; its samples' place in IMT
 .const AK_IMW   = AK + 30       ; windows left
+.const AK_PNR   = AK + 31       ; the shared PNS core's way back (ak_pnc)
+.const AK_TNB   = AK + 32       ; tns_data's n_filt, length and order widths, 3 words
 .const AK_BOOKS = AK + 0x40     ; 12 words
 .const SWB_L    = 0x3D00
 .const SWB_S    = 0x3D40
@@ -371,11 +373,11 @@ nb:     alu s3, s3, s2, #OP_ADD
 
 ; tns_data() into CUR + R_TREC, in tns.sm's TN_REC order. NW windows; NFB, LB, OB the n_filt,
 ; length and order widths. Uses s1 .. s8, e8 and getbits's registers.
-.macro ak_tnsparse(NW, NFB, LB, OB) {
+.macro ak_tnsparse() {
         ldi s13, #CUR + R_TREC - 1
         x17.mve e8, s13
-        ldi s1, #NW
-win:    getbits(s3, NFB)        ; n_filt
+win:    yld(s11, AK_TNB)
+        getbits_s(s3)           ; n_filt
         x17.sty e8, #3, #0
         x18.eagu e8, e8, #AGU_INC
         alu s2, s3, s0, #OP_ADD
@@ -394,10 +396,12 @@ filt:   alu s4, s2, s0, #OP_ADD
         nop()
         nop()
         alu s2, s2, s14, #OP_SUB
-        getbits(s3, LB)         ; length
+        yld(s11, AK_TNB + 1)
+        getbits_s(s3)           ; length
         x17.sty e8, #3, #0
         x18.eagu e8, e8, #AGU_INC
-        getbits(s3, OB)         ; order
+        yld(s11, AK_TNB + 2)
+        getbits_s(s3)           ; order
         x17.sty e8, #3, #0
         x18.eagu e8, e8, #AGU_INC
         alu s7, s3, s0, #OP_ADD
@@ -784,15 +788,23 @@ tns:    getbits(s3, 1)          ; tns_data_present
         jmp #3, #3, gain
         nop()
         nop()
-        ak_isshort(CUR)
-        jmp #3, #3, tshort
+        ak_isshort(CUR)         ; widths and windows: long 2, 6, 5 over 1, short 1, 4, 3 over 8
+        ldi s3, #2
+        ldi s5, #6
+        ldi s6, #5
+        jmp #IF_NOT, #3, twid
+        ldi s1, #1              ; (delay slot)
         nop()
-        nop()
-        ak_tnsparse(1, 2, 6, 5)
-        jmp #ALWAYS, #0, gain
-        nop()
-        nop()
-tshort: ak_tnsparse(8, 1, 4, 3)
+        ldi s3, #1
+        ldi s5, #4
+        ldi s6, #3
+        ldi s1, #8
+twid:   yst(AK_TNB)
+        alu s3, s5, s0, #OP_ADD
+        yst(AK_TNB + 1)
+        alu s3, s6, s0, #OP_ADD
+        yst(AK_TNB + 2)
+        ak_tnsparse()
 gain:   getbits(s3, 1)          ; gain_control_data_present
         alu s4, s3, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -818,10 +830,10 @@ gain:   getbits(s3, 1)          ; gain_control_data_present
 
 ; PNS for REC (mode 0), or for STR as a pair's right with STL its left (mode 1). Skipped when
 ; REC has no noise band. The generator lives at XRNG between calls.
-.macro ak_pns(REC, MODE) {
+.macro ak_pns(REC, MODE, ID, SKIP, CORE) {
         ak_hasbook(REC, 13, 13)
         ptst p3, s0, #EQ4, #PTST
-        jmp #3, #3, done
+        jmp #3, #3, SKIP
         nop()
         nop()
         yld(s3, REC + R_NB)
@@ -853,14 +865,38 @@ gain:   getbits(s3, 1)          ; gain_control_data_present
         ak_ycopy(PN_LBOOK, STL + R_BOOK, 128)
         ak_ycopy(PN_LSF, STL + R_SF, 128)
         ak_ycopy(PN_MSU, PAIR_MSU, 128)
-tabs:   ak_xcopy(PN_T, XPNT, 4)
+tabs:   ldi s3, #ID
+        jmp #ALWAYS, #0, CORE
+        yat(AK_PNR)             ; (delay slot)
+        x17.sty e6, #3, #0      ; (delay slot)
+}
+
+; After the core: REC's exponent back.
+.macro ak_pnsret(REC) {
+        yld(s3, PN_E)
+        yst(REC + R_E)
+}
+
+; The PNS core, once in the program: entered at its first line by ak_pns, it leaves through
+; AK_PNR to R0 (a pair's left), R1 (its right) or R2 (a lone channel).
+.macro ak_pnscore(R0, R1, R2) {
+        ak_xcopy(PN_T, XPNT, 4)
         ak_xcopy(PN_SEED, XSEED, 6)
         ak_xcopy(PN_RNG, XRNG, 1)
         pns_channel()
         ak_xcopy(XRNG, PN_RNG, 1)
-        yld(s3, PN_E)
-        yst(REC + R_E)
-done:
+        yld(s4, AK_PNR)
+        ptst p3, s0, #EQ4, #PTST
+        jmp #3, #3, R0
+        alu s4, s4, s14, #OP_SUB ; (delay slot)
+        nop()
+        ptst p3, s0, #EQ4, #PTST
+        jmp #3, #3, R1
+        nop()
+        nop()
+        jmp #ALWAYS, #0, R2
+        nop()
+        nop()
 }
 
 ; M/S and intensity on STL (X ST_L) and STR (X ST_R), common_window only. Skipped when there
@@ -1005,8 +1041,8 @@ flong:  ldi s4, #10
 fcopy:  ak_xcopyd(WFALL)
 }
 
-; The window for one channel's overlap OVL, by FIN's window_sequence, into Y PCMY.
-.macro ak_window(OVL) {
+; The window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence, into Y PCMY.
+.macro ak_window() {
         yld(s2, FIN + R_WS)
         alu s4, s2, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -1021,19 +1057,19 @@ fcopy:  ak_xcopyd(WFALL)
         jmp #3, #3, wsh
         nop()
         nop()
-        win_stop(IMT, WRISE, WFALL, WB, OVL, PCMY)
+        win_stop(IMT, WRISE, WFALL, WB, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wl:     win_long(IMT, WRISE, WFALL, OVL, PCMY)
+wl:     win_long(IMT, WRISE, WFALL, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wst:    win_start(IMT, WRISE, WFALL, WB, OVL, PCMY)
+wst:    win_start(IMT, WRISE, WFALL, WB, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wsh:    win_short(IMT, WRISE, WFALL, WB, OVL, PCMY)
+wsh:    win_short(IMT, WRISE, WFALL, WB, PCMY)
 done:
 }
 
@@ -1083,17 +1119,14 @@ sloop:  yld(s5, AK_IMI)
         nop()
         nop()
 halves: ak_halves()
-        yld(s4, AK_FSL)
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, slot1
-        nop()
-        nop()
-        ak_window(OVL0)
-        jmp #ALWAYS, #0, shape
-        nop()
-        nop()
-slot1:  ak_window(OVL1)
-shape:  yld(s3, AK_FSL)
+        yld(s4, AK_FSL)         ; the slot's overlap, OVL0 or OVL1 = OVL0 + 0x400
+        ldi s3, #10
+        x19.alu s3, s4, s3, #SHIFT
+        ldi s4, #OVL0
+        alu s3, s3, s4, #OP_ADD
+        yst(WIN_OVL)
+        ak_window()
+        yld(s3, AK_FSL)
         ldi s13, #AK_SHP - 1
         alu s13, s13, s3, #OP_ADD
         x17.mve e8, s13
@@ -1285,7 +1318,9 @@ ak_parse:
         ak_ycopy(STR, CUR, R_SIZE)
         ak_xcopyf(ST_R, DQ_OUT, 1024)
         ak_xcopyf(ST_L, XL, 1024)
-        ak_pns(STL, 0)
+        ak_pns(STL, 0, 0, ak_pd0, ak_pnc)
+ak_pr0: ak_pnsret(STL)
+ak_pd0:
         yld(s4, AK_CW)
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, ak_st
@@ -1310,12 +1345,10 @@ ak_nost:
         jmp #3, #3, ak_pnr0
         nop()
         nop()
-        ak_pns(STR, 1)
-        jmp #ALWAYS, #0, ak_pnr
-        nop()
-        nop()
+        ak_pns(STR, 1, 1, ak_pnr, ak_pnc)
 ak_pnr0:
-        ak_pns(STR, 0)
+        ak_pns(STR, 0, 1, ak_pnr, ak_pnc)
+ak_pr1: ak_pnsret(STR)
 ak_pnr: ak_ycopy(FIN, STR, R_HEAD)
         yld(s3, AK_SLOT)
         alu s3, s3, s14, #OP_ADD
@@ -1357,8 +1390,12 @@ ak_end: jmp #ALWAYS, #0, ak_out
         nop()
         nop()
 
+ak_pnc: ak_pnscore(ak_pr0, ak_pr1, ak_pr2)
+
 ak_one: ak_ycopy(STL, CUR, R_SIZE)
-        ak_pns(STL, 0)
+        ak_pns(STL, 0, 2, ak_pd2, ak_pnc)
+ak_pr2: ak_pnsret(STL)
+ak_pd2:
         ak_ycopy(FIN, STL, R_HEAD)
         yld(s3, AK_SLOT)
         yst(AK_FSL)

@@ -7,18 +7,27 @@
 ; 16 bits; the shift comes first, so the clamp's differences stay within 2^18.
 ;
 ; Needs lib/bits.sm (s0 = 0, s14 = 1) and lib/mem.sm. x02.ainc's template also writes s2 and
-; x02.mpy steps A1, so nothing lives in them.
+; x02.mpy steps A1, so nothing lives in them. The overlap's X address is a Y slot, WIN_OVL, so
+; one copy of the code serves every channel.
 
-; win_long(T, WP, WC, OVL, PCM): an only_long block.
+.const WIN_OVL = 0x2388
+
+; A8 = Y:[WIN_OVL]. Uses s12 and amov_e's registers.
+.macro win_a8ovl() {
+        yld(s12, WIN_OVL)
+        amov_e(4, s12)
+}
+
+; win_long(T, WP, WC, PCM): an only_long block.
 ;   X T    the IMDCT's 2048 words
 ;   X WP   the previous shape's rising half, 1024 words; X WC the current shape's
-;   X OVL  1024 overlap words, read then rewritten with the block's second half
+;   X OVL  1024 overlap words at Y:[WIN_OVL], read then rewritten with the block's second half
 ;   Y PCM  1024 samples out
 ; Uses s1, s3 .. s13, e6, e7, R2, R3, R7, A4, A6, A8, A10, A14, p3 (all the macros here).
-.macro win_long(T, WP, WC, OVL, PCM) {
+.macro win_long(T, WP, WC, PCM) {
         aimm_e(2, T)
         aimm_e(3, WP)
-        aimm_e(4, OVL)
+        win_a8ovl()
         ldi s13, #PCM - 1
         x17.mve e7, s13         ; e7 = PCM
         ldi s9, #32767
@@ -52,7 +61,7 @@ first:  x19.xrd s1, #4          ; t
         nop()
         ldi s12, #WC + 1023
         amov_e(3, s12)           ; the current shape, falling
-        aimm_e(4, OVL)
+        win_a8ovl()
         rimm R2, #-1
         ldi s11, #1024
 second: x19.xrd s1, #4
@@ -160,9 +169,9 @@ wz:     stx A8, s4
 }
 
 ; PCM = clamp(rshr(OVL + B[0 .. 1023], 5)); OVL = B[1024 .. 2047].
-.macro win_out(B, OVL, PCM) {
+.macro win_out(B, PCM) {
         aimm_e(2, B)
-        aimm_e(4, OVL)
+        win_a8ovl()
         ldi s13, #PCM - 1
         x17.mve e7, s13
         ldi s9, #32767
@@ -191,7 +200,7 @@ wo:     x19.xrd s5, #4
         jmp #IF_NOT, #3, wo
         nop()
         nop()
-        aimm_e(4, OVL)
+        win_a8ovl()
         ldi s11, #1024
 wc:     x19.xrd s5, #4          ; A4 continues at B + 1024
         x02.ainc #4, #4
@@ -206,21 +215,21 @@ wc:     x19.xrd s5, #4          ; A4 continues at B + 1024
 }
 
 ; long_start: WPL the previous long shape's rising half, WCS the current short one's.
-.macro win_start(T, WPL, WCS, B, OVL, PCM) {
+.macro win_start(T, WPL, WCS, B, PCM) {
         win_run(1024, T, WPL, 1, B)
         win_quarter(448, T + 1024, B + 1024)
         win_run(128, T + 1472, WCS + 127, -1, B + 1472)
         win_zero(448, B + 1600)
-        win_out(B, OVL, PCM)
+        win_out(B, PCM)
 }
 
 ; long_stop: WPS the previous short shape's rising half, WCL the current long one's.
-.macro win_stop(T, WPS, WCL, B, OVL, PCM) {
+.macro win_stop(T, WPS, WCL, B, PCM) {
         win_zero(448, B)
         win_run(128, T + 448, WPS, 1, B + 448)
         win_quarter(448, T + 576, B + 576)
         win_run(1024, T + 1024, WCL + 1023, -1, B + 1024)
-        win_out(B, OVL, PCM)
+        win_out(B, PCM)
 }
 
 ; One short window w of eight_short: T the eight IMDCTs' 256 words each, contiguous; WL the
@@ -232,7 +241,7 @@ wc:     x19.xrd s5, #4          ; A4 continues at B + 1024
 }
 
 ; eight_short: WPS the previous short shape's rising half (window 0's left), WCS the current.
-.macro win_short(T, WPS, WCS, B, OVL, PCM) {
+.macro win_short(T, WPS, WCS, B, PCM) {
         win_zero(448, B)
         win_run(128, T, WPS, 1, B + 448)
         win_run(128, T + 128, WCS + 127, -1, B + 576)
@@ -244,5 +253,5 @@ wc:     x19.xrd s5, #4          ; A4 continues at B + 1024
         win_short1(T, WCS, WCS, B, 6)
         win_short1(T, WCS, WCS, B, 7)
         win_zero(448, B + 1600)
-        win_out(B, OVL, PCM)
+        win_out(B, PCM)
 }
