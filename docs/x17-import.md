@@ -84,3 +84,6 @@ model and do not see them:
 - **X in mode 0 is 0..0x1BFF** (`specs/questions.md` 6): stereo.sm (ST_T), pns.sm (PN_T,
   PN_SEED, PN_RNG) and tns.sm (TN_K, TN_KC, TN_B) put tables at X:0x1F00 and up, outside the
   window. Their layout has to move before the silicon fit; the emulator runs are unaffected.
+- **x03 and x18 low products are 24 bits, unmasked** (x17 121d31b, reference.md `x03.mpy`):
+  pns.sm's LCG read x03.mpy's low half as [15:0]; it now masks it with x18.and. predictor.sm
+  already masked x02's. No other lib reads an x03 or x18 low half.
