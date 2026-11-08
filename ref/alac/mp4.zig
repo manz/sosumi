@@ -1,5 +1,6 @@
-//! The ALAC track of an MP4 (ISO/IEC 14496-12 boxes): its magic cookie and its packets, in
-//! order, from stsz, stsc and stco or co64.
+//! The ALAC or AAC track of an MP4 (ISO/IEC 14496-12 boxes): its configuration and its packets,
+//! in order, from stsz, stsc and stco or co64. For AAC the configuration is the
+//! AudioSpecificConfig from the esds box's DecoderSpecificInfo (ISO/IEC 14496-1 7.2.6, 14496-14).
 const std = @import("std");
 
 pub const Error = error{ NoAlacTrack, BadBox };
@@ -25,7 +26,11 @@ fn child(b: []const u8, name: []const u8) ?[]const u8 {
     return null;
 }
 
+pub const Codec = enum { alac, aac };
+
 pub const Track = struct {
+    codec: Codec = .alac,
+    /// ALAC's magic cookie, or AAC's AudioSpecificConfig.
     cookie: []const u8,
     sizes: []const u8, // stsz entries
     uniform: u32,
@@ -34,6 +39,58 @@ pub const Track = struct {
     chunks: []const u8,
     co64: bool,
 };
+
+/// An expandable descriptor's tag and payload at `b[p..]` (ISO/IEC 14496-1 8.3.3).
+fn descriptor(b: []const u8, p: usize) ?struct { tag: u8, body: []const u8, end: usize } {
+    if (p >= b.len) return null;
+    var q = p + 1;
+    var len: usize = 0;
+    for (0..4) |_| {
+        if (q >= b.len) return null;
+        len = len << 7 | (b[q] & 0x7F);
+        q += 1;
+        if (b[q - 1] & 0x80 == 0) break;
+    }
+    if (q + len > b.len) return null;
+    return .{ .tag = b[p], .body = b[q .. q + len], .end = q + len };
+}
+
+/// The DecoderSpecificInfo inside an esds payload: ES_Descriptor (3), DecoderConfigDescriptor
+/// (4, 13 fixed bytes), DecoderSpecificInfo (5) (ISO/IEC 14496-1 7.2.6.5, 7.2.6.6).
+fn esdsConfig(esds: []const u8) ?[]const u8 {
+    if (esds.len < 4) return null;
+    const es = descriptor(esds, 4) orelse return null;
+    if (es.tag != 3 or es.body.len < 3) return null;
+    const flags = es.body[2];
+    var p: usize = 3;
+    if (flags & 0x80 != 0) p += 2; // dependsOn_ES_ID
+    if (flags & 0x40 != 0) {
+        if (p >= es.body.len) return null;
+        p += 1 + es.body[p]; // URL
+    }
+    if (flags & 0x20 != 0) p += 2; // OCR_ES_Id
+    while (descriptor(es.body, p)) |d| : (p = d.end) {
+        if (d.tag != 4 or d.body.len < 13) continue;
+        var q: usize = 13;
+        while (descriptor(d.body, q)) |e| : (q = e.end) if (e.tag == 5) return e.body;
+    }
+    return null;
+}
+
+/// The mp4a sample entry's esds config: the entry's 8-byte header, 8 bytes of SampleEntry, the
+/// audio fields (20 bytes; QuickTime sound versions 1 and 2 add 16 and 36), then its boxes.
+fn mp4aConfig(entry: []const u8) ?[]const u8 {
+    if (entry.len < 36) return null;
+    const version = std.mem.readInt(u16, entry[16..18], .big);
+    const at: usize = switch (version) {
+        0 => 36,
+        1 => 52,
+        2 => 72,
+        else => return null,
+    };
+    if (entry.len < at) return null;
+    return esdsConfig(child(entry[at..], "esds") orelse return null);
+}
 
 pub fn findTrack(file: []const u8) Error!Track {
     const moov = child(file, "moov") orelse return error.NoAlacTrack;
@@ -50,13 +107,17 @@ pub fn findTrack(file: []const u8) Error!Track {
         const stsd = child(stbl, "stsd") orelse continue;
         // version/flags, count, then the sample entry: size, 'alac', 28 bytes of audio fields,
         // then its 'alac' config box
-        if (stsd.len < 44 or !std.mem.eql(u8, stsd[12..16], "alac")) continue;
+        if (stsd.len < 44) continue;
+        const entry = stsd[8..@min(stsd.len, 8 + be32(stsd, 8))];
+        const codec: Codec = if (std.mem.eql(u8, stsd[12..16], "alac")) .alac else if (std.mem.eql(u8, stsd[12..16], "mp4a")) .aac else continue;
+        const cookie = if (codec == .alac) stsd[44..] else mp4aConfig(entry) orelse continue;
         const stsz = child(stbl, "stsz") orelse return error.BadBox;
         const stsc = child(stbl, "stsc") orelse return error.BadBox;
         const co64 = child(stbl, "co64");
         const stco = co64 orelse child(stbl, "stco") orelse return error.BadBox;
         return .{
-            .cookie = stsd[44..],
+            .codec = codec,
+            .cookie = cookie,
             .uniform = be32(stsz, 4),
             .count = be32(stsz, 8),
             .sizes = stsz[12..],

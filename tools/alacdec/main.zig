@@ -24,7 +24,9 @@ pub fn main(init: std.process.Init) !void {
     const cwd = std.Io.Dir.cwd();
     const file = try cwd.readFileAlloc(io, args[1], gpa, .limited(1 << 31));
     defer gpa.free(file);
-    const cfg = try ref.alac.config.parse((try mp4.findTrack(file)).cookie);
+    const track = try mp4.findTrack(file);
+    if (track.codec != .alac) return error.NoAlacTrack;
+    const cfg = try ref.alac.config.parse(track.cookie);
     var dec = try ref.alac.decoder.Decoder.init(gpa, cfg);
     defer dec.deinit();
     // --dsp: the whole decoder in measured sm1 operations (ref/dsp/alac)
