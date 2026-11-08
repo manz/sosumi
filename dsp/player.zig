@@ -7,6 +7,7 @@ const host = @import("host");
 const h = @import("harness.zig");
 
 pub const emu = h.emu;
+pub const aac = @import("aac_player.zig");
 
 const packet_base = 0x80;
 const pk = 0x2E00;
