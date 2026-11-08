@@ -5,9 +5,11 @@
 ; n2 words w with value w * 2^E become 2 n2 samples in PCM units as Q7 words. The words are
 ; brought to a largest |x| in [2^21, 2^22) (one rounded halving, or doublings counted by
 ; comparisons), then a pre-twiddle into an n2/2-point complex FFT in bit-reversed order, the
-; FFT's stages, a post-twiddle and the fold. cmul is two rounded products summed. Before each
-; stage the largest and smallest components decide its scaling: a quarter from 2^22, a half from
-; 2^21 (rounded shifts), the shifts joining the exponent. The output shift
+; FFT's stages (radix 2 first when log2 n4 is odd, then radix 4), a post-twiddle and the fold.
+; cmul is two rounded products summed. Before each stage the fewest redundant sign bits among
+; its inputs (x01.norm, tracked with x18.min as the stage before stores them) decide a rounded
+; right shift down to 2^20 (radix 4) or 2^21 (radix 2), the shifts joining the exponent. The
+; output shift
 ; scaled + E' - log2 n2 + 7 is one 0x19 op-23 shift (reference.md `x19`), which saturates as the model's comparisons
 ; do.
 ;
@@ -18,23 +20,24 @@
 ;   X Z    n2 words: n4 = n2/2 complex points, re then im
 ;   X OUT  2 n2 samples out
 ;   X PRE  exp(-j pi (n + 1/4) / n2), n4 pairs; X POST exp(-j pi k / n2), n4 pairs
-;   X TW   the FFT twiddles stage by stage: for size 2, 4, .. n4, the size/2 pairs
-;          exp(-j 2 pi i (n4 / size) / n4) for i = 0 .. size/2 - 1 (n4 - 1 pairs in all)
+;   X TW   the radix-4 twiddles (the twin's tw4): per stage of block size l, for j < l, the
+;          pairs exp(-j 2 pi m j / (4 l)), m = 1, 2, 3 (1020 words long, 126 short)
 ;   Y REV  Z + 2 rev(n) - 2 for n = 0 .. n4 - 1 (rev: log2 n4 bits reversed)
 ;   Y ESLOT E
+; imdct takes an odd STAGES (a radix-2 stage first, the long block), imdct_even an even one.
 ; Needs lib/bits.sm (s0 = 0, s14 = 1) and lib/mem.sm. x02.ainc's template also writes
 ; s2 (its w2 multiply slot) and x02.mpy steps A1, so nothing lives in s2 or A1 here. Uses every s register but s0
-; and s14 (s15 is left 16 for bits.sm), e6, e7, R1..R3, R7, A2..A6, A8..A10, A12, A14 and Y
+; and s14 (s15 is left 16 for bits.sm), e6..e8, R1..R7, A2..A6, A8..A10, A12, A14 and Y
 ; IM_Y .. IM_Y + 7.
 
 .const IM_Y    = 0x2380
 .const IM_EX   = IM_Y + 0       ; E of the normalised words
 .const IM_SC   = IM_Y + 1       ; FFT scaling so far
-.const IM_HALF = IM_Y + 2       ; the stage's size / 2
-.const IM_GRPS = IM_Y + 3       ; the stage's groups, n4 / size
-.const IM_PJ   = IM_Y + 4       ; Z + 2 j
+.const IM_HALF = IM_Y + 2       ; the radix-4 stage's block size l
+.const IM_GRPS = IM_Y + 3       ; the stage's groups, n4 / (4 l)
+.const IM_PJ   = IM_Y + 4       ; the stage's twiddles in TW
 .const IM_STG  = IM_Y + 5       ; stages left
-.const IM_J    = IM_Y + 6       ; twiddles left in the stage
+.const IM_J    = IM_Y + 6       ; groups left in the stage
 
 ; s10 = max(0, X[BASE ..]), s11 = min(0, X[BASE ..]) over COUNT words. Uses s1, s4, s9, A8, p3.
 .macro im_scan(BASE, COUNT) {
@@ -164,14 +167,24 @@ scale:  yld(s3, ESLOT)
         im_shift(IN, N2)
 }
 
-; s7 = max(s7, V), s13 = min(s13, V). Uses s4, p3.
-.macro im_track(V) {
-        alu s4, V, s7, #OP_SUB
-        ptst p3, s0, #LE4, #PTST
-        psel s7, s4, s7, p3, #0, #4
-        alu s4, V, s13, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        psel s13, s4, s13, p3, #1, #4
+; s15 = min(s15, norm(V)), the fewest redundant sign bits so far (x01.norm, x18.min: x17
+; handbook §10, fact 708). Uses T.
+.macro im_trk(V, T) {
+        x01.norm T, V
+        x18.min s15, s15, T
+}
+
+; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - s15), s12 = -s6
+; (the rounded right shift its loads take), IM_SC += s6, s15 = 24 again. Uses s3.
+.macro im_dec(LIM) {
+        ldi s6, #23 - LIM
+        alu s6, s6, s15, #OP_SUB
+        x18.max s6, s6, s0
+        alu s12, s0, s6, #OP_SUB
+        yld(s3, IM_SC)
+        alu s3, s3, s6, #OP_ADD
+        yst(IM_SC)
+        ldi s15, #24
 }
 
 ; A<2k> = the value s<src> + 2 (mem.sm's amov path without its first two steps): e6, R7.
@@ -181,8 +194,8 @@ scale:  yld(s3, ESLOT)
         x12.aset #k, R7
 }
 
-; Z[rev n] = (IN[2n], IN[n2 - 1 - 2n]) * PRE[n], tracking the largest and smallest component in
-; s7 and s13. Y REV holds Z + 2 rev(n) - 2.
+; Z[rev n] = (IN[2n], IN[n2 - 1 - 2n]) * PRE[n], tracking the fewest redundant sign bits in s15.
+; Y REV holds Z + 2 rev(n) - 2.
 .macro im_pre(N2, N4, IN, PRE, REV) {
         ldi s12, #IN
         amov_e(2, s12)
@@ -193,8 +206,7 @@ scale:  yld(s3, ESLOT)
         x17.mve e7, s13         ; e7 = REV
         rimm R2, #-2
         ldi s11, #N4
-        ldi s7, #0
-        ldi s13, #0
+        ldi s15, #24
 pre:    x19.xrd s1, #4          ; xr
         x02.ainc #4, #4
         x02.ainc #4, #4
@@ -217,8 +229,8 @@ pre:    x19.xrd s1, #4          ; xr
         stx A12, s6
         x02.ainc #12, #12
         stx A12, s8
-        im_track(s6)
-        im_track(s8)
+        im_trk(s6, s7)
+        im_trk(s8, s7)
         alu s11, s11, s14, #OP_SUB
         alu s4, s11, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -235,115 +247,190 @@ pre:    x19.xrd s1, #4          ; xr
         x19.a3 s0, RD, e6, #25, #2, #0
 }
 
-; dst = shift23(X[A an], s12), A an + 1.
-.macro im_ld(dst, an) {
-        x19.xrd dst, #an
-        x02.ainc #an, #an
-        x19.alu dst, dst, s12, #SHIFT
+; The FFT (the twin's `fft`): in place over Z's N4 complex points in bit-reversed order, a
+; radix-2 first stage when log2 N4 is odd, then radix-4 stages. Each stage first takes its
+; shift from the outputs the stage before tracked (im_dec), and its loads apply it. Loads are
+; x03.tap0 into s0's product (a pure X load and step, fact 709); x02.ainc steps the stores.
+
+; Radix 2 over adjacent pairs, N4 / 2 butterflies. Uses s1, s3..s9, s13, A4, A10.
+.macro im_r2(N4, Z) {
+        aimm_e(2, Z)
+        aimm_e(5, Z)
+        ldi s4, #N4 / 2
+        x03.tap0 s1, #4, s0, s0, s0 ; ar
+r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
+        x03.tap0 s5, #4, s0, s0, s0 ; br
+        x03.tap0 s7, #4, s0, s0, s0 ; bi
+        x19.alu s1, s1, s12, #SHIFT
+        x19.alu s3, s3, s12, #SHIFT
+        x19.alu s5, s5, s12, #SHIFT
+        x19.alu s7, s7, s12, #SHIFT
+        alu s8, s1, s5, #OP_ADD
+        alu s9, s3, s7, #OP_ADD
+        alu s1, s1, s5, #OP_SUB
+        alu s3, s3, s7, #OP_SUB
+        stx A10, s8
+        x02.ainc #10, #10
+        stx A10, s9
+        x02.ainc #10, #10
+        stx A10, s1
+        x02.ainc #10, #10
+        stx A10, s3
+        x02.ainc #10, #10
+        im_trk(s8, s13)
+        im_trk(s9, s13)
+        im_trk(s1, s13)
+        x01.norm s13, s3
+        alu s4, s4, s14, #OP_SUB
+        ptst p3, s0, #EQ4, #PTST
+        jmp #IF_NOT, #3, r2
+        x18.min s15, s15, s13   ; (delay slot)
+        x03.tap0 s1, #4, s0, s0, s0 ; (delay slot) the next ar; past the end, a dummy
 }
 
-; X[AN] = V, AN + 1 (an its number), and V tracked.
-.macro im_st(AN, an, V) {
-        stx AN, V
-        x02.ainc #an, #an
-        im_track(V)
+; One block's two words from A an into D1, D2, shifted by s12.
+.macro im_ld2(D1, D2, an) {
+        x03.tap0 D1, #an, s0, s0, s0
+        x03.tap0 D2, #an, s0, s0, s0
+        x19.alu D1, D1, s12, #SHIFT
+        x19.alu D2, D2, s12, #SHIFT
 }
 
-; The FFT's stages over Z, twiddles from A5. Each stage's scaling comes from the largest and
-; smallest components the stage before wrote (s7, s13; the pre-twiddle's for the first) and is
-; applied as each butterfly loads its inputs.
-.macro im_fft(N4, Z, TW, STAGES) {
-        im_decide(s7, s13)
-        aimm_o(2, TW)
-        rimm R5, #2
-        ldi s3, #1
+; (RE, IM) = (A1, A2) * W, W = the next twiddle pair from A12. Uses s4, s5, A1 (x02.mpy).
+.macro im_cm(RE, IM, A1, A2) {
+        x03.tap0 s4, #12, s0, s0, s0 ; wr
+        x03.tap0 s5, #12, s0, s0, s0 ; wi
+        x02.mpy RE, A1, s4
+        x02.mpy IM, A2, s5
+        alu RE, RE, IM, #OP_SUB
+        x02.mpy IM, A1, s5
+        x02.mpy A1, A2, s4
+        alu IM, IM, A1, #OP_ADD
+}
+
+; The radix-4 stages: STG of them from l = L0 (block size), groups N4 / (4 l), twiddles from TW
+; (the twin's tw4, a triple per j). Blocks at A4, A6, A8, A10 (Z + 8 l g + {0, 2, 4, 6} l + 2 j),
+; twiddles at A12; R6 = 2 l, R5 = 6 l, R4 the group's end for A10, R2 the stage's twiddles,
+; R1 = -2.
+.macro im_r4(N4, Z, TW, L0, STG) {
+        ldi s3, #L0
         yst(IM_HALF)
-        ldi s3, #N4 / 2
+        ldi s3, #N4 / (4 * L0)
         yst(IM_GRPS)
-        ldi s3, #0
-        yst(IM_SC)
-        ldi s3, #STAGES
+        ldi s3, #TW
+        yst(IM_PJ)
+        ldi s3, #STG
         yst(IM_STG)
-stage:  yld(s3, IM_SC)
-        alu s3, s3, s6, #OP_ADD
-        yst(IM_SC)
-        alu s12, s0, s6, #OP_SUB ; the load shift
+        rimm R1, #-2
+stage:  im_dec(20)
         yld(s1, IM_HALF)
-        alu s1, s1, s1, #OP_ADD
-        im_rset(s1, R4)         ; 2 half
-        alu s1, s1, s1, #OP_ADD
-        alu s1, s1, s14, #OP_SUB
-        alu s1, s1, s14, #OP_SUB
-        im_rset(s1, R1)         ; 2 size - 2
-        ldi s3, #Z
-        amov_e(1, s3)            ; Z + 2 j
-        yld(s3, IM_HALF)
+        alu s1, s1, s1, #OP_ADD ; 2 l
+        im_rset(s1, R6)
+        alu s3, s1, s1, #OP_ADD
+        alu s1, s1, s3, #OP_ADD ; 6 l
+        im_rset(s1, R5)
+        yld(s1, IM_PJ)
+        im_rset(s1, R2)
+        aimm_e(2, Z)
+        x18.rag101 s0, R3, A4, R6, #2
+        x12.aset #3, R3         ; A6 = Z + 2 l
+        x18.rag101 s0, R3, A6, R6, #2
+        x12.aset #4, R3         ; A8
+        x18.rag101 s0, R3, A8, R6, #2
+        x12.aset #5, R3         ; A10
+        yld(s3, IM_GRPS)
         yst(IM_J)
         ldi s13, #IM_J - 1
         x17.mve e8, s13
-        ldi s13, #IM_GRPS - 1
-        x17.mve e9, s13
-        ldi s7, #0
-        ldi s13, #0
-tw:     x19.xrd s10, #5         ; wr
-        x02.ainc #5, #5
-        x19.xrd s11, #5         ; wi
-        x02.ainc #5, #5
-        x18.rag101 s0, R3, A2, R4, #5
-        x12.aset #2, R3         ; A4 = Z + 2 j
-        x12.aset #5, R3         ; A10
-        x18.rag101 s0, R3, A2, R4, #2
-        x12.aset #3, R3         ; A6 = Z + 2 j + 2 half
-        x12.aset #6, R3         ; A12
-        ldy s15, e9
-bf:     im_ld(s1, 4)            ; ar
-        im_ld(s8, 4)            ; ai
-        im_ld(s3, 6)            ; br
-        im_ld(s5, 6)            ; bi
-        x02.mpy s6, s3, s10
-        x02.mpy s9, s5, s11
-        alu s6, s6, s9, #OP_SUB ; tr
-        x02.mpy s9, s3, s11
-        x02.mpy s3, s5, s10
-        alu s9, s9, s3, #OP_ADD ; ti
-        alu s3, s1, s6, #OP_ADD
-        im_st(A10, 10, s3)
-        alu s3, s8, s9, #OP_ADD
-        im_st(A10, 10, s3)
-        alu s3, s1, s6, #OP_SUB
-        im_st(A12, 12, s3)
-        alu s3, s8, s9, #OP_SUB
-        im_st(A12, 12, s3)
-        x18.rag101 s0, R3, A4, R1, #2
+grp:    x18.rag101 s0, R4, A10, R6, #2 ; the group's end for A10
+        x12.aset #6, R2         ; A12 = the stage's twiddles
+bf:     im_ld2(s1, s3, 8)       ; F1 = block 2
+        im_cm(s6, s7, s1, s3)   ; F1 W^j
+        im_ld2(s1, s3, 6)       ; F2 = block 1
+        im_cm(s8, s9, s1, s3)   ; F2 W^2j
+        im_ld2(s1, s3, 10)      ; F3 = block 3
+        im_cm(s10, s11, s1, s3) ; F3 W^3j
+        im_ld2(s1, s3, 4)       ; F0
+        x18.rag101 s0, R3, A4, R1, #2 ; every block back to its j (R1 = -2)
         x12.aset #2, R3
         x18.rag101 s0, R3, A6, R1, #2
         x12.aset #3, R3
+        x18.rag101 s0, R3, A8, R1, #2
+        x12.aset #4, R3
         x18.rag101 s0, R3, A10, R1, #2
         x12.aset #5, R3
-        x18.rag101 s0, R3, A12, R1, #2
-        x12.aset #6, R3
-        alu s15, s15, s14, #OP_SUB
-        alu s4, s15, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, bf
+        alu s4, s1, s8, #OP_ADD ; p = F0 + F2 W^2j
+        alu s5, s3, s9, #OP_ADD
+        alu s1, s1, s8, #OP_SUB ; q
+        alu s3, s3, s9, #OP_SUB
+        alu s8, s6, s10, #OP_ADD ; r = F1 W^j + F3 W^3j
+        alu s9, s7, s11, #OP_ADD
+        alu s6, s6, s10, #OP_SUB ; s
+        alu s7, s7, s11, #OP_SUB
+        alu s10, s4, s8, #OP_ADD ; p + r
+        alu s11, s5, s9, #OP_ADD
+        alu s4, s4, s8, #OP_SUB ; p - r
+        alu s5, s5, s9, #OP_SUB
+        alu s8, s1, s7, #OP_ADD ; q - j s
+        alu s9, s3, s6, #OP_SUB
+        alu s1, s1, s7, #OP_SUB ; q + j s
+        alu s3, s3, s6, #OP_ADD
+        stx A4, s10
+        x02.ainc #4, #4
+        stx A4, s11
+        x02.ainc #4, #4
+        stx A6, s8
+        x02.ainc #6, #6
+        stx A6, s9
+        x02.ainc #6, #6
+        stx A8, s4
+        x02.ainc #8, #8
+        stx A8, s5
+        x02.ainc #8, #8
+        stx A10, s1
+        x02.ainc #10, #10
+        stx A10, s3
+        x02.ainc #10, #10
+        im_trk(s10, s6)
+        im_trk(s11, s6)
+        im_trk(s8, s6)
+        im_trk(s9, s6)
+        im_trk(s4, s6)
+        im_trk(s5, s6)
+        im_trk(s1, s6)
+        x01.norm s6, s3
+        pcond p3, R4, A10, #30  ; more in the group: A10 != R4
+        jmp #3, #3, bf
+        x18.min s15, s15, s6    ; (delay slot)
         nop()
-        nop()
-        x18.rag101 s0, R3, A2, R5, #2
-        x12.aset #1, R3         ; j + 1
+        x18.rag101 s0, R3, A4, R5, #2
+        x12.aset #2, R3         ; the next group: every block + 6 l
+        x18.rag101 s0, R3, A6, R5, #2
+        x12.aset #3, R3
+        x18.rag101 s0, R3, A8, R5, #2
+        x12.aset #4, R3
+        x18.rag101 s0, R3, A10, R5, #2
+        x12.aset #5, R3
         ldy s4, e8
         alu s4, s4, s14, #OP_SUB
         x17.sty e8, #4, #0
         ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, tw
+        jmp #IF_NOT, #3, grp
         nop()
         nop()
-        im_decide(s7, s13)
-        yld(s3, IM_HALF)
-        alu s3, s3, s3, #OP_ADD
+        yld(s1, IM_HALF)
+        alu s4, s1, s1, #OP_ADD
+        alu s4, s4, s1, #OP_ADD
+        alu s4, s4, s4, #OP_ADD ; 6 l: this stage's l triples
+        yld(s3, IM_PJ)
+        alu s3, s3, s4, #OP_ADD
+        yst(IM_PJ)
+        alu s3, s1, s1, #OP_ADD
+        alu s3, s3, s3, #OP_ADD ; l * 4
         yst(IM_HALF)
         yld(s3, IM_GRPS)
-        ldi s4, #-1
-        x19.alu s3, s3, s4, #SHIFT ; groups / 2 (even, so the rounding is exact)
+        ldi s4, #-2
+        x19.alu s3, s3, s4, #SHIFT ; groups / 4 (a multiple of 4 until the last stage: exact)
         yst(IM_GRPS)
         yld(s3, IM_STG)
         alu s3, s3, s14, #OP_SUB
@@ -436,7 +523,23 @@ fr:     x19.xrd s1, #8
 .macro imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT) {
         im_norm(N2, IN, OUT, ESLOT, silent)
         im_pre(N2, N4, IN, PRE, REV)
-        im_fft(N4, Z, TW, STAGES)
+        ldi s3, #0
+        yst(IM_SC)
+        im_dec(21)
+        im_r2(N4, Z)
+        im_r4(N4, Z, TW, 2, (STAGES / 2))
+        im_post(N2, N4, Z, IN, POST)
+        im_fold(N2, LOGN2, IN, OUT)
+silent: ldi s15, #16
+}
+
+; The same for an even STAGES (the short block): radix 4 throughout.
+.macro imdct_even(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT) {
+        im_norm(N2, IN, OUT, ESLOT, silent)
+        im_pre(N2, N4, IN, PRE, REV)
+        ldi s3, #0
+        yst(IM_SC)
+        im_r4(N4, Z, TW, 1, (STAGES / 2))
         im_post(N2, N4, Z, IN, POST)
         im_fold(N2, LOGN2, IN, OUT)
 silent: ldi s15, #16

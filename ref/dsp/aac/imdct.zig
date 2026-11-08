@@ -3,15 +3,22 @@
 //! Input is the dequantiser's block-floating form, words w with value w * 2^e. The words are
 //! first brought to a largest |x| in [2^21, 2^22), the shift found by comparisons (one rounded
 //! halving above 2^22, doublings below 2^21). Then the reference's structure: a pre-twiddle, an
-//! N/4-point radix-2 FFT, a post-twiddle and the fold, with three changes:
+//! N/4-point FFT, a post-twiddle and the fold, with four changes:
 //!
 //!   - `cmul` is two rounded products summed (no 48-bit sum of products), so each part of a
 //!     complex product carries up to one more LSB of rounding.
-//!   - The FFT's block floating point scales the inputs of a stage rather than its sums: a
-//!     stage whose largest component is >= 2^22 quarters every component, >= 2^21 halves it
-//!     (rounded shifts). Butterfly inputs then stay at most 2^21, so a + w b stays below 2^22.3
-//!     at every stage. (Halving the sums, the reference's rule, can grow past 2^23 over a few
-//!     loud stages; a 24-bit add would wrap.)
+//!   - The FFT is radix 4 (a radix-2 first stage when log2 of its size is odd): a butterfly
+//!     takes four points through three twiddle products, so a 512-point FFT is five stages, not
+//!     nine.
+//!   - Its block floating point scales the inputs of a stage rather than its sums. Every
+//!     component lies in [-2^k, 2^k) for k = 23 - (the fewest redundant sign bits, x01's norm);
+//!     a radix-4 stage shifts them right by k - 20 (rounded, when positive), a radix-2 stage by
+//!     k - 21. Inputs are then at most 2^20 (2^21), so a radix-4 output stays below
+//!     (1 + 3 sqrt 2) 2^20 < 2^22.4, a radix-2 one below (1 + sqrt 2) 2^21 < 2^22.3. Against
+//!     the ffmpeg binary's PCM this costs at most 0.7 dB of SNR on the fixtures (mono.aac_at
+//!     82.5 to 81.8 dB) and one LSB of max |diff|. (Halving the
+//!     sums, the reference's rule, can grow past 2^23 over a few loud stages; a 24-bit add would
+//!     wrap.)
 //!   - The bit reversal is a table: sm1 shows no bit-reverse operation.
 //!
 //! Output, like the reference: N samples in PCM units as Q7 words, saturated by comparisons.
@@ -31,6 +38,14 @@ pub const Cx = struct { re: Word, im: Word };
 /// exp(-j m pi / 4096), from the shared sine table (m in [0, 4096]).
 fn expk(m: usize) Cx {
     return .{ .re = sine.cos(m), .im = ops.sub(0, sine.sin(m)) };
+}
+
+/// exp(-j 2 pi a / b) for 0 <= a / b < 3/4, from the sine table (angles past pi negated back).
+fn expTurn(a: usize, b: usize) Cx {
+    const m = a * 8192 / b; // exact: b divides 8192 a for the sizes used
+    if (m <= 4096) return expk(m);
+    const e = expk(m - 4096);
+    return .{ .re = ops.sub(0, e.re), .im = ops.sub(0, e.im) };
 }
 
 /// The tables an x17 routine loads: twiddles in Q23, all read from `sine` (docs/aac-mode0.md),
@@ -53,11 +68,29 @@ pub fn Tables(comptime n2: usize) type {
             for (&t, 0..) |*e, k| e.* = expk(k * (4096 / n2));
             break :blk t;
         };
-        /// exp(-j 2 pi k / n4): m = k * 8192 / n4
-        pub const fft: [n4 / 2]Cx = blk: {
-            @setEvalBranchQuota(200000);
-            var t: [n4 / 2]Cx = undefined;
-            for (&t, 0..) |*e, k| e.* = expk(k * (8192 / n4));
+        /// A radix-2 first stage when `stages` is odd.
+        pub const radix2_first = stages % 2 == 1;
+        /// The radix-4 stages' twiddles in the order a butterfly reads them: for each stage
+        /// combining four blocks of size l into 4 l (l = 1 or 2, then times 4), for j = 0 .. l - 1,
+        /// exp(-j 2 pi m j / (4 l)) for m = 1, 2, 3: 1020 words long, 126 short, as many as the
+        /// radix-2 twiddles they replace.
+        pub const tw4_len: usize = blk: {
+            var n: usize = 0;
+            var l: usize = if (radix2_first) 2 else 1;
+            while (4 * l <= n4) : (l *= 4) n += l;
+            break :blk n;
+        };
+        pub const tw4: [tw4_len][3]Cx = blk: {
+            @setEvalBranchQuota(400000);
+            var t: [tw4_len][3]Cx = undefined;
+            var i: usize = 0;
+            var l: usize = if (radix2_first) 2 else 1;
+            while (4 * l <= n4) : (l *= 4) {
+                for (0..l) |j| {
+                    for (0..3) |mm| t[i][mm] = expTurn((mm + 1) * j, 4 * l);
+                    i += 1;
+                }
+            }
             break :blk t;
         };
         /// rev[i]: i with its `stages` bits reversed.
@@ -84,38 +117,81 @@ fn atLeast(a: Word, k: u5) bool {
     return !ops.isNeg(ops.sub(m, @as(Word, 1) << k));
 }
 
-/// 2 when some component is >= 2^22, 1 when some is >= 2^21, else 0.
-fn stageShift(z: []const Cx) u5 {
-    var sh: u5 = 0;
-    for (z) |c| {
-        if (atLeast(c.re, 22) or atLeast(c.im, 22)) return 2;
-        if (atLeast(c.re, 21) or atLeast(c.im, 21)) sh = 1;
-    }
-    return sh;
+/// The right shift that brings every component into [-2^lim, 2^lim]: k - lim when positive,
+/// every component in [-2^k, 2^k) with k = 23 - (the fewest redundant sign bits).
+fn stageShift(z: []const Cx, lim: u5) u5 {
+    var n: u5 = 24;
+    for (z) |c| n = @min(n, @min(ops.norm(c.re), ops.norm(c.im)));
+    const k: i32 = 23 - @as(i32, n);
+    return @intCast(@max(0, k - lim));
 }
 
-/// In place: FFT(z) / 2^return over n4 points, z already in bit-reversed order.
+fn scale(z: []Cx, sh: u5) void {
+    if (sh != 0) for (z) |*c| {
+        c.* = .{ .re = ops.rshr(c.re, sh), .im = ops.rshr(c.im, sh) };
+    };
+}
+
+fn cadd(a: Cx, b: Cx) Cx {
+    return .{ .re = ops.add(a.re, b.re), .im = ops.add(a.im, b.im) };
+}
+
+fn csub(a: Cx, b: Cx) Cx {
+    return .{ .re = ops.sub(a.re, b.re), .im = ops.sub(a.im, b.im) };
+}
+
+/// a - j b and a + j b.
+fn cmj(a: Cx, b: Cx) Cx {
+    return .{ .re = ops.add(a.re, b.im), .im = ops.sub(a.im, b.re) };
+}
+
+fn cpj(a: Cx, b: Cx) Cx {
+    return .{ .re = ops.sub(a.re, b.im), .im = ops.add(a.im, b.re) };
+}
+
+/// In place: FFT(z) / 2^return over n4 points, z already in (radix-2) bit-reversed order.
+/// Bit-reversed order puts the four blocks a radix-4 step combines as x[4m], x[4m + 2],
+/// x[4m + 1], x[4m + 3] of the 4 l points it builds.
 fn fft(comptime n2: usize, z: []Cx) u5 {
     const T = Tables(n2);
     var scaled: u5 = 0;
-    var size: usize = 2;
-    while (size <= T.n4) : (size *= 2) {
-        const sh = stageShift(z);
-        if (sh != 0) for (z) |*c| {
-            c.* = .{ .re = ops.rshr(c.re, sh), .im = ops.rshr(c.im, sh) };
-        };
+    var l: usize = 1;
+    if (T.radix2_first) {
+        const sh = stageShift(z, 21);
+        scale(z, sh);
         scaled += sh;
-        const half = size / 2;
-        const step = T.n4 / size;
+        var i: usize = 0;
+        while (i < T.n4) : (i += 2) {
+            const a = z[i];
+            z[i] = cadd(a, z[i + 1]);
+            z[i + 1] = csub(a, z[i + 1]);
+        }
+        l = 2;
+    }
+    var t: usize = 0;
+    while (4 * l <= T.n4) : (l *= 4) {
+        const sh = stageShift(z, 20);
+        scale(z, sh);
+        scaled += sh;
         var start: usize = 0;
-        while (start < T.n4) : (start += size) {
-            for (0..half) |j| {
-                const a = z[start + j];
-                const t = cmul(z[start + j + half], T.fft[j * step]);
-                z[start + j] = .{ .re = ops.add(a.re, t.re), .im = ops.add(a.im, t.im) };
-                z[start + j + half] = .{ .re = ops.sub(a.re, t.re), .im = ops.sub(a.im, t.im) };
+        while (start < T.n4) : (start += 4 * l) {
+            for (0..l) |j| {
+                const w = T.tw4[t + j];
+                const b0 = z[start + j];
+                const b1 = cmul(z[start + l + j], w[1]); // F2 W^2j
+                const b2 = cmul(z[start + 2 * l + j], w[0]); // F1 W^j
+                const b3 = cmul(z[start + 3 * l + j], w[2]); // F3 W^3j
+                const p = cadd(b0, b1);
+                const q = csub(b0, b1);
+                const r = cadd(b2, b3);
+                const s2 = csub(b2, b3);
+                z[start + j] = cadd(p, r);
+                z[start + l + j] = cmj(q, s2);
+                z[start + 2 * l + j] = csub(p, r);
+                z[start + 3 * l + j] = cpj(q, s2);
             }
         }
+        t += l;
     }
     return scaled;
 }
@@ -245,7 +321,7 @@ fn exponentFor(comptime n2: usize, w: *const [n2]Word, target: f64) i32 {
     return @intFromFloat(@floor(target - std.math.log2(peak)));
 }
 
-test "long and short blocks stay within one PCM step of double precision" {
+test "long and short blocks stay near one PCM step of double precision" {
     var prng = std.Random.DefaultPrng.init(0x1D);
     const rnd = prng.random();
     var worst: Err = .{ .exact = 0, .refd = 0, .peak = 0 };
@@ -262,11 +338,11 @@ test "long and short blocks stay within one PCM step of double precision" {
         worst.refd = @max(worst.refd, @max(a.refd, b.refd));
         worst.peak = @max(worst.peak, @max(a.peak, b.peak));
     }
-    // One 16-bit PCM step is 2^7 in Q7. Measured: 73 against double precision at a 2^21.7
-    // peak (the reference: 41), 36 against the reference; the error grows with loudness, from
-    // 0.5 Q7 at 2^10 peaks. Bounds with headroom, to catch a regression:
-    try testing.expect(worst.exact < 96);
-    try testing.expect(worst.refd < 48);
+    // One 16-bit PCM step is 2^7 in Q7. Measured: 143 against double precision at a 2^21.7
+    // peak (the reference: 41; the radix-2 FFT: 73), 102 against the reference; the error grows
+    // with loudness. Bounds with headroom, to catch a regression:
+    try testing.expect(worst.exact < 160);
+    try testing.expect(worst.refd < 112);
     try testing.expect(worst.peak > 1 << 21);
 }
 
@@ -304,17 +380,48 @@ test "normalising puts the largest word in [2^21, 2^22) and keeps the value" {
     }
 }
 
-test "a stage quarters from 2^22, halves from 2^21, and its butterflies stay below 2^22.3" {
-    var z = [_]Cx{ .{ .re = 0, .im = (1 << 21) - 1 }, .{ .re = 5, .im = 0 } };
-    try testing.expectEqual(@as(u5, 0), stageShift(&z));
-    z[1].re = -(1 << 21);
-    try testing.expectEqual(@as(u5, 1), stageShift(&z));
-    z[0].im = 1 << 22;
-    try testing.expectEqual(@as(u5, 2), stageShift(&z));
-    // after the shift every component is at most 2^21: |a + w b| <= 2^21 + 2^21.5 + 1 for any
-    // twiddle, below 2^22.3
-    try testing.expect(ops.rshr((1 << 23) - 1, 2) <= 1 << 21);
-    try testing.expect(ops.rshr((1 << 22) - 1, 1) <= 1 << 21);
+test "a stage's shift brings every component within 2^lim" {
+    var z = [_]Cx{ .{ .re = 0, .im = (1 << 20) - 1 }, .{ .re = 5, .im = 0 } };
+    try testing.expectEqual(@as(u5, 0), stageShift(&z, 20));
+    z[1].re = -(1 << 20); // fits [-2^20, 2^20)
+    try testing.expectEqual(@as(u5, 0), stageShift(&z, 20));
+    z[1].re = 1 << 20;
+    try testing.expectEqual(@as(u5, 1), stageShift(&z, 20));
+    z[0].im = (1 << 23) - 1;
+    try testing.expectEqual(@as(u5, 3), stageShift(&z, 20));
+    try testing.expectEqual(@as(u5, 2), stageShift(&z, 21));
+    // the largest input after the shift, rounded up, is 2^20: a radix-4 output is at most
+    // (1 + 3 sqrt 2) 2^20 + 3 rounding LSBs, below 2^22.4
+    try testing.expect(ops.rshr((1 << 23) - 1, 3) <= 1 << 20);
+}
+
+test "the radix-4 FFT matches a direct DFT" {
+    const n2 = 1024;
+    const T = Tables(n2);
+    var prng = std.Random.DefaultPrng.init(0xF4);
+    const rnd = prng.random();
+    var x: [T.n4]Cx = undefined;
+    for (&x) |*c| c.* = .{ .re = rnd.intRangeAtMost(Word, -(1 << 20), 1 << 20), .im = rnd.intRangeAtMost(Word, -(1 << 20), 1 << 20) };
+    var z: [T.n4]Cx = undefined;
+    for (0..T.n4) |n| z[T.rev[n]] = x[n];
+    const sc = fft(n2, &z);
+    var worst: f64 = 0;
+    for (0..T.n4) |k| {
+        var re: f64 = 0;
+        var im: f64 = 0;
+        for (0..T.n4) |n| {
+            const a = -2.0 * std.math.pi * @as(f64, @floatFromInt(n * k % T.n4)) / T.n4;
+            const xr: f64 = @floatFromInt(x[n].re);
+            const xi: f64 = @floatFromInt(x[n].im);
+            re += xr * @cos(a) - xi * @sin(a);
+            im += xr * @sin(a) + xi * @cos(a);
+        }
+        const f = std.math.ldexp(@as(f64, 1), -@as(i32, sc));
+        worst = @max(worst, @abs(re * f - @as(f64, @floatFromInt(z[k].re))));
+        worst = @max(worst, @abs(im * f - @as(f64, @floatFromInt(z[k].im))));
+    }
+    // the output is ~2^20 * sqrt(512) / 2^sc; a few LSBs of rounding per stage
+    try testing.expect(worst < 16);
 }
 
 test "an all-zero block gives silence" {

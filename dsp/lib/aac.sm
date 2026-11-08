@@ -1061,7 +1061,7 @@ ishort: ldi s3, #DQ_OUT
 sloop:  yld(s5, AK_IMI)
         ldi s6, #128
         ak_xcopyd(IMS_IN)
-        imdct(128, 64, 7, 6, IMS_IN, DQ_SPEC, IMS_OUT, PRES, POSTS, TWS, REVS, ESLOT)
+        imdct_even(128, 64, 7, 6, IMS_IN, DQ_SPEC, IMS_OUT, PRES, POSTS, TWS, REVS, ESLOT)
         ldi s5, #IMS_OUT
         ldi s6, #256
         yld(s4, AK_IMO)

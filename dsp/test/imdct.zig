@@ -56,5 +56,5 @@ test "imdct transforms a long block as the twin does" {
 }
 
 test "imdct transforms a short block as the twin does" {
-    try runs(128, "imdct(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, 0x2400, 0x2390)", 0x5B7);
+    try runs(128, "imdct_even(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, 0x2400, 0x2390)", 0x5B7);
 }

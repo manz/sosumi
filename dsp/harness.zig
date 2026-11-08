@@ -80,18 +80,13 @@ pub fn putCx(st: *emu.State, gpa: std.mem.Allocator, base: u32, k: usize, c: imd
     try putX(st, gpa, base + 2 * @as(u32, @intCast(k)) + 1, c.im);
 }
 
-/// One IMDCT size's tables: PRE, POST, TW stage by stage from the twin's fft, Y REV.
+/// One IMDCT size's tables: PRE, POST, TW the twin's radix-4 triples, Y REV.
 pub fn stageImdct(st: *emu.State, gpa: std.mem.Allocator, comptime n2: usize, pre: u32, post: u32, tw: u32, rev: u32) !void {
     const T = imdct.Tables(n2);
     for (T.pre, T.post, 0..) |a, c, k| {
         try putCx(st, gpa, pre, k, a);
         try putCx(st, gpa, post, k, c);
     }
-    var at: usize = 0;
-    var size: usize = 2;
-    while (size <= T.n4) : (size *= 2) for (0..size / 2) |i| {
-        try putCx(st, gpa, tw, at, T.fft[i * (T.n4 / size)]);
-        at += 1;
-    };
+    for (T.tw4, 0..) |w, i| for (w, 0..) |c, m| try putCx(st, gpa, tw, 3 * i + m, c);
     for (T.rev, 0..) |r, n| try putY(st, gpa, rev + @as(u32, @intCast(n)), 2 * @as(i32, r) - 2);
 }
