@@ -22,7 +22,7 @@
 ;
 ; Keeps the bit reader (e5, s9, s10) and s14, s15. Uses every other s register; unpredict
 ; parks s9 and s10 at X:[A10 + 40], +41 (past the coefficients and their zeros up to +35; Y
-; is 16 bits, the cache is not) to free them for the tap and the adaptation, through A5. It also writes R6, R7, e6
+; is 16 bits, the cache is not), and keeps two constants at +42, +43 through A12, A13 to free them for the tap and the adaptation, through A5. It also writes R6, R7, e6
 ; and p3.
 ; Left shifts by a runtime count that must wrap go through sxr first, so the 0x19 shift
 ; (which saturates) never overflows.
@@ -109,23 +109,17 @@ done:
 
 ; The adaptation's registers: A9 = out[j - order], A11 = the reversed coefficients,
 ; s8 = order steps, s9 = h = rshr(2^ds - 1, 1), s10 = -ds (floor(v / 2^ds) = rshr(v - h, ds)),
-; s11 = 5, s6 = 2^15 - 1, s1 = 2^18, s5 = w << 18 (w = 1), s3 = the first out. Uses s2.
+; both from X:[A12], X:[A13] (the window computes them once), s6 = 2^15 - 1, s5 = w = 1,
+; s3 = the first out. Uses s2.
 ; D (set before, in s4) is tested directly: s4 <= 0.
 .macro adapt_init() {
         x19.aagu A9, A7, #5, #0
         x19.aagu A11, A10, #5, #0
         ldy s8, e12
-        ldy s2, e13
-        x19.alu s9, s14, s2, #SHIFT ; 2^ds
-        alu s10, s0, s2, #OP_SUB ; -ds
-        alu s9, s9, s14, #OP_SUB
-        alu s2, s0, s14, #OP_SUB
-        x19.alu s9, s9, s2, #SHIFT ; h
-        ldi s11, #5
+        x19.xrd s9, #12         ; h (window)
+        x19.xrd s10, #13        ; -ds (window)
         ldi s6, #0x7FFF
-        ldi s1, #18
-        x19.alu s1, s14, s1, #SHIFT ; 2^18
-        alu s5, s1, s0, #OP_ADD
+        alu s5, s14, s0, #OP_ADD ; w = 1
         x19.xrd s3, #9
         x02.ainc #9, #9
 }
@@ -207,6 +201,17 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         x17.mve e6, s13         ; e6 = -M - 1
         x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -M
         ragu R6, A10, R7, #29   ; A10 - R7
+        ; the adaptation's h = rshr(2^ds - 1, 1) and -ds, once: X:[A10 + 42], +43
+        x03.agu A12, A10, #42, #0, A0
+        x03.agu A13, A10, #43, #0, A0
+        ldy s2, e13
+        x19.alu s9, s14, s2, #SHIFT ; 2^ds
+        alu s10, s0, s2, #OP_SUB ; -ds
+        alu s9, s9, s14, #OP_SUB
+        alu s2, s0, s14, #OP_SUB
+        x19.alu s9, s9, s2, #SHIFT ; h
+        stx A12, s9
+        stx A13, s10
 sample: ldy s7, e15
         alu s12, s7, s14, #OP_SUB
         ptst p3, s0, #LT12, #PTST
@@ -306,10 +311,9 @@ pstep:  alu s3, s7, s3, #OP_SUB ; dd = top - out
         alu s13, s6, s0, #OP_ADD
 pput:   stx A11, s13
         x02.ainc #11, #11       ; (overwrites s2)
-        x19.alu s12, s3, s11, #SHIFT ; m << 5
-        x02.mpy s12, s5, s12    ; w * m, exact
+        x18.mpy s12, s0, s5, s3 ; w m, |w m| < 2^23 (x17 reference.md x18.mpy, low product)
         alu s4, s4, s12, #OP_SUB
-        alu s5, s5, s1, #OP_ADD ; w += 1
+        alu s5, s5, s14, #OP_ADD ; w += 1
         alu s8, s8, s14, #OP_SUB
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
@@ -356,10 +360,9 @@ nstep:  alu s3, s7, s3, #OP_SUB ; dd = top - out
         alu s13, s13, s14, #OP_SUB
 nput:   stx A11, s13
         x02.ainc #11, #11       ; (overwrites s2)
-        x19.alu s12, s3, s11, #SHIFT ; m << 5
-        x02.mpy s12, s5, s12    ; w * m, exact
+        x18.mpy s12, s0, s5, s3 ; w m (m <= 0 here: the low product mod 2^24)
         alu s4, s4, s12, #OP_ADD
-        alu s5, s5, s1, #OP_ADD ; w += 1
+        alu s5, s5, s14, #OP_ADD ; w += 1
         alu s8, s8, s14, #OP_SUB
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
