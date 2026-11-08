@@ -39,3 +39,47 @@ pub fn assemble(gpa: std.mem.Allocator, src: []const u8) ![]u32 {
 pub fn stagePacket(gpa: std.mem.Allocator, state: *emu.State, base: u32, data: []const u8) !void {
     for (0..data.len / 2) |i| try state.y_mem.put(gpa, base + @as(u32, @intCast(i)), @as(u32, data[2 * i]) << 8 | data[2 * i + 1]);
 }
+
+const Word = @import("ref").dsp.ops.Word;
+const imdct = @import("ref").dsp.aac.imdct;
+
+/// X:[addr] = v, its 24 bits.
+pub fn putX(st: *emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
+    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
+}
+
+/// X[base ..] = ws.
+pub fn putAllX(st: *emu.State, gpa: std.mem.Allocator, base: u32, ws: []const Word) !void {
+    for (ws, 0..) |v, k| try putX(st, gpa, base + @as(u32, @intCast(k)), v);
+}
+
+/// Y:[addr] = v, its low 16 bits.
+pub fn putY(st: *emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
+    try st.y_mem.put(gpa, addr, @as(u16, @truncate(@as(u32, @bitCast(v)))));
+}
+
+/// A Y word read back as signed 16 bits; a missing word reads as 0xDEAD.
+pub fn sx16(v: ?u32) i32 {
+    return @as(i16, @bitCast(@as(u16, @truncate(v orelse 0xDEAD))));
+}
+
+pub fn putCx(st: *emu.State, gpa: std.mem.Allocator, base: u32, k: usize, c: imdct.Cx) !void {
+    try putX(st, gpa, base + 2 * @as(u32, @intCast(k)), c.re);
+    try putX(st, gpa, base + 2 * @as(u32, @intCast(k)) + 1, c.im);
+}
+
+/// One IMDCT size's tables: PRE, POST, TW stage by stage from the twin's fft, Y REV.
+pub fn stageImdct(st: *emu.State, gpa: std.mem.Allocator, comptime n2: usize, pre: u32, post: u32, tw: u32, rev: u32) !void {
+    const T = imdct.Tables(n2);
+    for (T.pre, T.post, 0..) |a, c, k| {
+        try putCx(st, gpa, pre, k, a);
+        try putCx(st, gpa, post, k, c);
+    }
+    var at: usize = 0;
+    var size: usize = 2;
+    while (size <= T.n4) : (size *= 2) for (0..size / 2) |i| {
+        try putCx(st, gpa, tw, at, T.fft[i * (T.n4 / size)]);
+        at += 1;
+    };
+    for (T.rev, 0..) |r, n| try putY(st, gpa, rev + @as(u32, @intCast(n)), 2 * @as(i32, r) - 2);
+}

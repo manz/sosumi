@@ -14,18 +14,6 @@ const testing = std.testing;
 const fi = 4;
 const Y = 0x2600;
 
-fn putX(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
-}
-
-fn putY(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
-    try st.y_mem.put(gpa, addr, @as(u16, @truncate(@as(u32, @bitCast(v)))));
-}
-
-fn sx16(v: ?u32) i32 {
-    return @as(i16, @bitCast(@as(u16, @truncate(v orelse 0xDEAD))));
-}
-
 /// tns_data() as the library's TN_REC wants it: per window n_filt, then if n_filt > 0
 /// coef_res and per filter length, order, then if order > 0 direction and the order codes.
 fn record(gpa: std.mem.Allocator, t: *const ics.Tns, nwin: usize, out: *std.ArrayList(i32)) !void {
@@ -97,18 +85,18 @@ test "tns_channel filters every window as the twin's apply" {
         var state = h.emu.State{};
         defer state.deinit(gpa);
         const top = @min(if (short) rtns.max_bands_short[fi] else rtns.max_bands_long[fi], info.max_sfb);
-        try putY(&state, gpa, Y + 0, blk.e);
-        try putY(&state, gpa, Y + 1, @intCast(nwin));
-        try putY(&state, gpa, Y + 2, if (short) 128 else 1024);
-        try putY(&state, gpa, Y + 3, nswb);
-        try putY(&state, gpa, Y + 4, top);
-        try putY(&state, gpa, Y + 5, if (short) rtns.max_order_short else rtns.max_order_long);
-        for (offsets, 0..) |o, k| try putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
-        for (rec.items, 0..) |v, k| try putY(&state, gpa, Y + 0x60 + @as(u32, @intCast(k)), v);
+        try h.putY(&state, gpa, Y + 0, blk.e);
+        try h.putY(&state, gpa, Y + 1, @intCast(nwin));
+        try h.putY(&state, gpa, Y + 2, if (short) 128 else 1024);
+        try h.putY(&state, gpa, Y + 3, nswb);
+        try h.putY(&state, gpa, Y + 4, top);
+        try h.putY(&state, gpa, Y + 5, if (short) rtns.max_order_short else rtns.max_order_long);
+        for (offsets, 0..) |o, k| try h.putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
+        for (rec.items, 0..) |v, k| try h.putY(&state, gpa, Y + 0x60 + @as(u32, @intCast(k)), v);
         // coef_res 0 at TN_K + 4 + c, coef_res 1 at TN_K + 16 + c
-        for (T.refl[0][0..8], 0..) |v, k| try putX(&state, gpa, 0x1F00 + @as(u32, @intCast(k)), v);
-        for (T.refl[1], 0..) |v, k| try putX(&state, gpa, 0x1F08 + @as(u32, @intCast(k)), v);
-        for (blk.w, 0..) |v, k| try putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
+        for (T.refl[0][0..8], 0..) |v, k| try h.putX(&state, gpa, 0x1F00 + @as(u32, @intCast(k)), v);
+        for (T.refl[1], 0..) |v, k| try h.putX(&state, gpa, 0x1F08 + @as(u32, @intCast(k)), v);
+        for (blk.w, 0..) |v, k| try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
 
         const st = T.apply(&t, info, fi, &blk);
         halvings += st.halvings;
@@ -116,9 +104,9 @@ test "tns_channel filters every window as the twin's apply" {
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 28);
         try testing.expect(state.halted);
 
-        try testing.expectEqual(@as(i32, blk.e), sx16(state.getY(Y + 0)));
-        try testing.expectEqual(@as(i32, @intCast(st.halvings)), sx16(state.getY(Y + 6)));
-        try testing.expectEqual(@as(i32, @intCast(st.gave_up)), sx16(state.getY(Y + 7)));
+        try testing.expectEqual(@as(i32, blk.e), h.sx16(state.getY(Y + 0)));
+        try testing.expectEqual(@as(i32, @intCast(st.halvings)), h.sx16(state.getY(Y + 6)));
+        try testing.expectEqual(@as(i32, @intCast(st.gave_up)), h.sx16(state.getY(Y + 7)));
         for (blk.w, 0..) |w, k| {
             try testing.expectEqual(@as(u32, @as(u24, @bitCast(w))), state.readX(0x400 + @as(u32, @intCast(k))) orelse 0xDEAD);
         }

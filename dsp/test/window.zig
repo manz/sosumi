@@ -18,14 +18,6 @@ const b_at = 0x1100;
 const ovl_at = 0x1900;
 const pcm_at = 0x2000;
 
-fn putX(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
-}
-
-fn putAll(st: *h.emu.State, gpa: std.mem.Allocator, base: u32, ws: []const Word) !void {
-    for (ws, 0..) |v, k| try putX(st, gpa, base + @as(u32, @intCast(k)), v);
-}
-
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
     return switch (seq) {
         .only_long => std.fmt.comptimePrint("win_long({d}, {d}, {d}, {d}, {d})", .{ t_at, lp_at, lc_at, ovl_at, pcm_at }),
@@ -60,14 +52,14 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
 
             var state = h.emu.State{};
             defer state.deinit(gpa);
-            try putAll(&state, gpa, t_at, &t);
-            try putAll(&state, gpa, lp_at, &W.long[prev]);
-            try putAll(&state, gpa, lc_at, &W.long[cur]);
-            try putAll(&state, gpa, sp_at, &W.short[prev]);
-            try putAll(&state, gpa, sc_at, &W.short[cur]);
-            try putAll(&state, gpa, ovl_at, &st.overlap);
+            try h.putAllX(&state, gpa, t_at, &t);
+            try h.putAllX(&state, gpa, lp_at, &W.long[prev]);
+            try h.putAllX(&state, gpa, lc_at, &W.long[cur]);
+            try h.putAllX(&state, gpa, sp_at, &W.short[prev]);
+            try h.putAllX(&state, gpa, sc_at, &W.short[cur]);
+            try h.putAllX(&state, gpa, ovl_at, &st.overlap);
             // B starts as garbage: every word must be written
-            for (0..2048) |k| try putX(&state, gpa, b_at + @as(u32, @intCast(k)), 0x5A5A5A);
+            for (0..2048) |k| try h.putX(&state, gpa, b_at + @as(u32, @intCast(k)), 0x5A5A5A);
 
             var buf: [2048]Word = undefined;
             const in: W.Imdct = if (seq == .eight_short) .{ .short = @ptrCast(&t) } else .{ .long = &t };

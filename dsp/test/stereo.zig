@@ -14,18 +14,6 @@ const testing = std.testing;
 const fi = 4;
 const Y = 0x2600;
 
-fn putX(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
-}
-
-fn putY(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
-    try st.y_mem.put(gpa, addr, @as(u16, @truncate(@as(u32, @bitCast(v)))));
-}
-
-fn sx16(v: ?u32) i32 {
-    return @as(i16, @bitCast(@as(u16, @truncate(v orelse 0xDEAD))));
-}
-
 fn emptyChannel(info: ics.IcsInfo) ics.Channel {
     return .{ .global_gain = 100, .info = info, .sections = .{}, .scalefactors = @splat(@splat(0)), .pulse = null, .tns = null, .spectrum = @splat(0) };
 }
@@ -102,38 +90,38 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
         var state = h.emu.State{};
         defer state.deinit(gpa);
         const nb = @as(usize, info.num_window_groups) * info.max_sfb;
-        try putY(&state, gpa, Y + 0, @intCast(nb));
-        try putY(&state, gpa, Y + 1, info.num_window_groups);
-        try putY(&state, gpa, Y + 2, info.max_sfb);
-        try putY(&state, gpa, Y + 3, if (short) 128 else 1024);
-        try putY(&state, gpa, Y + 4, pair.ms.?.present);
-        try putY(&state, gpa, Y + 5, l.e);
-        try putY(&state, gpa, Y + 6, r.e);
-        for (info.group_len, 0..) |gl, g| try putY(&state, gpa, Y + 0x10 + @as(u32, @intCast(g)), gl);
-        for (offsets, 0..) |o, k| try putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
+        try h.putY(&state, gpa, Y + 0, @intCast(nb));
+        try h.putY(&state, gpa, Y + 1, info.num_window_groups);
+        try h.putY(&state, gpa, Y + 2, info.max_sfb);
+        try h.putY(&state, gpa, Y + 3, if (short) 128 else 1024);
+        try h.putY(&state, gpa, Y + 4, pair.ms.?.present);
+        try h.putY(&state, gpa, Y + 5, l.e);
+        try h.putY(&state, gpa, Y + 6, r.e);
+        for (info.group_len, 0..) |gl, g| try h.putY(&state, gpa, Y + 0x10 + @as(u32, @intCast(g)), gl);
+        for (offsets, 0..) |o, k| try h.putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
         for (0..info.num_window_groups) |g| for (0..info.max_sfb) |sfb| {
             const i: u32 = @intCast(g * info.max_sfb + sfb);
             const rb = pair.right.sections.sfb_cb[g][sfb];
-            try putY(&state, gpa, Y + 0x60 + i, pair.left.sections.sfb_cb[g][sfb]);
-            try putY(&state, gpa, Y + 0xE0 + i, rb);
-            try putY(&state, gpa, Y + 0x160 + i, pair.right.scalefactors[g][sfb]);
-            try putY(&state, gpa, Y + 0x1E0 + i, @intFromBool(pair.ms.?.used[g][sfb]));
+            try h.putY(&state, gpa, Y + 0x60 + i, pair.left.sections.sfb_cb[g][sfb]);
+            try h.putY(&state, gpa, Y + 0xE0 + i, rb);
+            try h.putY(&state, gpa, Y + 0x160 + i, pair.right.scalefactors[g][sfb]);
+            try h.putY(&state, gpa, Y + 0x1E0 + i, @intFromBool(pair.ms.?.used[g][sfb]));
             if (rb >= ics.intensity_hcb2) {
                 seen_is += 1;
                 if (rb == ics.intensity_hcb2 and pair.ms.?.present == 1) seen_is_neg += 1;
             } else if (pair.ms.?.used[g][sfb] and pair.left.sections.sfb_cb[g][sfb] < ics.noise_hcb) seen_ms += 1;
         };
-        for (St.quarter, 0..) |t, b| try putX(&state, gpa, 0x1F00 + @as(u32, @intCast(b)), t);
+        for (St.quarter, 0..) |t, b| try h.putX(&state, gpa, 0x1F00 + @as(u32, @intCast(b)), t);
         for (l.w, r.w, 0..) |a, b, k| {
-            try putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), a);
-            try putX(&state, gpa, 0x800 + @as(u32, @intCast(k)), b);
+            try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), a);
+            try h.putX(&state, gpa, 0x800 + @as(u32, @intCast(k)), b);
         }
         St.applyPair(&pair, &l, &r, offsets, offsets);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 24);
         try testing.expect(state.halted);
 
-        try testing.expectEqual(@as(i32, l.e), sx16(state.getY(Y + 5)));
-        try testing.expectEqual(@as(i32, r.e), sx16(state.getY(Y + 6)));
+        try testing.expectEqual(@as(i32, l.e), h.sx16(state.getY(Y + 5)));
+        try testing.expectEqual(@as(i32, r.e), h.sx16(state.getY(Y + 6)));
         for (l.w, r.w, 0..) |a, b, k| {
             try testing.expectEqual(@as(u32, @as(u24, @bitCast(a))), state.readX(0x400 + @as(u32, @intCast(k))) orelse 0xDEAD);
             try testing.expectEqual(@as(u32, @as(u24, @bitCast(b))), state.readX(0x800 + @as(u32, @intCast(k))) orelse 0xDEAD);

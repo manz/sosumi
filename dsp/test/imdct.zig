@@ -8,22 +8,8 @@ const I = ref.dsp.aac.imdct;
 const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
-fn putX(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
-}
-
-fn putY(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
-    try st.y_mem.put(gpa, addr, @as(u16, @truncate(@as(u32, @bitCast(v)))));
-}
-
-fn putCx(st: *h.emu.State, gpa: std.mem.Allocator, base: u32, k: usize, c: I.Cx) !void {
-    try putX(st, gpa, base + 2 * @as(u32, @intCast(k)), c.re);
-    try putX(st, gpa, base + 2 * @as(u32, @intCast(k)) + 1, c.im);
-}
-
 fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
     const gpa = testing.allocator;
-    const T = I.Tables(n2);
     const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init(0x4000)\n        {s}\n        x17.halt\n", .{call});
     defer gpa.free(src);
     const prog = try h.assemble(gpa, src);
@@ -54,21 +40,9 @@ fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        for (w, 0..) |v, k| try putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
-        for (T.pre, 0..) |c, k| try putCx(&state, gpa, 0x1000, k, c);
-        for (T.post, 0..) |c, k| try putCx(&state, gpa, 0x1400, k, c);
-        // TW: stage by stage, for size 2, 4, .. n4, the twin's fft[i * n4 / size], i < size / 2
-        var at: usize = 0;
-        var size: usize = 2;
-        while (size <= T.n4) : (size *= 2) {
-            for (0..size / 2) |i| {
-                try putCx(&state, gpa, 0x1A00, at, T.fft[i * (T.n4 / size)]);
-                at += 1;
-            }
-        }
-        try testing.expectEqual(T.n4 - 1, at);
-        for (T.rev, 0..) |r, n| try putY(&state, gpa, 0x2400 + @as(u32, @intCast(n)), 2 * @as(i32, r) - 2);
-        try putY(&state, gpa, 0x2390, e);
+        for (w, 0..) |v, k| try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
+        try h.stageImdct(&state, gpa, n2, 0x1000, 0x1400, 0x1A00, 0x2400);
+        try h.putY(&state, gpa, 0x2390, e);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 26);
         try testing.expect(state.halted);
         for (want, 0..) |v, k| {

@@ -12,28 +12,20 @@ const testing = std.testing;
 
 const fi = 4; // 44.1 kHz
 
-fn putX(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.x_mem.put(gpa, addr, @as(u24, @bitCast(v)));
-}
-
-fn putY(st: *h.emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
-    try st.y_mem.put(gpa, addr, @as(u16, @truncate(@as(u24, @bitCast(v)))));
-}
-
 /// The twin's tables at the library's addresses: X DQ_D pairs (m, em), DQ_IT, DQ_G; Y DQ_IE,
 /// DQ_IR (4 rem), DQ_OFF.
 fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, offsets: []const u16) !void {
     for (D.direct_m, D.direct_e, 0..) |m, e, k| {
-        try putX(st, gpa, 0x1800 + 2 * @as(u32, @intCast(k)), m);
-        try putX(st, gpa, 0x1801 + 2 * @as(u32, @intCast(k)), e);
+        try h.putX(st, gpa, 0x1800 + 2 * @as(u32, @intCast(k)), m);
+        try h.putX(st, gpa, 0x1801 + 2 * @as(u32, @intCast(k)), e);
     }
-    for (D.interp, 0..) |v, j| try putX(st, gpa, 0x1910 + @as(u32, @intCast(j)), v);
-    for (D.gain, 0..) |v, j| try putX(st, gpa, 0x1960 + @as(u32, @intCast(j)), v);
+    for (D.interp, 0..) |v, j| try h.putX(st, gpa, 0x1910 + @as(u32, @intCast(j)), v);
+    for (D.gain, 0..) |v, j| try h.putX(st, gpa, 0x1960 + @as(u32, @intCast(j)), v);
     for (D.interp_e, D.interp_rem, 0..) |e, r, j| {
-        try putY(st, gpa, 0x2140 + @as(u32, @intCast(j)), e);
-        try putY(st, gpa, 0x2148 + @as(u32, @intCast(j)), 4 * r);
+        try h.putY(st, gpa, 0x2140 + @as(u32, @intCast(j)), e);
+        try h.putY(st, gpa, 0x2148 + @as(u32, @intCast(j)), 4 * r);
     }
-    for (offsets, 0..) |o, j| try putY(st, gpa, 0x2180 + @as(u32, @intCast(j)), @intCast(o));
+    for (offsets, 0..) |o, j| try h.putY(st, gpa, 0x2180 + @as(u32, @intCast(j)), @intCast(o));
 }
 
 test "dq_channel dequantises as the twin does: words and exponent" {
@@ -92,15 +84,15 @@ test "dq_channel dequantises as the twin does: words and exponent" {
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        for (spec, 0..) |q, k| try putX(&state, gpa, @intCast(k), q);
+        for (spec, 0..) |q, k| try h.putX(&state, gpa, @intCast(k), q);
         try stageTables(&state, gpa, offsets);
-        try putY(&state, gpa, 0x2150, s.groups);
-        try putY(&state, gpa, 0x2151, s.max_sfb);
-        try putY(&state, gpa, 0x2152, if (short) 128 else 1024);
-        for (s.group_len, 0..) |l, j| try putY(&state, gpa, 0x2153 + @as(u32, @intCast(j)), l);
+        try h.putY(&state, gpa, 0x2150, s.groups);
+        try h.putY(&state, gpa, 0x2151, s.max_sfb);
+        try h.putY(&state, gpa, 0x2152, if (short) 128 else 1024);
+        for (s.group_len, 0..) |l, j| try h.putY(&state, gpa, 0x2153 + @as(u32, @intCast(j)), l);
         for (0..b.n) |i| {
-            try putY(&state, gpa, 0x2000 + @as(u32, @intCast(i)), b.book[i]);
-            try putY(&state, gpa, 0x2080 + @as(u32, @intCast(i)), b.sf[i]);
+            try h.putY(&state, gpa, 0x2000 + @as(u32, @intCast(i)), b.book[i]);
+            try h.putY(&state, gpa, 0x2080 + @as(u32, @intCast(i)), b.sf[i]);
         }
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 24);
         try testing.expect(state.halted);
