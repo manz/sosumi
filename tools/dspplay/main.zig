@@ -5,6 +5,8 @@
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
 //!
+//! Packets decode in parallel, one host model per core: ALAC packets are independent.
+//!
 //! --check writes no audio: it decodes every packet with ref/dsp/alac too and reports each
 //! frame whose samples differ, then a summary; it exits 1 on any difference.
 const std = @import("std");
@@ -27,6 +29,71 @@ fn writeStereo(w: *std.Io.Writer, pcm: []const i16, nch: usize) !void {
         try w.writeInt(i16, pcm[i * nch + @min(c, nch - 1)], .little);
     };
 }
+
+const max_workers = 32;
+/// Workers allocate from the thread-safe allocator.
+const wa = std.heap.smp_allocator;
+
+/// One packet's result.
+const Slot = struct {
+    pcm: []i16,
+    frames: usize = 0,
+    bundles: usize = 0,
+    status: u32 = 0,
+    err: ?anyerror = null,
+    diff: ?Diff = null,
+};
+
+const Job = struct { packets: []const []u8, slots: []Slot, first: usize, step: usize };
+
+const Worker = struct {
+    player: dsp.Player,
+    twin: ?ref.dsp.alac.decoder.Decoder,
+    want: []i32,
+    nch: usize,
+
+    fn init(prog: []const u32, cfg: ref.alac.config.Config, check: bool) !Worker {
+        return .{
+            .player = try dsp.Player.init(wa, prog, cfg),
+            .twin = if (check) try ref.dsp.alac.decoder.Decoder.init(wa, cfg) else null,
+            .want = try wa.alloc(i32, @as(usize, cfg.frame_length) * cfg.channels),
+            .nch = cfg.channels,
+        };
+    }
+
+    fn deinit(self: *Worker) void {
+        self.player.deinit();
+        if (self.twin) |*t| t.deinit();
+        wa.free(self.want);
+    }
+
+    fn run(self: *Worker, job: Job) void {
+        var i = job.first;
+        while (i < job.packets.len) : (i += job.step) self.one(job.packets[i], &job.slots[i]);
+    }
+
+    fn one(self: *Worker, pkt: []const u8, sl: *Slot) void {
+        sl.err = null;
+        sl.diff = null;
+        const pcm = self.player.feed(pkt) catch |e| {
+            sl.err = e;
+            sl.status = self.player.status;
+            sl.frames = sl.pcm.len / self.nch;
+            @memset(sl.pcm, 0);
+            return;
+        };
+        sl.bundles = self.player.bundles;
+        sl.frames = pcm.len / self.nch;
+        @memcpy(sl.pcm[0..pcm.len], pcm);
+        if (self.twin) |*t| {
+            const n = t.decode(pkt, self.want) catch |e| {
+                sl.err = e;
+                return;
+            };
+            sl.diff = firstDiff(self.want[0 .. n * self.nch], pcm);
+        }
+    }
+};
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
@@ -51,45 +118,64 @@ pub fn main(init: std.process.Init) !void {
 
     const prog = try dsp.program(gpa);
     defer gpa.free(prog);
-    var player = try dsp.Player.init(gpa, prog, cfg);
-    defer player.deinit();
-    var twin = try ref.dsp.alac.decoder.Decoder.init(gpa, cfg);
-    defer twin.deinit();
-    const want = try gpa.alloc(i32, @as(usize, cfg.frame_length) * nch);
-    defer gpa.free(want);
-    const silence = try gpa.alloc(i16, @as(usize, cfg.frame_length) * nch);
-    defer gpa.free(silence);
-    @memset(silence, 0);
+
+    // ALAC packets carry no state from one to the next, so each worker decodes its share of a
+    // batch on its own host model; the batch is then written in order.
+    var all: std.ArrayList([]u8) = .empty;
+    defer all.deinit(gpa);
+    while (try packets.next()) |pkt| try all.append(gpa, pkt);
+    const workers = @max(1, @min(std.Thread.getCpuCount() catch 1, max_workers));
+    const batch = 2 * workers;
+    const frame = @as(usize, cfg.frame_length) * nch;
+    const slots = try gpa.alloc(Slot, batch);
+    defer gpa.free(slots);
+    for (slots) |*sl| sl.* = .{ .pcm = try gpa.alloc(i16, frame) };
+    defer for (slots) |sl| gpa.free(sl.pcm);
+    const ctx = try gpa.alloc(Worker, workers);
+    defer gpa.free(ctx);
+    for (ctx) |*c| c.* = try Worker.init(prog, cfg, check);
+    defer for (ctx) |*c| c.deinit();
+    std.debug.print("{d} workers\n", .{workers});
 
     var obuf: [1 << 16]u8 = undefined;
     var ow = std.Io.File.stdout().writer(io, &obuf);
     const w = &ow.interface;
 
-    var k: usize = 0;
     var bad: usize = 0;
     var failed: usize = 0;
     var max_bundles: usize = 0;
     var total_bundles: u64 = 0;
-    while (try packets.next()) |pkt| : (k += 1) {
-        const pcm = player.feed(pkt) catch |e| blk: {
-            if (failed < 5) std.debug.print("packet {d}: {s} (status {d})\n", .{ k, @errorName(e), player.status });
-            failed += 1;
-            break :blk silence;
-        };
-        max_bundles = @max(max_bundles, player.bundles);
-        total_bundles += player.bundles;
-        if (check) {
-            const n = try twin.decode(pkt, want);
-            if (firstDiff(want[0 .. n * nch], pcm)) |d| {
+    var base: usize = 0;
+    out: while (base < all.items.len) : (base += batch) {
+        const n = @min(batch, all.items.len - base);
+        var threads: [max_workers]?std.Thread = @splat(null);
+        for (ctx, 0..) |*c, t| {
+            const job: Job = .{ .packets = all.items[base .. base + n], .slots = slots[0..n], .first = t, .step = workers };
+            threads[t] = std.Thread.spawn(.{}, Worker.run, .{ c, job }) catch blk: {
+                c.run(job);
+                break :blk null;
+            };
+        }
+        for (threads[0..workers]) |th| if (th) |t| t.join();
+        for (slots[0..n], 0..) |*sl, i| {
+            const k = base + i;
+            if (sl.err) |e| {
+                if (failed < 5) std.debug.print("packet {d}: {s} (status {d})\n", .{ k, @errorName(e), sl.status });
+                failed += 1;
+            }
+            max_bundles = @max(max_bundles, sl.bundles);
+            total_bundles += sl.bundles;
+            if (sl.diff) |d| {
                 if (bad < 20) std.debug.print("frame {d}: sample {d} (ch {d}) want {d} got {d}\n", .{ k, d.at / nch, d.at % nch, d.want, d.got });
                 bad += 1;
             }
-            continue;
+            if (check) continue;
+            // the player went away (a closed pipe): stop quietly
+            writeStereo(w, sl.pcm[0 .. sl.frames * nch], nch) catch break :out;
         }
-        // the player went away (a closed pipe): stop quietly
-        writeStereo(w, pcm, nch) catch break;
     }
     w.flush() catch {};
+    const k = all.items.len;
     std.debug.print("{d} packets, {d} failed, worst {d} bundles, mean {d}\n", .{ k, failed, max_bundles, if (k == 0) 0 else total_bundles / k });
     if (check) {
         std.debug.print("{d} of {d} frames differ from ref/dsp/alac\n", .{ bad, k });

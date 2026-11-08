@@ -46,13 +46,14 @@ pub fn build(b: *std.Build) void {
         .root_module = b.createModule(.{
             .root_source_file = b.path("tools/dspplay/main.zig"),
             .target = target,
-            .optimize = optimize,
+            // the emulator is the hot path: Debug is far below real time
+            .optimize = .ReleaseFast,
             .imports = &.{
                 .{ .name = "ref", .module = ref_mod },
                 .{ .name = "dsp", .module = b.createModule(.{
                     .root_source_file = b.path("dsp/player.zig"),
                     .target = target,
-                    .optimize = optimize,
+                    .optimize = .ReleaseFast,
                     .imports = &.{
                         .{ .name = "ref", .module = ref_mod },
                         .{ .name = "asm", .module = x17.module("asm") },
