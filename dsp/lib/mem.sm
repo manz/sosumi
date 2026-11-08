@@ -7,10 +7,9 @@
 ; `x12.aset`, `x03.agu`). They use s13, e6, R7 and A14, and
 ; x03.agu's X read slot loads s7 (from X:[A0]), so s7 does not survive them.
 
-; e6 = addr.
+; e6 = addr: one lde (reference.md `lde`, own-entry: k = 2, 3, 5..15 load e<k> <- #imm16).
 .macro yat(addr) {
-        ldi s13, #addr - 1
-        x17.mve e6, s13
+        lde e6, #addr
 }
 
 .macro yld(dst, addr) {

@@ -31,7 +31,14 @@ fn load(ctx: ?*anyopaque, gpa: std.mem.Allocator, path: []const u8) anyerror!?[]
 
 /// The syllables of `src`, which may `.include` any lib above (caller frees).
 pub fn assemble(gpa: std.mem.Allocator, src: []const u8) ![]u32 {
-    return switch (try asm_mod.assembleFileWith(gpa, src, .{ .path = "t.sm", .loader = .{ .load = load } })) {
+    return assembleSites(gpa, src, null);
+}
+
+pub const Site = asm_mod.Site;
+
+/// `assemble`, also listing where each bundle came from when `sites` is set.
+pub fn assembleSites(gpa: std.mem.Allocator, src: []const u8, sites: ?*std.ArrayList(Site)) ![]u32 {
+    return switch (try asm_mod.assembleFileWith(gpa, src, .{ .path = "t.sm", .loader = .{ .load = load }, .sites = sites })) {
         .ok => |p| p,
         .err => |fe| {
             std.debug.print("line {d}: {s}\n", .{ fe.line, fe.lineText() });
