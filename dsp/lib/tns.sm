@@ -175,7 +175,7 @@ hdone:
         tn_copy(s3, s1, s10)
         ldi s3, #0
         yst(TN_TRY)
-again:  aimm(A10, TN_B)         ; B' = 0
+again:  aimm_e(5, TN_B)         ; B' = 0
         ldi s9, #12
 zb:     stx A10, s0
         x02.ainc #10, #10
@@ -198,7 +198,7 @@ zb:     stx A10, s0
         rimm R2, #-1            ; backwards: from the last sample
         alu s1, s1, s10, #OP_ADD
         alu s1, s1, s14, #OP_SUB
-fwd:    amov(A4, s1)
+fwd:    amov_e(2, s1)
         yld(s11, TN_ORD)
         ldi s7, #22
         x19.alu s7, s14, s7, #SHIFT ; 2^22 (amov is done with s7)
@@ -238,7 +238,7 @@ fail:   ldi s3, #TN_SAVE
 giveup: ldi s1, #TN_W
         yld(s2, TN_ST)
         alu s1, s1, s2, #OP_ADD
-        amov(A4, s1)
+        amov_e(2, s1)
         yld(s9, TN_LEN)
 gz:     stx A4, s0
         x02.ainc #4, #4
@@ -312,7 +312,7 @@ rdone:
         tn_yst(TN_LEN, 3, 1)    ; s11 (amov below uses s7, s12, s13)
         ldi s1, #TN_KC - 1
         alu s1, s1, s8, #OP_ADD ; K'[ord - 1]
-        amov(A12, s1)
+        amov_e(6, s1)
         rimm R5, #-1
         yld(s3, TN_RES)
         ldi s5, #TN_K + 4
@@ -336,7 +336,7 @@ cl:     alu s4, s2, s0, #OP_ADD
         alu s8, s8, s14, #OP_SUB ; (delay slot)
         nop()
         alu s6, s5, s6, #OP_ADD
-        amov(A8, s6)
+        amov_e(4, s6)
         x19.xrd s6, #8
         stx A12, s6
         x18.rag101 s0, R3, A12, R5, #2

@@ -142,8 +142,8 @@ cp:     ldy s3, e7
 
 ; X[DST ..] = X[s5 ..], s6 words (s6 > 0). Uses s1, s2, s3, s4, A4, A8 and amov's registers.
 .macro ak_xcopyd(DST) {
-        amov(A4, s5)
-        aimm(A8, DST)
+        amov_e(2, s5)
+        aimm_e(4, DST)
         alu s3, s6, s0, #OP_ADD
 xc:     x19.xrd s1, #4
         x02.ainc #4, #4
@@ -159,8 +159,8 @@ xc:     x19.xrd s1, #4
 
 ; X[s4 ..] = X[s5 ..], s6 words (s6 > 0). Uses s1, s2, s3, s4, A4, A8 and amov's registers.
 .macro ak_xcopyr() {
-        amov(A4, s5)
-        amov(A8, s4)
+        amov_e(2, s5)
+        amov_e(4, s4)
         alu s3, s6, s0, #OP_ADD
 xc:     x19.xrd s1, #4
         x02.ainc #4, #4
@@ -247,7 +247,7 @@ done:   alu s4, s5, s0, #OP_ADD
         yst(AK_RE5)
         alu s3, s10, s0, #OP_ADD
         yst(AK_RAV)
-        aimm(A12, XSAVE)
+        aimm_e(6, XSAVE)
         stx A12, s9
 }
 
@@ -256,7 +256,7 @@ done:   alu s4, s5, s0, #OP_ADD
         alu s13, s13, s14, #OP_SUB
         x17.mve e5, s13
         yld(s10, AK_RAV)
-        aimm(A12, XSAVE)
+        aimm_e(6, XSAVE)
         x19.xrd s9, #12
         ldi s14, #1
         ldi s15, #16
@@ -505,7 +505,7 @@ more:   yld(s4, AK_WN)
 ; spectral_data() for CUR into X DQ_SPEC, window-major (w * 128 + k); zero, noise and
 ; intensity bands stay 0. An escape past 8 ones jumps to FAIL.
 .macro ak_walk(FAIL) {
-        aimm(A8, DQ_SPEC)
+        aimm_e(4, DQ_SPEC)
         ldi s3, #1024
 wz:     stx A8, s0
         x02.ainc #8, #8
@@ -603,7 +603,7 @@ win:    yld(s3, AK_WW)
         x19.alu s3, s3, s4, #SHIFT ; (delay slot) w * 128
         yld(s5, AK_WO)
         alu s3, s3, s5, #OP_ADD
-        amov(A6, s3)
+        amov_e(3, s3)
         yld(s3, AK_WNT)
         yst(AK_WN)
         yld(s2, AK_WBK)
@@ -680,7 +680,7 @@ pl:     yld(s5, CUR + R_PCNT)
         alu s13, s13, s2, #OP_ADD
         x17.mve e6, s13
         ldy s6, e6              ; amp
-        amov(A8, s1)
+        amov_e(4, s1)
         x19.xrd s3, #8
         alu s4, s0, s3, #OP_SUB
         ptst p3, s0, #LT4, #PTST ; positive

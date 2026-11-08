@@ -304,7 +304,7 @@ alac_pbok:
         x17.sty e8, #3, #0
         yld(s3, PK_CB)
         x17.sty e9, #3, #0      ; max_bits = chan_bits
-        aimm(A6, MIX)
+        aimm_e(3, MIX)
         rice_decompress(RICE)
         rice_slots(RICE)
         ldy s3, e10
@@ -336,11 +336,11 @@ alac_rok:
         jmp #3, #3, alac_mode0
         nop()
         nop()
-        aimm(A2, MIX)
+        aimm_e(1, MIX)
         integrate()
 alac_mode0:
         ; the coefficients into the lane's scratch
-        aimm(A4, CSCR)
+        aimm_e(2, CSCR)
         ysub(3)
         ldy s1, e6              ; order
         lanebase(COEFY, 0x20)
@@ -361,9 +361,9 @@ alac_cc:
         nop()
         nop()
 alac_ccd:
-        aimm(A2, MIX)
-        aimm(A3, MIX)
-        aimm(A10, CSCR)
+        aimm_e(1, MIX)
+        aimm_o(1, MIX)
+        aimm_e(5, CSCR)
         unpredict()
         ; a pair's lane 0 moves to Y UY, freeing X for lane 1
         yld(s3, PK_L)
@@ -419,8 +419,8 @@ alac_verb:
         nop()
         ; otherwise lane 0 to X (one lane) or Y UY (a pair), lane 1 to X
 alac_vl:
-        aimm(A2, MIX)
-        aimm(A3, MIX)
+        aimm_e(1, MIX)
+        aimm_o(1, MIX)
         lde e13, #UY
         yld(s1, PK_N)
 alac_vs:
@@ -494,8 +494,8 @@ alac_uok:
         yld(s4, PK_NCH)
         alu s3, s4, s3, #OP_SUB
         x17.sty e10, #3, #0     ; gap
-        aimm(A2, MIX)
-        aimm(A3, MIX)
+        aimm_e(1, MIX)
+        aimm_o(1, MIX)
         lde e13, #UY
         yld(s3, PK_CH)
         ldi s4, #RING - 1
@@ -566,7 +566,7 @@ alac_done:
 ; A pair's lane 0, X:[MIX..MIX + n), to Y:[UY..UY + n): the low 16 bits of each word. Uses A2,
 ; e13, s1, s3, s12.
 .macro alac_touy() {
-        aimm(A2, MIX)
+        aimm_e(1, MIX)
         lde e13, #UY
         yld(s1, PK_N)
 ty:     alu s12, s1, s0, #OP_ADD

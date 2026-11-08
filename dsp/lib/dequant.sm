@@ -53,7 +53,7 @@
         nop()
         alu s4, s4, s1, #OP_ADD
         alu s4, s4, s1, #OP_ADD ; DQ_D + 2 mag
-        amov(A8, s4)
+        amov_e(4, s4)
         x19.xrd s4, #8          ; m
         x02.ainc #8, #8
         x19.xrd s3, #8          ; em
@@ -79,7 +79,7 @@ found:  alu s8, s6, s14, #OP_SUB
         x19.alu s8, s8, s12, #SHIFT ; j = floor(mag / 2^s)
         ldi s4, #DQ_IT - 64
         alu s4, s4, s8, #OP_ADD
-        amov(A8, s4)            ; (clobbers s7)
+        amov_e(4, s4)            ; (clobbers s7)
         x19.alu s12, s8, s6, #SHIFT
         alu s7, s1, s12, #OP_SUB ; f = mag - j 2^s
         x19.xrd s3, #8          ; lo
@@ -185,7 +185,7 @@ win:    yld(s4, DQ_WL)
         alu s7, s7, s5, #OP_ADD
         ldi s4, #DQ_SPEC
         alu s7, s7, s4, #OP_ADD
-        amov(A2, s7)
+        amov_e(1, s7)
         yld(s10, DQ_MQ)
 mx:     alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -312,7 +312,7 @@ win:    yld(s4, DQ_WL)
         alu s8, s7, s5, #OP_ADD
         ldi s4, #DQ_SPEC
         alu s4, s8, s4, #OP_ADD
-        amov(A2, s4)
+        amov_e(1, s4)
         ldi s4, #DQ_OUT
         alu s4, s8, s4, #OP_ADD
         amov(A3, s4)
@@ -402,7 +402,7 @@ gw2:    yst(DQ_WB)
 
 ; dq_channel(): clears DQ_OUT, then both passes; E = 0 when no band has a non-zero value.
 .macro dq_channel() {
-        aimm(A3, DQ_OUT)
+        aimm_o(1, DQ_OUT)
         ldi s9, #1024
 clr:    stx A3, s0
         x02.ainc #3, #3

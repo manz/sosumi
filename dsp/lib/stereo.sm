@@ -224,7 +224,7 @@ rgw2:   x18.eagu e10, e10, #AGU_INC
 ; X[BUF ..] moved down by n = s6 >= 0 over 1024 words, rounded, 0 from 24 on. Uses s1, s4,
 ; s11, s12, A4.
 .macro st_move(BUF) {
-        aimm(A4, BUF)
+        aimm_e(2, BUF)
         ldi s11, #1024
         ldi s4, #24
         alu s4, s6, s4, #OP_SUB
@@ -338,10 +338,10 @@ msrun:  ldy s9, e7              ; start
         nop()
         ldi s4, #ST_L
         alu s4, s4, s9, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
         ldi s4, #ST_R
         alu s4, s4, s9, #OP_ADD
-        amov(A6, s4)
+        amov_e(3, s4)
 msw:    x19.xrd s1, #4
         x19.xrd s5, #6
         alu s7, s1, s5, #OP_ADD
@@ -459,14 +459,14 @@ isrun:  ldy s9, e7              ; start
         alu s11, s12, s11, #OP_SUB ; n
         ldi s4, #ST_T
         alu s4, s4, s6, #OP_ADD
-        amov(A8, s4)
+        amov_e(4, s4)
         x19.xrd s6, #8          ; T[b]
         ldi s4, #ST_L
         alu s4, s4, s9, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
         ldi s4, #ST_R
         alu s4, s4, s9, #OP_ADD
-        amov(A6, s4)
+        amov_e(3, s4)
         alu s12, s0, s11, #OP_SUB ; -n
         ldi s4, #24
         alu s4, s11, s4, #OP_SUB

@@ -38,7 +38,7 @@
 
 ; s10 = max(0, X[BASE ..]), s11 = min(0, X[BASE ..]) over COUNT words. Uses s1, s4, s9, A8, p3.
 .macro im_scan(BASE, COUNT) {
-        aimm(A8, BASE)
+        aimm_e(4, BASE)
         ldi s9, #COUNT
         ldi s10, #0
         ldi s11, #0
@@ -94,8 +94,8 @@ done:
 ; X[BASE ..] = shift23(X[BASE ..], s6) over COUNT words: s6 < 0 a rounded right shift. Uses s1,
 ; s4, s9, A8, A9 and aimm's registers.
 .macro im_shift(BASE, COUNT) {
-        aimm(A8, BASE)
-        aimm(A9, BASE)
+        aimm_e(4, BASE)
+        aimm_o(4, BASE)
         ldi s9, #COUNT
 sl:     x19.xrd s1, #8
         x02.ainc #8, #8
@@ -125,7 +125,7 @@ havebig: alu s4, s5, s0, #OP_ADD
         jmp #IF_NOT, #3, nonzero
         nop()
         nop()
-        aimm(A9, OUT)
+        aimm_o(4, OUT)
         ldi s9, #2 * N2
 clr:    stx A9, s0
         x02.ainc #9, #9
@@ -184,10 +184,10 @@ scale:  yld(s3, ESLOT)
 ; s7 and s13. Y REV holds Z + 2 rev(n) - 2.
 .macro im_pre(N2, N4, IN, PRE, REV) {
         ldi s12, #IN
-        amov(A4, s12)
+        amov_e(2, s12)
         ldi s12, #IN + N2 - 1
-        amov(A6, s12)
-        aimm(A8, PRE)
+        amov_e(3, s12)
+        aimm_e(4, PRE)
         ldi s13, #REV - 1
         x17.mve e7, s13         ; e7 = REV
         rimm R2, #-2
@@ -253,7 +253,7 @@ pre:    x19.xrd s1, #4          ; xr
 ; applied as each butterfly loads its inputs.
 .macro im_fft(N4, Z, TW, STAGES) {
         im_decide(s7, s13)
-        aimm(A5, TW)
+        aimm_o(2, TW)
         rimm R5, #2
         ldi s3, #1
         yst(IM_HALF)
@@ -275,7 +275,7 @@ stage:  yld(s3, IM_SC)
         alu s1, s1, s14, #OP_SUB
         im_rset(s1, R1)         ; 2 size - 2
         ldi s3, #Z
-        amov(A2, s3)            ; Z + 2 j
+        amov_e(1, s3)            ; Z + 2 j
         yld(s3, IM_HALF)
         yst(IM_J)
         ldi s13, #IM_J - 1
@@ -356,12 +356,12 @@ bf:     im_ld(s1, 4)            ; ar
 
 ; u[2k] = re(Z[k] POST[k]), u[n2 - 1 - 2k] = -im(Z[k] POST[k]), u over IN.
 .macro im_post(N2, N4, Z, IN, POST) {
-        aimm(A4, Z)
-        aimm(A8, POST)
+        aimm_e(2, Z)
+        aimm_e(4, POST)
         ldi s12, #IN
-        amov(A10, s12)
+        amov_e(5, s12)
         ldi s12, #IN + N2 - 1
-        amov(A12, s12)
+        amov_e(6, s12)
         rimm R2, #-2
         ldi s11, #N4
 post:   x19.xrd s1, #4          ; er
@@ -418,16 +418,16 @@ fr:     x19.xrd s1, #8
         alu s6, s6, s3, #OP_ADD
         ldi s3, #7 - LOGN2
         alu s6, s6, s3, #OP_ADD
-        aimm(A9, OUT)
+        aimm_o(4, OUT)
         ldi s12, #IN + N2 / 2
-        amov(A8, s12)
+        amov_e(4, s12)
         rimm R2, #1
         im_fold_run(N2 / 2, s1, s0, #OP_ADD)
         ldi s12, #IN + N2 - 1
-        amov(A8, s12)
+        amov_e(4, s12)
         rimm R2, #-1
         im_fold_run(N2, s0, s1, #OP_SUB)
-        aimm(A8, IN)
+        aimm_e(4, IN)
         rimm R2, #1
         im_fold_run(N2 / 2, s0, s1, #OP_SUB)
 }

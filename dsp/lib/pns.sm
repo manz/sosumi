@@ -178,8 +178,8 @@ sdone:  pn_yst(PN_SH, 1, 1)     ; s9
         ldi s4, #PN_S
         yld(s5, PN_ST)
         alu s4, s4, s5, #OP_ADD
-        amov(A4, s4)
-        aimm(A6, PN_RNG)
+        amov_e(2, s4)
+        aimm_e(3, PN_RNG)
         x19.xrd s1, #6          ; x
         ldi s7, #0x7655
         ldi s12, #8
@@ -233,7 +233,7 @@ kdone:                          ; pass 2: scale, and acc = sum rshr(rnd(v^2 / 2^
         ldi s4, #PN_S
         yld(s5, PN_ST)
         alu s4, s4, s5, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
         yld(s10, PN_LEN)
         yld(s9, PN_SH)
         alu s9, s0, s9, #OP_SUB ; -s
@@ -281,7 +281,7 @@ pdone:                          ; z = seed[floor(m / 2^20) - 2], then three Newt
         x19.alu s5, s5, s12, #SHIFT
         ldi s12, #PN_SEED - 2
         alu s5, s5, s12, #OP_ADD
-        amov(A8, s5)
+        amov_e(4, s5)
         x19.xrd s1, #8          ; z
         ldi s12, #48
         ldi s5, #16
@@ -311,7 +311,7 @@ nw:     x02.mpy s5, s1, s1
         alu s6, s6, s5, #OP_SUB ; b
         ldi s5, #PN_T
         alu s5, s5, s6, #OP_ADD
-        amov(A8, s5)
+        amov_e(4, s5)
         x19.xrd s6, #8
         x02.mpy s6, s1, s6      ; g
         yld(s9, PN_SH)
@@ -325,7 +325,7 @@ nw:     x02.mpy s5, s1, s1
         ldi s4, #PN_S
         yld(s5, PN_ST)
         alu s4, s4, s5, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
         yld(s10, PN_LEN)
 sc:     alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -355,15 +355,15 @@ ndone:
         alu s6, s6, s5, #OP_SUB ; b
         ldi s5, #PN_T
         alu s5, s5, s6, #OP_ADD
-        amov(A8, s5)
+        amov_e(4, s5)
         x19.xrd s6, #8          ; T[b]
         yld(s5, PN_ST)
         ldi s4, #PN_S
         alu s4, s4, s5, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
         ldi s4, #PN_L
         alu s4, s4, s5, #OP_ADD
-        amov(A6, s4)
+        amov_e(3, s4)
         yld(s10, PN_LEN)
 cp:     alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -393,10 +393,10 @@ cpdone: yld(s3, PN_EL)
         alu s9, s0, s9, #OP_SUB ; -n
         ldi s4, #SRC
         alu s4, s4, s2, #OP_ADD
-        amov(A6, s4)
+        amov_e(3, s4)
         ldi s4, #BUF
         alu s4, s4, s2, #OP_ADD
-        amov(A4, s4)
+        amov_e(2, s4)
 dl:     alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, ddone

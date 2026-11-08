@@ -37,3 +37,24 @@
         ldi s12, #value
         amov(an, s12)
 }
+
+; A<2h> = value: rimm then x12.aset (reference.md `rimm`, own-rimm; `x12.aset`, own-aset12).
+; Uses R7.
+.macro aimm_e(h, value) {
+        rimm R7, #value
+        x12.aset #h, R7
+}
+
+; A<2h + 1> = value: one x16.aset (reference.md `x16.aset`, own-x16aset).
+.macro aimm_o(h, value) {
+        x16.aset #h, #value
+}
+
+; A<2h> = the value in `src` (not s13): amov without its last copy. Uses s13, e6, R7.
+.macro amov_e(h, src) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, R7, e6, #25, #2, #0
+        x12.aset #h, R7
+}
