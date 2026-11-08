@@ -140,28 +140,43 @@ cp:     ldy s3, e7
         nop()
 }
 
-; X[DST ..] = X[s5 ..], s6 words (s6 > 0). Uses s1, s2, s3, s4, A4, A8 and amov's registers.
+; X[A8 ..] = X[A4 ..], s6 words (s6 > 0), three bundles a word: x03's counted loop (x17
+; handbook §10 "Counted loop", reference.md x03.rep: stores s3, all 24 bits (708), at X:[A8]
+; and steps A8 each pass, e11 counting through p3; N >= 2, so one word is stored apart) with
+; x03.tap0's X load in its first slot (s3 <- X:[A4], A4 += 1, after its product; the last load
+; is a dummy). Uses s3, s12, s13, e11, p3.
+.macro ak_xrep() {
+        x19.xrd s3, #4          ; the first word
+        x02.ainc #4, #4
+        alu s12, s6, s14, #OP_SUB
+        alu s12, s12, s14, #OP_SUB ; N - 2
+        x17.mve e11, s12        ; e11 = N - 1
+        alu s12, s0, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; p3 = 1
+        x03.rep p3
+        x03.tap0 s3, #4, s0, s12, s13 ; (delay slot) the next word
+        nop()                   ; (delay slot)
+}
+
+; X[DST ..] = X[s5 ..], s6 words (s6 > 0). Uses s3, s12, s13, e11, p3, A4, A8 and amov's registers.
 .macro ak_xcopyd(DST) {
         amov_e(2, s5)
         aimm_e(4, DST)
-        alu s3, s6, s0, #OP_ADD
-xc:     x19.xrd s1, #4
-        x02.ainc #4, #4
-        stx A8, s1
-        x02.ainc #8, #8
-        alu s3, s3, s14, #OP_SUB
-        alu s4, s3, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, xc
-        nop()
-        nop()
+        ak_xrep()
 }
 
-; X[s4 ..] = X[s5 ..], s6 words (s6 > 0). Uses s1, s2, s3, s4, A4, A8 and amov's registers.
+; X[s4 ..] = X[s5 ..], s6 words (s6 > 0). Uses s3, s12, s13, e11, p3, A4, A8 and amov's registers.
 .macro ak_xcopyr() {
         amov_e(2, s5)
         amov_e(4, s4)
-        alu s3, s6, s0, #OP_ADD
+        ak_xrep()
+}
+
+; X[DST ..] = X[SRC ..], N words, one at a time (the small tables). Uses s1, s3, s4, A4, A8.
+.macro ak_xcopy(DST, SRC, N) {
+        aimm_e(2, SRC)
+        aimm_e(4, DST)
+        ldi s3, #N
 xc:     x19.xrd s1, #4
         x02.ainc #4, #4
         stx A8, s1
@@ -174,7 +189,8 @@ xc:     x19.xrd s1, #4
         nop()
 }
 
-.macro ak_xcopy(DST, SRC, N) {
+; X[DST ..] = X[SRC ..], N >= 2 words, on the counted loop.
+.macro ak_xcopyf(DST, SRC, N) {
         ldi s5, #SRC
         ldi s6, #N
         ak_xcopyd(DST)
@@ -1267,8 +1283,8 @@ ak_parse:
 
         ; a pair's right: both channels' tools, then the right's tail, then the left's
         ak_ycopy(STR, CUR, R_SIZE)
-        ak_xcopy(ST_R, DQ_OUT, 1024)
-        ak_xcopy(ST_L, XL, 1024)
+        ak_xcopyf(ST_R, DQ_OUT, 1024)
+        ak_xcopyf(ST_L, XL, 1024)
         ak_pns(STL, 0)
         yld(s4, AK_CW)
         ptst p3, s0, #EQ4, #PTST
@@ -1286,7 +1302,7 @@ ak_parse:
         nop()
 ak_st:  ak_stereo()
 ak_nost:
-        ak_xcopy(XL, ST_L, 1024) ; right to PN_W, left to PN_L
+        ak_xcopyf(XL, ST_L, 1024) ; right to PN_W, left to PN_L
         ak_xcopy(PN_W, ST_R, 1024)
         ak_xcopy(PN_L, XL, 1024)
         yld(s4, AK_CW)
