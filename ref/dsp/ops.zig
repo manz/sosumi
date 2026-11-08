@@ -6,8 +6,8 @@
 //! Helpers below the primitives are compositions, written only in primitives.
 //!
 //! What is not here because it is not measured: a persistent wide accumulator, a carry flag, a
-//! wrapping arithmetic right shift other than the rounded one, bitwise AND/OR on data, leading
-//! zero count. A model that wants one asks for a probe first.
+//! wrapping arithmetic right shift other than the rounded one, bitwise AND/OR on data. A model
+//! that wants one asks for a probe first.
 const std = @import("std");
 
 /// A register or X word: 24 bits, two's complement.
@@ -54,6 +54,15 @@ pub fn mulRound23(a: Word, b: Word) Word {
 /// positive operands; the low half does not depend on the operands' signedness).
 pub fn mulLo(a: Word, b: Word) u16 {
     return @truncate(@as(u48, @bitCast(@as(i48, a) * b *% 2)));
+}
+
+/// The redundant sign bits of a 24-bit word: x01's norm (x17 handbook §10 "Count leading
+/// bits", facts 502, 666, 669): norm(0x100) = 14, norm(-0x100) = 15, norm(0) = 24, norm(-1) = 23.
+/// So a lies in [-2^(23 - n), 2^(23 - n)).
+pub fn norm(a: Word) u5 {
+    if (a == 0) return 24;
+    const m: u24 = @bitCast(if (a < 0) ~a else a);
+    return @intCast(23 - (24 - @as(u32, @clz(m))));
 }
 
 /// The sign test: ptst condition "negative" (own-ptst, own-ptst-pos), the one predicate
@@ -123,6 +132,17 @@ pub fn wideAdd(x: Wide, y: Wide) Wide {
 pub fn normalize(w: Wide) Wide {
     const carry = floorShr(w.lo, 15);
     return .{ .hi = add(w.hi, carry), .lo = sub(w.lo, shl(carry, 15)) };
+}
+
+test "norm counts the redundant sign bits as x01 does" {
+    try std.testing.expectEqual(@as(u5, 14), norm(0x100));
+    try std.testing.expectEqual(@as(u5, 15), norm(-0x100));
+    try std.testing.expectEqual(@as(u5, 24), norm(0));
+    try std.testing.expectEqual(@as(u5, 23), norm(-1));
+    try std.testing.expectEqual(@as(u5, 22), norm(-2));
+    try std.testing.expectEqual(@as(u5, 8), norm(0x7FFF));
+    try std.testing.expectEqual(@as(u5, 0), norm(0x400000));
+    try std.testing.expectEqual(@as(u5, 1), norm(-0x400000));
 }
 
 const testing = std.testing;
