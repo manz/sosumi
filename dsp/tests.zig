@@ -10,4 +10,5 @@ test {
     _ = @import("test/tns.zig");
     _ = @import("test/imdct.zig");
     _ = @import("test/window.zig");
+    _ = @import("test/aac.zig");
 }

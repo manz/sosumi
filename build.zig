@@ -28,6 +28,11 @@ pub fn build(b: *std.Build) void {
             .{ .name = "host", .module = x17.module("host") },
         },
     }) });
+    // the access units aacdec dumped, for aac_packet's test
+    for ([_][]const u8{ "tone.aac_at", "sweep.ff_tns", "pink.ff_pns", "pink.ff_is", "clicks.aac_at" }) |name| {
+        const file = b.fmt("{s}.pkts", .{name});
+        dsp_t.root_module.addAnonymousImport(file, .{ .root_source_file = b.path(b.fmt("testdata/aac/{s}", .{file})) });
+    }
     test_step.dependOn(&b.addRunArtifact(dsp_t).step);
 
     const compare = b.addExecutable(.{

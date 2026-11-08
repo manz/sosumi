@@ -41,7 +41,7 @@ predictor.sm).
 
 The AAC path first, each lib after what it calls:
 
-    bits, mem, pcm -> huffman -> sections -> dequant -> stereo -> pns -> tns -> imdct -> window
+    bits, mem, pcm -> huffman -> sections -> dequant -> stereo -> pns -> tns -> imdct -> window -> aac
 
 ALAC afterwards: rice, predictor, unmix, alac.
 
@@ -64,6 +64,7 @@ memory and are not yet checked against the standard's text (OPEN).
 | tns.sm | 2f5d48b | `ref/dsp/aac/tns.zig` | **Moved** to `dsp/lib/tns.sm`. The lattice on Q23 reflection coefficients, the (-2^22, 2^22) bound with put-back, halve and retry up to 48 times, then zero the run: all the twin's. Its table is the twin's `refl` (coef_res 0 at TN_K + 0..7, 1 at TN_K + 8..23). TN_REC is our flattening of tns_data(). No citations to rewrite, no `x02.v`. Tests (`dsp/test/tns.zig`) build `ics.Tns`, flatten it to TN_REC and check words, exponent, halvings and runs zeroed against `apply` with the real 44.1 kHz offsets and TNS limits; x17's used made-up offsets and its own model. |
 | imdct.sm | 2f5d48b | `ref/dsp/aac/imdct.zig` | **Moved** to `dsp/lib/imdct.sm`. Normalisation to [2^21, 2^22), pre-twiddle into a bit-reversed n2/2-point FFT, per-stage scaling, post-twiddle, fold and one saturating output shift: all the twin's. Its tables are the twin's `Tables(n2)` (`pre`, `post`, `rev`); TW is the twin's `fft` laid out stage by stage. Citation added for the `x19` shift. No `x02.v` (only `x02.ainc` / `x02.mpy`, whose side effects the header documents). Tests (`dsp/test/imdct.zig`) run long and short blocks, six shapes each (halving, doublings, silence, a lone peak, a large last coefficient), against `imdct`; x17's rebuilt the tables and the model by hand. |
 | window.sm | dd66f03 | `ref/dsp/aac/window.zig` | **Moved** to `dsp/lib/window.sm`. The w / 4 Q23 halves, the four sequences' layouts, the rounded shift by 5 before the clamp and the overlap hand-on are the twin's `block` and `synth`. The macros take constant table addresses, so the glue copies each shape's rising halves into fixed slots. No citations to rewrite, no `x02.v`. Tests (`dsp/test/window.zig`) run every sequence for every previous/current shape pair with the twin's real sine and KBD halves, quiet, clipping and at the clamp's edges; x17's used random window values and its own model. |
+| aac.sm | 70471ae | `ref/dsp/aac/decoder.zig` | **Moved** to `dsp/lib/aac.sm`: the aac_packet glue. Element loop, ics parse into a channel record, pulses, then per pair left PNS, M/S and intensity (common_window only, status 4 otherwise), right PNS and each channel's TNS, IMDCT, window and overlap: the twin `Decoder.decode`'s order. CCE and PCE stop with status 1, as the twin's `ElementNotImplemented`. Host tables and state slots are ours. No citations to rewrite, no `x02.v`. x17's `testdata/aac/books.txt` stays behind: the test stages the twin's own tables. Tests (`dsp/test/aac.zig`) load each `aacdec --dump` fixture's state and decode all its units, PCM bit for bit against the twin's `Decoder`. X use runs to 0x5131 and Y to 0x65FF: an emulator layout, not the silicon fit. |
 
 ## Silicon follow-ups
 
