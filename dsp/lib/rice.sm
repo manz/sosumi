@@ -166,15 +166,12 @@ top:    ldy s7, e4
         ; residual: mag = floor((nd + 1) / 2) = rshr(nd, 1), negated when nd is odd
         alu s6, s0, s14, #OP_SUB
         x19.alu s8, s7, s6, #SHIFT ; mag
-        alu s12, s8, s8, #OP_ADD
-        alu s12, s12, s7, #OP_SUB ; 2 mag - nd: 1 when odd
-        alu s12, s12, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; p3 = even
-        jmp #3, #3, even
-        alu s6, s0, s8, #OP_SUB ; (delay slot) -mag
-        nop()
-        alu s8, s6, s0, #OP_ADD
-even:   stx A6, s8
+        ; times 1 - 2 (nd & 1): x18.mpy's low product mod 2^24 (a = mag >= 0)
+        x18.and s12, s7, s14    ; nd & 1
+        alu s12, s12, s12, #OP_ADD
+        alu s12, s14, s12, #OP_SUB
+        x18.mpy s8, s0, s8, s12
+        stx A6, s8
         x02.ainc #6, #6
         ldy s5, e4
         alu s5, s5, s14, #OP_SUB
@@ -184,8 +181,8 @@ even:   stx A6, s8
         alu s12, s4, s5, #OP_SUB
         ptst p3, s0, #LT12, #PTST
         jmp #3, #3, grow
-        nop()
-        nop()
+        ldy s6, e7              ; (delay slot) pb; the clamp below ignores s1 and s6
+        x18.mpy s1, s0, s6, s7  ; (delay slot) pb nd < 2^23
         x17.sty e1, #6, #1      ; hi = 1 (s14)
         ldi s5, #0x7FFF
         x17.sty e12, #5, #0
@@ -198,9 +195,7 @@ even:   stx A6, s8
         ; (mb < 2^9 * 2^16): x18.mpy's integer products (x17 reference.md x18.mpy: P mod 2^24
         ; and the signed P >> 24, operands >= 0), floor(pb mb / 2^9) = pb hi 2^6 +
         ; floor(pb lo / 2^9), the last the high half of (pb 2^15) lo.
-grow:   ldy s6, e7              ; pb
-        x18.mpy s1, s0, s6, s7  ; pb nd < 2^23
-        ldy s7, e1              ; hi
+grow:   ldy s7, e1              ; hi
         ldy s8, e12             ; lo
         ldi s5, #6
         x19.alu s5, s6, s5, #SHIFT
