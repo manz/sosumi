@@ -110,11 +110,6 @@ pub const Player = struct {
         return p;
     }
 
-    /// The PNS generator's word (X:0x5130, the dump's rng), for a decode that starts mid-stream.
-    pub fn seed(self: *Player, x: ref.dsp.ops.Word) Error!void {
-        try h.putX(&self.state, self.gpa, 0x5130, x);
-    }
-
     pub fn deinit(self: *Player) void {
         self.state.deinit(self.gpa);
         self.gpa.free(self.pcm);
