@@ -2,7 +2,7 @@
 //! in x17's emulator under its host model, and the drained PCM goes to stdout as s16le stereo
 //! (a mono track on both channels).
 //!
-//!     dspplay in.m4a | ffplay -f s16le -ar 44100 -ac 2 -
+//!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
 //!
 //! --check writes no audio: it decodes every packet with ref/dsp/alac too and reports each
@@ -19,6 +19,13 @@ fn firstDiff(want: []const i32, got: []const i16) ?Diff {
     if (want.len != got.len) return .{ .at = @min(want.len, got.len), .want = 0, .got = 0 };
     for (want, got, 0..) |w, g, i| if (@as(i32, g) != w) return .{ .at = i, .want = w, .got = g };
     return null;
+}
+
+/// One packet's PCM as s16le stereo, a mono channel on both sides.
+fn writeStereo(w: *std.Io.Writer, pcm: []const i16, nch: usize) !void {
+    for (0..pcm.len / nch) |i| for (0..2) |c| {
+        try w.writeInt(i16, pcm[i * nch + @min(c, nch - 1)], .little);
+    };
 }
 
 pub fn main(init: std.process.Init) !void {
@@ -40,7 +47,7 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("alac_packet decodes 16-bit, 1 or 2 channel tracks with frames up to 4096\n", .{});
         std.process.exit(1);
     }
-    if (!check) std.debug.print("play: | ffplay -f s16le -ar {d} -ac 2 -\n", .{cfg.sample_rate});
+    if (!check) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{cfg.sample_rate});
 
     const prog = try dsp.program(gpa);
     defer gpa.free(prog);
@@ -79,11 +86,10 @@ pub fn main(init: std.process.Init) !void {
             }
             continue;
         }
-        for (0..pcm.len / nch) |i| for (0..2) |c| {
-            try w.writeInt(i16, pcm[i * nch + @min(c, nch - 1)], .little);
-        };
+        // the player went away (a closed pipe): stop quietly
+        writeStereo(w, pcm, nch) catch break;
     }
-    try w.flush();
+    w.flush() catch {};
     std.debug.print("{d} packets, {d} failed, worst {d} bundles, mean {d}\n", .{ k, failed, max_bundles, if (k == 0) 0 else total_bundles / k });
     if (check) {
         std.debug.print("{d} of {d} frames differ from ref/dsp/alac\n", .{ bad, k });
