@@ -60,61 +60,56 @@
         x12.aset #k, R7
 }
 
-; Jumps to FAIL unless -L < s<V> < L, L = s7. Uses s4, p3.
-.macro tn_small(V, FAIL) {
-        alu s4, V, s7, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, FAIL   ; V >= L
-        alu s4, V, s7, #OP_ADD  ; (delay slot)
-        nop()
-        ptst p3, s0, #LE4, #PTST
-        jmp #3, #3, FAIL        ; V <= -L
-        nop()
-        nop()
+; RD = s<src> (mem.sm's amov R path). Uses s13, e6.
+.macro tn_rset(src, RD) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, RD, e6, #25, #2, #0
 }
 
-; The lattice over s10 samples from A4, stepping R2; s11 = order >= 1, s7 = 2^22, B' zero.
-; Jumps to FAIL when a value leaves the range. Uses s1, s4, s5, s6, s8, s9, s12, R3, A6, A8, A10.
+; The lattice over s10 samples from A4, stepping R2; s11 = order >= 1, R5 = TN_KC + order, B'
+; zero. Every value (input, f, b) joins a running max in s3 and min in s7 (x18.max / x18.min,
+; x17 fact 708), and the run fails at its end when max >= 2^22 or min <= -2^22. That is the
+; twin's per-value test: the first value out of range comes from values inside it, so it is
+; exact (|f - k b| < 2^23), and later values cannot lower the max or raise the min. Jumps to
+; FAIL then. Uses s1, s3..s8, s12, R3, A6, A8, A10.
 .macro tn_lattice(FAIL) {
+        ldi s3, #0
+        ldi s7, #0
 ls:     alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, ldone
         ldi s12, #TN_KC - 2     ; (delay slot)
-        nop()
+        x19.xrd s1, #4          ; (delay slot) f = x
         tn_aset(s12, 3)         ; A6 = K'
         ldi s12, #TN_B - 2
         tn_aset(s12, 4)         ; A8 = B' (read)
         tn_aset(s12, 5)         ; A10 = B' (write)
-        x19.xrd s1, #4          ; f = x
-        tn_small(s1, FAIL)
-        x19.xrd s5, #6          ; stage m = order: no b written
-        x02.ainc #6, #6
-        x19.xrd s6, #8
-        x02.ainc #8, #8
+        x03.tap0 s5, #6, s0, s0, s0 ; stage m = order: no b written
+        x03.tap0 s6, #8, s0, s0, s0
+        x18.max s3, s3, s1
         x02.mpy s8, s5, s6
+        x18.min s7, s7, s1
         alu s1, s1, s8, #OP_SUB
-        tn_small(s1, FAIL)
-        alu s9, s11, s14, #OP_SUB
-st:     alu s4, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #3, #3, sdone
-        nop()
-        nop()
-        x19.xrd s5, #6          ; k_m
-        x02.ainc #6, #6
-        x19.xrd s6, #8          ; b_(m-1)
-        x02.ainc #8, #8
+        pcond p3, R5, A6, #30   ; more stages: A6 != R5
+        jmp #IF_NOT, #3, sdone
+        x18.max s3, s3, s1      ; (delay slot)
+        x18.min s7, s7, s1      ; (delay slot)
+st:     x03.tap0 s5, #6, s0, s0, s0 ; k_m
+        x03.tap0 s6, #8, s0, s0, s0 ; b_(m-1)
         x02.mpy s8, s5, s6
         alu s1, s1, s8, #OP_SUB ; f_(m-1)
-        tn_small(s1, FAIL)
         x02.mpy s8, s5, s1
         alu s8, s8, s6, #OP_ADD ; b_m
-        tn_small(s8, FAIL)
         stx A10, s8
+        x18.max s3, s3, s8
+        x18.min s7, s7, s8
         x02.ainc #10, #10
-        jmp #ALWAYS, #0, st
-        alu s9, s9, s14, #OP_SUB ; (delay slot)
-        nop()
+        pcond p3, R5, A6, #30
+        jmp #3, #3, st
+        x18.max s3, s3, s1      ; (delay slot)
+        x18.min s7, s7, s1      ; (delay slot)
 sdone:  stx A10, s1             ; b_0 = y
         stx A4, s1
         x18.rag101 s0, R3, A4, R2, #2
@@ -122,7 +117,17 @@ sdone:  stx A10, s1             ; b_0 = y
         jmp #ALWAYS, #0, ls
         alu s10, s10, s14, #OP_SUB ; (delay slot)
         nop()
-ldone:
+ldone:  ldi s12, #22
+        x19.alu s12, s14, s12, #SHIFT ; 2^22
+        alu s4, s3, s12, #OP_SUB
+        ptst p3, s0, #LT4, #PTST
+        jmp #IF_NOT, #3, FAIL   ; max >= 2^22
+        alu s4, s7, s12, #OP_ADD ; (delay slot)
+        nop()
+        ptst p3, s0, #LE4, #PTST
+        jmp #3, #3, FAIL        ; min <= -2^22
+        nop()
+        nop()
 }
 
 ; X[DST ..] = X[SRC ..] over s<N> words (s<N> kept). Uses s1, s4, s9, A4, A8 and aimm's.
@@ -201,8 +206,9 @@ zb:     stx A10, s4
         alu s1, s1, s14, #OP_SUB
 fwd:    amov_e(2, s1)
         yld(s11, TN_ORD)
-        ldi s7, #22
-        x19.alu s7, s14, s7, #SHIFT ; 2^22 (amov is done with s7)
+        ldi s12, #TN_KC
+        alu s12, s12, s11, #OP_ADD
+        tn_rset(s12, R5)        ; R5 = TN_KC + order, past K'
         tn_lattice(fail)
         jmp #ALWAYS, #0, rdone
         nop()
