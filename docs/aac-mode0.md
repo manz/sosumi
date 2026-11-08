@@ -68,11 +68,41 @@ Y:0x2E80..0x2EFF (24-bit): stereo T, PNS T and seeds, TNS reflection table, the 
 Y is within a few hundred words of full, so each stage's slots get placed against this table
 before code moves.
 
+## IMDCT in place
+
+imdct.sm today needs IN (n2), Z (n2) and OUT (2 n2): 4096 words for a long block. On WORK:
+
+- Long: the spectrum at WORK + 1024, Z at WORK + 0. The post-twiddle writes u back over the
+  spectrum. The fold then writes out[0 .. 1023] over Z (reading u), then out[1536 ..] = -u[0 ..
+  511] over u's upper half, then out[1024 .. 1535] as that copy reversed.
+- Short: the spectrum at WORK + 1024. Window w's 256 outputs land at 448 + 128 w, which never
+  reaches an input not yet read (1024 + 128 w' for w' > w). Its IN, Z and OUT scratch (512) fits
+  WORK + 0 .. 447 with the normalised input in its own slot; that span is zeroed at the end.
+- The window runs in place on WORK. So every stage finds a channel's spectrum at WORK + 1024
+  with WORK + 0 .. 1023 free as scratch.
+
+## Window tables
+
+aac.sm copies each shape's halves into WRISE and WFALL (2048 words of X), and that room is gone.
+The window loops read the sine rise from SINE (stride 2 long, 4 short) or the KBD rise from Y,
+so each half loop comes in two variants picked by the shape.
+
+## Program size
+
+aac_packet assembles to 35397 syllables. P holds 0x4000 (4 lanes x 0x1000 rows), and pass 2 loads
+at row 0x40 (handbook §11), leaving 16128. Every macro call expands in place, and calls and
+returns are undefined on sm1 (handbook §9), so the code shrinks by sharing: one copy of each
+stage, entered by an absolute jump and left by dispatching on a Y slot, the way aac.sm already
+runs its parse (AK_PH) and its channel tail (AK_FR). This has to come first: it decides where
+the stages' slots live.
+
 ## Order
 
 1. Twin: the shared sine table and the 16-bit KBD halves; ref/dsp tests and the compare figures
-   above as the check.
-2. imdct.sm and window.sm: in-place on WORK, twiddles from SINE, KBD from Y.
-3. The other stages onto the map; aac.sm writes the ring directly.
-4. A mode-0 window check in dsp/test/aac.zig (every word touched inside the windows), the five
+   above as the check. Done.
+2. Program size: one copy per stage, shared through Y-slot dispatch, under 16128 syllables; a
+   size check in dsp/test/aac.zig.
+3. imdct.sm and window.sm: in place on WORK, twiddles from SINE, KBD from Y.
+4. The other stages onto the map; aac.sm writes the ring directly.
+5. A mode-0 window check in dsp/test/aac.zig (every word touched inside the windows), the five
    fixtures bit for bit against the twin.
