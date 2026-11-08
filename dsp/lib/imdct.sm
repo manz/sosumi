@@ -127,13 +127,14 @@ havebig: alu s4, s5, s0, #OP_ADD
         nop()
         aimm_o(4, OUT)
         ldi s9, #2 * N2
-clr:    stx A9, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+clr:    stx A9, s4
         x02.ainc #9, #9
         alu s9, s9, s14, #OP_SUB
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, clr
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         jmp #ALWAYS, #0, SILENT
         nop()

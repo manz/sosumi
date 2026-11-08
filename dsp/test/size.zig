@@ -4,7 +4,7 @@
 const std = @import("std");
 const h = @import("../harness.zig");
 
-const ratchet = 21098;
+const ratchet = 21115;
 
 test "aac_packet does not grow" {
     const gpa = std.testing.allocator;

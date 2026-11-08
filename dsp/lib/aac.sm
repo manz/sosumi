@@ -507,13 +507,14 @@ more:   yld(s4, AK_WN)
 .macro ak_walk(FAIL) {
         aimm_e(4, DQ_SPEC)
         ldi s3, #1024
-wz:     stx A8, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+wz:     stx A8, s4
         x02.ainc #8, #8
         alu s3, s3, s14, #OP_SUB
         alu s4, s3, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, wz
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         ldi s3, #0
         yst(AK_WGI)

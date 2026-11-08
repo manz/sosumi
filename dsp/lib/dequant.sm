@@ -404,13 +404,14 @@ gw2:    yst(DQ_WB)
 .macro dq_channel() {
         aimm_o(1, DQ_OUT)
         ldi s9, #1024
-clr:    stx A3, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+clr:    stx A3, s4
         x02.ainc #3, #3
         alu s9, s9, s14, #OP_SUB
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, clr
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         dq_pass1()
         yld(s4, DQ_E)

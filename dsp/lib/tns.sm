@@ -177,13 +177,14 @@ hdone:
         yst(TN_TRY)
 again:  aimm_e(5, TN_B)         ; B' = 0
         ldi s9, #12
-zb:     stx A10, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+zb:     stx A10, s4
         x02.ainc #10, #10
         alu s9, s9, s14, #OP_SUB
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, zb
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         ldi s1, #TN_W
         yld(s2, TN_ST)
@@ -240,13 +241,14 @@ giveup: ldi s1, #TN_W
         alu s1, s1, s2, #OP_ADD
         amov_e(2, s1)
         yld(s9, TN_LEN)
-gz:     stx A4, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+gz:     stx A4, s4
         x02.ainc #4, #4
         alu s9, s9, s14, #OP_SUB
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, gz
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         yld(s3, TN_GIVE)
         alu s3, s3, s14, #OP_ADD

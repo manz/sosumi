@@ -232,13 +232,14 @@ rgw2:   x18.eagu e10, e10, #AGU_INC
         jmp #3, #3, mshift
         alu s12, s0, s6, #OP_SUB ; (delay slot) -n
         nop()
-mz:     stx A4, s0
+        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
+mz:     stx A4, s4
         x02.ainc #4, #4
         alu s11, s11, s14, #OP_SUB
         alu s4, s11, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, mz
-        nop()
+        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
         nop()
         jmp #ALWAYS, #0, mdone
         nop()
