@@ -6,7 +6,8 @@
 ; Arrays are 24-bit X words walked upward through A registers:
 ;   A2   residuals pc[0..n)           (read)
 ;   A3   samples out[0..n)            (written)
-;   A10  coefficients, REVERSED: X:[A10 + i] = coefs[order - 1 - i], adapted in place
+;   A10  coefficients, REVERSED: X:[A10 + i] = coefs[order - 1 - i], adapted in place, then
+;        zeros from i = order to 35
 ; Walking the coefficients reversed lets every access ascend: the sum over k does not
 ; care about order, and the adaptation visits k = order - 1 down to 0, i.e. i upward.
 ; A4, A7, A8, A9, A11 are scratch. A1 is avoided: every x02 bundle runs its A slot, and the
@@ -20,8 +21,8 @@
 ;   e15 Y:base+4  scratch: samples left
 ;
 ; Keeps the bit reader (e5, s9, s10) and s14, s15. Uses every other s register; unpredict
-; parks s9 and s10 at X:[A10 + 32], +33 (past the 31 coefficients; Y is 16 bits, the cache
-; is not) to free them for the tap and the adaptation, through A5. It also writes R6, R7, e6
+; parks s9 and s10 at X:[A10 + 40], +41 (past the coefficients and their zeros up to +35; Y
+; is 16 bits, the cache is not) to free them for the tap and the adaptation, through A5. It also writes R6, R7, e6
 ; and p3.
 ; Left shifts by a runtime count that must wrap go through sxr first, so the 0x19 shift
 ; (which saturates) never overflows.
@@ -130,7 +131,7 @@ done:
 }
 
 .macro unpredict() {
-        x03.agu A5, A10, #32, #0, A0 ; park the bit reader
+        x03.agu A5, A10, #40, #0, A0 ; park the bit reader
         stx A5, s9
         x02.ainc #5, #5
         stx A5, s10
@@ -193,13 +194,18 @@ copy:   ldy s7, e15
 window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         x19.aagu A7, A4, #5, #0
         x02.ainc #7, #7         ; history: out[j - order]
-        ; R6 = A10 + order + 1: where A11 stands once the tap has prefetched its last term
+        ; R6 = A10 + M, M = order rounded up to 4: the taps run in fours over the coefficients,
+        ; zero from order to +35 (alac.sm zeroes the lane's 36 words before copying them in)
         ldy s13, e12
         ldi s12, #3
+        alu s13, s13, s12, #OP_ADD
+        ldi s12, #-4
+        x18.and s13, s13, s12   ; M
+        ldi s12, #2
         alu s13, s0, s13, #OP_SUB
         alu s13, s13, s12, #OP_SUB
-        x17.mve e6, s13         ; e6 = -(order + 2)
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -(order + 1)
+        x17.mve e6, s13         ; e6 = -M - 1
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -M
         ragu R6, A10, R7, #29   ; A10 - R7
 sample: ldy s7, e15
         alu s12, s7, s14, #OP_SUB
@@ -207,45 +213,51 @@ sample: ldy s7, e15
         jmp #3, #3, finish
         x19.xrd s7, #8          ; (delay slot) top; finish ignores s7 and A9
         x19.aagu A9, A7, #5, #0 ; (delay slot)
+        ; sum = sum_k c_k (out[j - 1 - k] - top) = sum_k c_k out[j - 1 - k] - top sum_k c_k, on
+        ; x03.tap's exact running sum {s2:s3} += 2 a b, 24 x 24 into 48 bits (x17 reference.md
+        ; x03.tap, 672, 701). A tap multiplies the value the bundle before loaded, then loads
+        ; the next: the history taps load out[] through A9 against a coefficient register; the
+        ; coefficient loads (A11) multiply the register's old coefficient by -top as they
+        ; replace it, so every c_k meets -top once. The first two loads multiply by s0, the
+        ; first L2, L3 a zeroed s8, s9; the padding's zeros end the chain.
         x19.aagu A11, A10, #5, #0
-        ldi s11, #0x7FFF
-        alu s11, s11, s11, #OP_ADD
-        alu s11, s11, s14, #OP_ADD ; 0xFFFF, the low-half mask (s11 is 5 again from adapt_init)
-        ; sum += c * d, d = out[j - 1 - k] - top, exact as floor(cd / 2^16) * 2^16 + cd[15:0]:
-        ; the x02 floor >> 24 of (c << 8) * d and the undoubled low product of c * d (w1[17] = 1),
-        ; which holds P's low 24 bits (x17 reference.md x02 mode 5 second multiply), masked to 16 by x18.and. Four x02.v bundles
-        ; and the mask a term, the X reads and A steps one term ahead, the hi add one term
-        ; behind; no multiply reads an s its own bundle's X read writes.
-        ; The bundles with nothing to read still read X:[A0] (x02.v always does): into s8, which
-        ; is dead until the sum reloads it. s0 would do too: a read into s0 is never seen (x17 reference.md x02 X read into s0).
-        ; Operands: xrd_d, xrd_a, inc_d1, inc_d2, inc_s, mpy_d, mpy_a, mpy_b, plo, #sgn,
-        ; #x3_d >> 2, #x3_d & 3, x3_a, x3_b, #op, #sh
-        x02.v s1, A11, A11, A0, A11, s9, s0, s0, s0, #5, #1, #1, s0, s0, #0, #0 ; c; s9 = s5 = 0
-        x02.v s3, A9, A9, A0, A9, s0, s0, s0, s0, #5, #3, #1, s1, s0, #0, #8 ; out; s13 = c << 8
-        x02.v s8, A0, A0, A0, A0, s4, s0, s0, s0, #5, #0, #2, s3, s7, #5, #0 ; s2 = d; s4 = 0
-tap:    x02.v s3, A9, A9, A0, A9, s0, s1, s2, s12, #5, #1, #0, s4, s9, #0, #0 ; s12 = cd mod 2^24, hi += s9, next out
-        x18.and s12, s12, s11   ; cd[15:0]
-        x02.v s1, A11, A11, A0, A11, s9, s13, s2, s0, #5, #1, #1, s5, s12, #0, #0 ; s9 = floor(cd / 2^16), lo += s12, next c
-        pcond p3, R6, A11, #30  ; terms left: A11 != R6
-        jmp #3, #3, tap
-        x02.v s8, A0, A0, A0, A0, s0, s0, s0, s0, #5, #3, #1, s1, s0, #0, #8 ; (delay slot) c << 8
-        x02.v s8, A0, A0, A0, A0, s0, s0, s0, s0, #5, #0, #2, s3, s7, #5, #0 ; (delay slot) d
-        x02.v s8, A0, A0, A0, A0, s0, s0, s0, s0, #5, #1, #0, s4, s9, #0, #1 ; hi = 2 (hi + s9): units of 2^15
-sum:    floorshr(s3, s5, 15)
-        alu s4, s4, s3, #OP_ADD
-        ldi s12, #15
-        x19.alu s3, s3, s12, #SHIFT
-        alu s5, s5, s3, #OP_SUB
-        ; pred = hi << (15 - ds) (wrapping) + rshr(lo, ds)
-        ldy s8, e13
-        alu s3, s12, s8, #OP_SUB ; 15 - ds
-        ldi s13, #9
-        alu s13, s13, s8, #OP_ADD ; hi wrapped to 9 + ds bits: the shift stays in 24
-        sxr(s4, s13)
-        x19.alu s4, s4, s3, #SHIFT
-        alu s3, s0, s8, #OP_SUB
-        x19.alu s5, s5, s3, #SHIFT
-        alu s4, s4, s5, #OP_ADD ; pred
+        alu s4, s0, s7, #OP_SUB ; -top
+        ldi s8, #0
+        ldi s9, #0
+        x03.tap0 s1, #9, s0, s2, s3 ; {s2:s3} = 0 (mode 4: 2 s1 s0, old sum ignored, 702); s1 = out[j - order]
+        x03.tap s5, #11, s0, s2, s3
+        x03.tap s6, #11, s0, s2, s3
+ptap:   x03.tap s8, #11, s4, s2, s3
+        x03.tap s9, #11, s4, s2, s3
+        x03.tap s1, #9, s5, s2, s3
+        x03.tap s1, #9, s6, s2, s3
+        x03.tap s1, #9, s8, s2, s3
+        x03.tap s1, #9, s9, s2, s3
+        pcond p3, R6, A11, #30  ; four more: A11 != R6
+        jmp #3, #3, ptap
+        x03.tap s5, #11, s4, s2, s3 ; (delay slot)
+        x03.tap s6, #11, s4, s2, s3 ; (delay slot)
+        x03.tap s8, #11, s4, s2, s3
+        x03.tap s9, #11, s4, s2, s3
+        ; acc = 2 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed). ALAC's
+        ; pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 1), the shifter's half-up
+        ; right shift; with H = hi + [L < 0], rshr(acc, ds + 1) = H 2^(23-ds) + rshr(L, ds + 1),
+        ; and only its low chan_bits <= 23 bits count: (H mod 2^ds) << (23 - ds) stays in 23.
+        alu s12, s3, s0, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; L < 0
+        jmp #IF_NOT, #3, hpos
+        ldy s10, e13            ; (delay slot) ds
+        ldi s11, #-1            ; (delay slot)
+        alu s2, s2, s14, #OP_ADD
+hpos:   alu s11, s11, s10, #OP_SUB ; -(ds + 1)
+        x19.alu s13, s14, s10, #SHIFT ; 2^ds
+        alu s13, s13, s14, #OP_SUB
+        ldi s12, #23
+        alu s12, s12, s10, #OP_SUB ; 23 - ds
+        x18.and s2, s2, s13     ; H mod 2^ds
+        x19.alu s2, s2, s12, #SHIFT
+        x19.alu s3, s3, s11, #SHIFT ; rshr(L, ds + 1)
+        alu s4, s2, s3, #OP_ADD ; pred
         x19.xrd s1, #2          ; res
         x02.ainc #2, #2
         alu s3, s1, s7, #OP_ADD
@@ -377,7 +389,7 @@ adone:
 advance: jmp #ALWAYS, #0, sample
         x02.ainc #7, #7         ; (delay slot)
         x02.ainc #8, #8         ; (delay slot)
-finish: x03.agu A5, A10, #32, #0, A0 ; the bit reader back
+finish: x03.agu A5, A10, #40, #0, A0 ; the bit reader back
         x19.xrd s9, #5
         x02.ainc #5, #5
         x19.xrd s10, #5

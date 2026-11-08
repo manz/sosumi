@@ -12,7 +12,7 @@
 ; samples and two channels. X holds one lane at a time:
 ;   X MIX          the lane being decoded, 4096 words: Rice writes the residuals there and the
 ;                  predictor runs in place.
-;   X CSCR         the lane's coefficients (34 words; unpredict parks the bit reader at +32).
+;   X CSCR         the lane's coefficients, zero to +35 (unpredict parks the bit reader at +40).
 ;   Y COEFY        coefficients as read, reversed, 0x20 per lane.
 ;   Y UY           a pair's lane 0 once decoded, as its low 16 bits, so that lane 1 can take X;
 ;                  unmix reads it back from here. The output is u + v - ... and its
@@ -340,6 +340,19 @@ alac_rok:
         integrate()
 alac_mode0:
         ; the coefficients into the lane's scratch
+        ; 36 zeros first: the predictor's taps run in fours past the order (predictor.sm)
+        aimm_e(2, CSCR)
+        ldi s1, #36
+        alu s8, s0, s0, #OP_ADD
+alac_cz:
+        stx A4, s8
+        x02.ainc #4, #4
+        alu s1, s1, s14, #OP_SUB
+        alu s4, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ4, #PTST
+        jmp #IF_NOT, #3, alac_cz
+        nop()
+        nop()
         aimm_e(2, CSCR)
         ysub(3)
         ldy s1, e6              ; order
