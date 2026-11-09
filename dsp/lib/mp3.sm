@@ -677,7 +677,7 @@ done:
 .const MP_XZ   = 0x1100         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
                                 ; reorder's band triple at +0 (<= 198)
 .const MP_XC36 = 0x11C8         ; X: IMDCT-36 rows (18 x 18, Q23)
-.const MP_XWIN = 0x130C         ; X: windows [normal, start, short, stop, unit][36], Q22
+.const MP_XWIN = 0x130C         ; X: windows [normal, start, short, stop][36], Q23
 .const MP_XC12 = 0x1B84         ; X: IMDCT-12 rows (6 x 6, Q23)
 .const MP_XAL  = 0x1BA8         ; X: alias butterflies [8][cs, ca, -ca], Q23
 .const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
@@ -1790,16 +1790,8 @@ gch:    mp3_hybrid()
 ; Annex C): channel MP_HCH of granule MP_SGR, lines X:MP_XS + 576 ch in, subband samples
 ; (sb * 18 + t) out in place, overlap X:MP_XOV + 576 ch. Every sum of products is one x03.tap
 ; sum read back rounded once (mp3_rd24); the taps' own loads walk the operands, two bundles a
-; product (fact 795). x02.ainc writes s2 (its multiply slot): nothing lives in s2 across one.
-
-; dst = rshr(acc, 23) = 2 (hi + [lo < 0]) + rshr(lo, 23): a Q22 gain's product. Uses s12, s13.
-.macro mp3_rd23(dst, hi, lo) {
-        mp3_rd24(dst, hi, lo)
-        alu dst, dst, dst, #OP_ADD
-        ldi s12, #23
-        alu s13, s12, lo, #ASRRS
-        alu dst, dst, s13, #OP_ADD
-}
+; product (fact 795); the windows are x02 rounded products (mem.sm pk). x02.ainc writes s2
+; (its multiply slot): nothing lives in s2 across one.
 
 ; Short block lines from band-major, window-minor runs to subband order: each band triple of
 ; width len at src, [w][i], becomes [i][w] (through X:MP_XZ). Uses s1..s9, s12, s13, e7,
@@ -2154,23 +2146,9 @@ sb:     mp3_row6()
         amov(A12, s1)
         aimm(A10, MP_XZ + 36)
         aimm(A13, MP_XWIN + 72)
-        ldi s6, #12
-wa:     x19.xrd s1, #10         ; y12[i]
-        x02.ainc #10, #10
-        x19.xrd s4, #13         ; win
-        x02.ainc #13, #13
-        x03.tap0 s1, #11, s4, s2, s3
-        mp3_rd23(s5, s2, s3)
-        x19.xrd s1, #12
-        alu s1, s1, s5, #OP_ADD
-        stx A12, s1
-        x02.ainc #12, #12
-        alu s6, s6, s14, #OP_SUB
-        alu s12, s6, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, wa
-        nop()
-        nop()
+        rimm R2, #0
+        x02.aa A8, A12, R2, #2, A0, A0
+        mp3_imwin()
         lde e7, #MP_HW
         ldy s1, e7
         alu s1, s1, s14, #OP_ADD
@@ -2183,62 +2161,178 @@ wa:     x19.xrd s1, #10         ; y12[i]
         nop()
 }
 
-; Subband s11's 18 lines from y[36] at X:MP_XZ: v = win(y[i], W[i]) + overlap[i], odd subbands
-; negate odd i (frequency inversion); overlap[i] = win(y[18 + i], W[18 + i]). The window at
-; s8 (the unit window for short subbands). s9 = the overlap's address, s10 = +-1.
-; Uses s1..s13, A8..A13.
+; Subband s11's 18 lines from y[36] at X:MP_XZ (twin `run`): the window at s8 (Q23; 0 for a short
+; subband, windowed already), s9 = the overlap's address, s10 = +-1 (odd subbands negate odd i).
+; Uses s1..s13, A8..A14, R1, R2, R7, p3.
 .macro mp3_olap() {
-        aimm(A10, MP_XZ)
+        amov(A8, s9)            ; overlap read
         amov(A12, s11)          ; lines out
         amov(A13, s8)           ; W
-        amov(A8, s9)            ; overlap
-        ldi s6, #9
-oa:     x19.xrd s1, #10
-        x02.ainc #10, #10
-        x19.xrd s4, #13
-        x02.ainc #13, #13
-        x03.tap0 s1, #11, s4, s2, s3
-        mp3_rd23(s5, s2, s3)
-        x19.xrd s1, #8
-        alu s5, s5, s1, #OP_ADD ; even i
-        stx A12, s5
-        x02.ainc #12, #12
-        x19.xrd s1, #10
-        x02.ainc #10, #10
-        x19.xrd s4, #13
-        x02.ainc #13, #13
-        x03.tap0 s1, #11, s4, s2, s3
-        mp3_rd23(s5, s2, s3)
-        x02.ainc #8, #8
-        x19.xrd s1, #8
-        alu s5, s5, s1, #OP_ADD ; odd i
-        x18.mpy s5, s0, s5, s10
-        stx A12, s5
-        x02.ainc #12, #12
-        x02.ainc #8, #8
-        alu s6, s6, s14, #OP_SUB
-        alu s12, s6, s0, #OP_ADD
+        rimm R1, #18
+        rimm R2, #0
+        x02.aa A9, A8, R2, #2, A0, A0 ; overlap written
+        x02.aa A14, A13, R1, #2, A0, A0 ; W[18]
+        aimm_e(5, MP_XZ)        ; A10: y
+        aimm_o(5, MP_XZ + 18)   ; A11: y[18]
+        alu s12, s8, s0, #OP_ADD
         ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, oa
+        jmp #3, #3, short
+        alu s12, s10, s14, #OP_SUB ; (delay slot) 0 for an even subband
+        ptst p3, s0, #EQ12, #PTST ; (delay slot)
+        jmp #3, #3, weven
         nop()
         nop()
-        amov(A8, s9)
-        ldi s6, #18
-ob:     x19.xrd s1, #10
-        x02.ainc #10, #10
-        x19.xrd s4, #13
-        x02.ainc #13, #13
-        x03.tap0 s1, #11, s4, s2, s3
-        mp3_rd23(s5, s2, s3)
-        stx A8, s5
-        x02.ainc #8, #8
-        alu s6, s6, s14, #OP_SUB
-        alu s12, s6, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, ob
+        mp3_olw1()
+        jmp #ALWAYS, #0, done
         nop()
         nop()
+weven:  mp3_olw0()
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+short:  jmp #3, #3, seven
+        nop()
+        nop()
+        mp3_ols1()
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+seven:  mp3_ols0()
+done:
 }
+
+; The overlap-add (twin `run`'s last loop): out[i] = y[i] W[i] + ov[i], the new ov[i] =
+; y[18 + i] W[18 + i], each window product one x02 rounded product (ops.mulRound23); odd subbands
+; negate odd i (as -ov - p). Short subbands come windowed from mp3_imdct12: no products. Packed
+; x02 bundles (mem.sm pk / pks) in a pipeline: y from A10, y2 A11, W A13, W2 A14, ov read A8,
+; written A9, lines A12. Uses s1..s9, s12, p3.
+.macro mp3_olw0() {
+        pk(s2, A11, s0, s0, s0, 0, s0, s0, 0, 0) ; y2
+        pk(s3, A14, s0, s0, s0, 0, s0, s0, 0, 0) ; W2
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        ldi s12, #8
+lp:     pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s6, s5, 0, 0) ; W2; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s6, s5, 0, 0) ; W2; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        jmp #IF_NOT, #3, lp
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap (delay slot)
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W (delay slot)
+        pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s6, s5, 0, 0) ; W2; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        pk(s0, A0, s6, s1, s4, 0, s0, s0, 0, 0) ; p = rnd(y W) of the last
+        pk(s0, A0, s0, s0, s0, 7, s6, s5, 0, 0) ; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+}
+
+.macro mp3_olw1() {
+        pk(s2, A11, s0, s0, s0, 0, s0, s0, 0, 0) ; y2
+        pk(s3, A14, s0, s0, s0, 0, s0, s0, 0, 0) ; W2
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        ldi s12, #8
+lp:     pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s6, s5, 0, 0) ; W2; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 5, s0, s5, 5, 0) ; W; -ov
+        pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s5, s6, 5, 0) ; W2; v = -ov - p
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        jmp #IF_NOT, #3, lp
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap (delay slot)
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W (delay slot)
+        pk(s2, A11, s6, s1, s4, 0, s0, s0, 0, 0) ; y2; p = rnd(y W) of the last
+        pk(s3, A14, s0, s0, s0, 7, s6, s5, 0, 0) ; W2; v = p + ov
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s9, s2, s3, 0, s0, s0, 0, 0) ; y; ov2 = rnd(y2 W2)
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pks(9, A9, 0, s0, s0, 0) ; the new overlap
+        pk(s4, A13, s0, s0, s0, 5, s0, s5, 5, 0) ; W; -ov
+        pk(s0, A0, s6, s1, s4, 0, s0, s0, 0, 0) ; p = rnd(y W) of the last
+        pk(s0, A0, s0, s0, s0, 7, s5, s6, 5, 0) ; v = -ov - p
+        pks(7, A12, 0, s0, s0, 0) ; its line
+}
+
+.macro mp3_ols0() {
+        ldi s12, #9
+lp:     pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pk(s2, A11, s0, s0, s0, 7, s1, s5, 0, 0) ; y2; v = y + ov
+        pks(2, A9, 0, s0, s0, 0) ; the new overlap
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        pk(s2, A11, s0, s0, s0, 7, s1, s5, 0, 0) ; y2; v = y + ov
+        jmp #IF_NOT, #3, lp
+        pks(2, A9, 0, s0, s0, 0) ; the new overlap (delay slot)
+        pks(7, A12, 0, s0, s0, 0) ; its line (delay slot)
+}
+
+.macro mp3_ols1() {
+        ldi s12, #9
+lp:     pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        pk(s2, A11, s0, s0, s0, 7, s1, s5, 0, 0) ; y2; v = y + ov
+        pks(2, A9, 0, s0, s0, 0) ; the new overlap
+        pks(7, A12, 0, s0, s0, 0) ; its line
+        pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; ov
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        pk(s2, A11, s0, s0, s0, 7, s1, s5, 0, 0) ; y2; v = y + ov
+        jmp #IF_NOT, #3, lp
+        pks(2, A9, 7, s0, s7, 5) ; the new overlap; v = -v (delay slot)
+        pks(7, A12, 0, s0, s0, 0) ; its line (delay slot)
+}
+
+; mp3_imdct12's window w: y[6 + 6 w + i] += rnd(y12[i] W[i]) for i < 12 (twin `imdctShort`),
+; y12 from A10, W A13, y read A8 and written A12. Uses s1, s4..s7, s12, p3.
+.macro mp3_imwin() {
+        ldi s12, #6
+lp:     pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y12
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        pk(s5, A8, s6, s1, s4, 0, s0, s0, 0, 0) ; y; p = rnd(y12 W)
+        pk(s0, A0, s0, s0, s0, 7, s5, s6, 0, 0) ; y + p
+        pks(7, A12, 0, s0, s0, 0)
+        pk(s1, A10, s0, s0, s0, 0, s0, s0, 0, 0) ; y12
+        pk(s4, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; W
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        pk(s5, A8, s6, s1, s4, 0, s0, s0, 0, 0) ; y; p = rnd(y12 W)
+        jmp #IF_NOT, #3, lp
+        pk(s0, A0, s0, s0, s0, 7, s5, s6, 0, 0) ; y + p (delay slot)
+        pks(7, A12, 0, s0, s0, 0) ; (delay slot)
+}
+
 
 .macro mp3_hybrid() {
         aimm(A11, MP_XDUM)
@@ -2333,7 +2427,7 @@ hsb:    lde e7, #MP_HSB
         nop()
         nop()
 hs12:   mp3_imdct12()
-        ldi s8, #MP_XWIN + 144
+        ldi s8, #0              ; windowed by mp3_imdct12
 hol:    lde e7, #MP_HSB
         ldy s1, e7
         ldi s12, #18

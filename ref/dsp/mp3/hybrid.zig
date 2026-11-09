@@ -7,7 +7,8 @@
 //!     factor being 72 - a and 144 - a. 324 taps, a 324-word table.
 //!   - IMDCT-12, per short window: out[i] = sum_k x[3k + w] cos(pi/24 (2i + 7)(2k + 1)), six
 //!     distinct rows the same way (out[5 - i] = -out[i], out[17 - i] = out[i]).
-//!   - Windows are Q22 (the start and stop blocks hold 1.0), one rounded product each.
+//!   - Windows are Q23, 1.0 held as 2^23 - 1 (the start and stop blocks), one x02 rounded
+//!     product each (`ops.mulRound23`): exact for |v| < 2^22, a Q21 value below 2.
 //!   - Overlap-add and the frequency inversion are plain adds and negations.
 //! Words wrap at 24 bits, as sm1's do: Q21 leaves |value| < 4, the fixtures peak below 1.1.
 const std = @import("std");
@@ -35,7 +36,7 @@ pub const ca: [8]Word = blk: {
     break :blk t;
 };
 
-/// Windows by block type, Q22: 0 normal, 1 start, 2 short (12 points), 3 stop.
+/// Windows by block type, Q23 (1.0 as 2^23 - 1): 0 normal, 1 start, 2 short (12 points), 3 stop.
 pub const windows: [4][36]Word = blk: {
     @setEvalBranchQuota(100000);
     var t: [4][36]Word = @splat(@splat(0));
@@ -43,10 +44,10 @@ pub const windows: [4][36]Word = blk: {
     for (0..36) |i| {
         const x: f64 = @floatFromInt(i);
         const long = @sin(pi / 36.0 * (x + 0.5));
-        t[0][i] = q(long, 22);
-        t[1][i] = if (i < 18) q(long, 22) else if (i < 24) q(1.0, 22) else if (i < 30) q(@sin(pi / 12.0 * (x - 18.0 + 0.5)), 22) else 0;
-        t[3][i] = if (i < 6) 0 else if (i < 12) q(@sin(pi / 12.0 * (x - 6.0 + 0.5)), 22) else if (i < 18) q(1.0, 22) else q(long, 22);
-        if (i < 12) t[2][i] = q(@sin(pi / 12.0 * (x + 0.5)), 22);
+        t[0][i] = qw(long);
+        t[1][i] = if (i < 18) qw(long) else if (i < 24) qw(1.0) else if (i < 30) qw(@sin(pi / 12.0 * (x - 18.0 + 0.5))) else 0;
+        t[3][i] = if (i < 6) 0 else if (i < 12) qw(@sin(pi / 12.0 * (x - 6.0 + 0.5))) else if (i < 18) qw(1.0) else qw(long);
+        if (i < 12) t[2][i] = qw(@sin(pi / 12.0 * (x + 0.5)));
     }
     break :blk t;
 };
@@ -120,7 +121,11 @@ fn imdct36(x: []const Word, out: *[36]Word) void {
 }
 
 fn win(v: Word, w: Word) Word {
-    return ops.accRshr(ops.mac(0, v, w), 23);
+    return ops.mulRound23(v, w);
+}
+
+fn qw(comptime x: f64) Word {
+    return if (x >= 1.0) (1 << 23) - 1 else q(x, 23);
 }
 
 fn imdctShort(x: []const Word, out: *[36]Word) void {

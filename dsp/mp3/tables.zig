@@ -176,7 +176,6 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
     for (H.cos36, 0..) |rw, r| for (rw, 0..) |v, k| try st.x_mem.put(gpa, at("MP_XC36") + @as(u32, @intCast(18 * r + k)), @as(u24, @bitCast(v)));
     for (H.cos12, 0..) |rw, r| for (rw, 0..) |v, k| try st.x_mem.put(gpa, at("MP_XC12") + @as(u32, @intCast(6 * r + k)), @as(u24, @bitCast(v)));
     for (H.windows, 0..) |w, j| for (w, 0..) |v, i| try st.x_mem.put(gpa, at("MP_XWIN") + @as(u32, @intCast(36 * j + i)), @as(u24, @bitCast(v)));
-    for (0..36) |i| try st.x_mem.put(gpa, at("MP_XWIN") + 144 + @as(u32, @intCast(i)), 1 << 22);
     for (H.cs, H.ca, 0..) |c, a, i| {
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i)), @as(u24, @bitCast(c)));
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i + 1)), @as(u24, @bitCast(a)));
