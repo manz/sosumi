@@ -147,7 +147,7 @@ pub const Player = struct {
 
 /// One space's words as image directives (x17 ASSEMBLY.md "Placement and layout"), up to 16 a
 /// line, a line per run of consecutive addresses.
-fn emitData(w: *std.Io.Writer, gpa: std.mem.Allocator, dir: []const u8, mem: *const std.AutoHashMapUnmanaged(u32, u32), mask: u32) !void {
+pub fn emitData(w: *std.Io.Writer, gpa: std.mem.Allocator, dir: []const u8, mem: *const std.AutoHashMapUnmanaged(u32, u32), mask: u32) !void {
     var keys: std.ArrayList(u32) = .empty;
     defer keys.deinit(gpa);
     var it = mem.keyIterator();

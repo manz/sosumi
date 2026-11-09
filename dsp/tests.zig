@@ -15,6 +15,7 @@ test {
     _ = @import("test/aac.zig");
     _ = @import("test/alac.zig");
     _ = @import("test/mp3.zig");
+    _ = @import("test/mp3_player.zig");
     _ = @import("mp3/tables.zig");
     _ = @import("test/size.zig");
 }

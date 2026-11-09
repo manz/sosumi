@@ -8,6 +8,7 @@ const h = @import("harness.zig");
 
 pub const emu = h.emu;
 pub const aac = @import("aac_player.zig");
+pub const mp3 = @import("mp3_player.zig");
 
 const pk = 0x2E00;
 const pk_n = pk + 6;

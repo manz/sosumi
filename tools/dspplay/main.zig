@@ -1,6 +1,7 @@
-//! Plays the ALAC or AAC track of an .m4a, or an ADTS .aac stream, through sm1: each packet runs
-//! alac_packet (dsp/lib/alac.sm) under x17's host model, or aac_packet (dsp/lib/aac.sm) in its
-//! emulator, and the PCM goes to stdout as s16le stereo (a mono track on both channels).
+//! Plays the ALAC or AAC track of an .m4a, an ADTS .aac stream or an .mp3 file through sm1: each
+//! packet runs alac_packet (dsp/lib/alac.sm) or mp3_packet (dsp/lib/mp3.sm) under x17's host
+//! model, or aac_packet (dsp/lib/aac.sm) in its emulator, and the PCM goes to stdout as s16le
+//! stereo (a mono track on both channels).
 //!
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
@@ -75,7 +76,7 @@ var profile_rows: usize = 15;
 var profile_worst = false;
 
 fn usage() noreturn {
-    std.debug.print("usage: dspplay in.m4a|in.aac [--check | --profile[=rows]]\n", .{});
+    std.debug.print("usage: dspplay in.m4a|in.aac|in.mp3 [--check | --profile[=rows]]\n", .{});
     std.process.exit(2);
 }
 
@@ -218,6 +219,7 @@ pub fn main(init: std.process.Init) !void {
     const w = &ow.interface;
     defer w.flush() catch {};
 
+    if (std.mem.endsWith(u8, args[1], ".mp3")) return playMp3(gpa, w, file, mode);
     if (ref.aac.adts.parse(file)) |hd| {
         var u: Units = .{ .adts = .{ .file = file } };
         return playAac(gpa, w, &hd.config, &u, mode);
@@ -385,4 +387,63 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
         @memcpy(prof.counts, worst);
         try prof.report(gpa, 1, profile_rows);
     } else if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
+}
+
+fn playMp3(gpa: std.mem.Allocator, w: *std.Io.Writer, file: []const u8, mode: Mode) !void {
+    const fr = try dsp.mp3.frames(gpa, file);
+    defer gpa.free(fr);
+    if (fr.len == 0) {
+        std.debug.print("no MP3 frames\n", .{});
+        std.process.exit(1);
+    }
+    const hd = try ref.mp3.header.parse(fr[0]);
+    const rate = hd.sampleRate();
+    std.debug.print("MP3, {d} frames, {d} ch, {d} Hz, {d} kbps (first frame)\n", .{ fr.len, hd.channels(), rate, hd.bitrateKbps() });
+    const check = mode == .check;
+    if (mode == .play) std.debug.print("play: | ffplay -nodisp -autoexit -f s16le -ar {d} -ch_layout stereo -\n", .{rate});
+
+    var prof: Profile = .{};
+    defer prof.deinit(gpa);
+    const prog = try dsp.mp3.programSites(gpa, if (mode == .profile) &prof.sites else null);
+    defer gpa.free(prog);
+    var player = try dsp.mp3.Player.init(gpa, prog, rate);
+    defer player.deinit();
+    if (mode == .profile) {
+        prof.counts = try gpa.alloc(u64, prog.len);
+        @memset(prof.counts, 0);
+        player.profile(prof.counts);
+    }
+    var twin: ref.dsp.mp3.decoder.Decoder = .{};
+    var want: [2304]i16 = undefined;
+
+    var t: Tally = .{};
+    for (fr, 0..) |frame, k| {
+        const nch: usize = (ref.mp3.header.parse(frame) catch hd).channels();
+        const pcm = player.feed(frame) catch |e| {
+            if (t.failed < 5) std.debug.print("frame {d}: {s}\n", .{ k, @errorName(e) });
+            t.failed += 1;
+            continue;
+        };
+        t.add(player.bundles, pcm.len / nch);
+        if (check) {
+            const f = twin.decode(frame, &want) catch |e| {
+                if (t.bad < 20) std.debug.print("frame {d}: twin {s}\n", .{ k, @errorName(e) });
+                t.bad += 1;
+                continue;
+            };
+            const n = @as(usize, f.header.samples()) * f.header.channels();
+            if (n != pcm.len) {
+                if (t.bad < 20) std.debug.print("frame {d}: {d} words, want {d}\n", .{ k, pcm.len, n });
+                t.bad += 1;
+            } else if (std.mem.indexOfDiff(i16, want[0..n], pcm)) |at| {
+                if (t.bad < 20) std.debug.print("frame {d}: sample {d} (ch {d}) want {d} got {d}\n", .{ k, at / nch, at % nch, want[at], pcm[at] });
+                t.bad += 1;
+            }
+            continue;
+        }
+        if (mode == .profile) continue;
+        writeStereo(w, pcm, nch) catch break;
+    }
+    t.report(rate, check, "ref/dsp/mp3");
+    if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
 }
