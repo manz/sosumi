@@ -79,7 +79,7 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
     var yi = state.y_mem.keyIterator();
     while (yi.next()) |k| {
         if (k.* >= map.at("AU") and k.* < map.at("AU") + 768) continue; // emulator-only staging
-        if (k.* >= map.at("HOST_P0") and k.* <= map.at("HOST_ST")) continue; // the host's block
+        if (k.* >= map.at("HOST_P0") and k.* <= map.at("HOST_ST") + 1) continue; // the host's block
         try testing.expect(k.* < 0x2F00);
     }
 }

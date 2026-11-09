@@ -75,6 +75,11 @@ Codec mode 0 is AAC (**MEASURED** on an AAC track).
 | Control word | N << 16 \| 0x1F << 7 for an N-byte packet (6 bytes -> 0x00060F80) | MEASURED |
 | Chain head | physical address \| 1, written to sm1 +0x100 | MEASURED |
 | Packets measured on silicon | 0x24, 0x24, then 0x2AA (the first real frame) on a 44.1 kHz stereo track | MEASURED |
+| Packet bytes | reach the program only through the input stream, never written into Y by the host | MEASURED (fact 783) |
+| Stream enable | once per stream, in the decoder pass: ld0e whose ALU word reads s12 = 1, s14 = 4. It survives re-arms; a second enable is not a no-op (OPEN) | MEASURED (facts 783, 786) |
+| Stream read | x16alu class 111 code 0x20: A<2N+1> = the next n + 1 bits, MSB first, up to 13 measured; 0 before the enable | MEASURED (facts 783, 784) |
+| Continuity | bits run on across packets; a read past the armed data stops the program until the next packet is armed; the host never realigns, so the program skips any padding itself | MEASURED (facts 784, 786) |
+| Per packet | the host releases the previous slot, arms one descriptor (one raw access unit), re-arms the decoder at q256 (+0x98C = 1), waits for status bit 2, reads the output | MEASURED (fact 785) |
 
 ## Output contract
 
@@ -93,6 +98,14 @@ The program must not overwrite an owned buffer: with the ring full the host's ha
 (**MEASURED** on silicon). On silicon the two 0x24-byte packets each gave 0x800 frames and the
 first real frame reported 0x1000 units (**MEASURED**); how those counts map onto one
 1024-sample stereo frame is **OPEN**.
+
+Measured for the program's output (fact 785): a two-slot ring, slots 0, 1, 0, 1 by packet.
+Slot k's PCM is Y:0x80 + 0x800 k, 2048 words (1024 frames x 2 channels, interleaved); its
+entry Y:5 + 2k = 1 (owned), Y:6 + 2k = 0x800 (length in 16-bit units); then Y:0xFD94 bit 0 =
+1, Y:0xFD80 = 0 (the program clears it after reading it), and the program halts. The host
+releases a slot by writing 0 to its owned word. The program keeps the slot index itself; X and
+Y persist across arms (fact 760). How a mono track fills the slot and how errors are signalled:
+**OPEN**.
 
 Also measured on silicon: a CPU read of engine SRAM while the program runs returns 0x74186A6A,
 and X memory keeps only 24 bits per word.

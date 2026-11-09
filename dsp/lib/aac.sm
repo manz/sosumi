@@ -1098,6 +1098,7 @@ shape:  yld(s3, AK_FSL)
         alu s3, s3, s5, #OP_SUB
         yst(HOST_ST)
         ldi s3, #0
+        yst(HOST_ST + 1)        ; host bytes +2 must be 0
         yst(HOST_P0)
         yld(s3, AK_OSL)
         alu s3, s14, s3, #OP_SUB

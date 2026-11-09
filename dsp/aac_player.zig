@@ -183,6 +183,9 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     defer st.deinit(gpa);
     try stageTables(&st, gpa, fi);
     try st.y_mem.put(gpa, ak_nch, nch);
+    // the ring's header (specs/aac.md output contract: host bytes +2 ring size, +4 units)
+    try st.y_mem.put(gpa, 1, 2);
+    try st.y_mem.put(gpa, 2, 0x800);
     for (0..2048) |k| try st.x_mem.put(gpa, map.at("OVL0") + @as(u32, @intCast(k)), 0);
     try st.x_mem.put(gpa, map.at("XRNG"), 0);
     for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);
