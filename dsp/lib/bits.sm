@@ -13,7 +13,7 @@
 ; refill(): one stream byte, cache = cache * 2^8 + the byte, avail + 8. The reader takes a byte
 ; only when it needs one of its bits, so it never reads into the next packet (a read past the
 ; armed bytes would wait for the next arm, 784); the bits left in the cache after a packet's
-; last element are its byte padding, dropped by the next bits_init. Uses s12, s13, A15.
+; last element are its byte padding, dropped by the next bits_init. Uses s13, A15.
 ;
 ; getbits(dst, k), k in 0..15 (getbits_s takes k in s11; k = 0 reads 0): refill a byte at a
 ; time while avail < k (the cache stays below 2^23), then dst = floor(cache / 2^sh),
@@ -71,14 +71,13 @@ on:     ldi s9, #0
 
 .macro refill() {
         x16.getb #7, #7         ; A15 <- the next 8 stream bits (783)
-        nop()                   ; A15 readable after the read: unmeasured, one bundle given
-        x02.asrc s13, A15       ; A15 + 1 (own-x02asrc)
-        ldi s12, #-8
-        alu s9, s12, s9, #ASR   ; cache << 8 (alu asr, a negative count shifts left: fact 774)
+        ldi s13, #-8
+        alu s9, s13, s9, #ASR   ; cache << 8 (alu asr, a negative count shifts left: fact 774)
+        x02.asrc s13, A15       ; A15 + 1 (own-x02asrc), two bundles after the read (unmeasured)
         alu s13, s13, s14, #OP_SUB ; the byte
         alu s9, s9, s13, #OP_ADD
-        ldi s12, #8
-        alu s10, s10, s12, #OP_ADD ; avail += 8
+        ldi s13, #8
+        alu s10, s10, s13, #OP_ADD ; avail += 8
 }
 
 .macro getbits(dst, k) {
@@ -92,12 +91,16 @@ on:     ldi s9, #0
 need:   alu s12, s10, s11, #OP_SUB ; sh = avail - k
         ptst p3, s0, #LT12, #PTST ; p3 = avail < k
         jmp #IF_NOT, #3, have
-        nop()
-        nop()
-        refill()                ; a byte at a time: k may pass 8 (a Huffman leaf's f)
+        ldi s13, #-8            ; (delay slot)
+        nop()                   ; (delay slot)
+        x16.getb #7, #7         ; a byte at a time (refill's steps): k may pass 8
+        alu s9, s13, s9, #ASR   ; cache << 8
+        ldi s12, #8
+        x02.asrc s13, A15       ; the byte + 1, two bundles after the read
+        alu s13, s13, s14, #OP_SUB
         jmp #ALWAYS, #0, need
-        nop()
-        nop()
+        alu s9, s9, s13, #OP_ADD ; (delay slot)
+        alu s10, s10, s12, #OP_ADD ; (delay slot) avail += 8
 have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
         alu s6, s0, s12, #OP_SUB ; -sh
         alu s6, s6, dst, #ASR   ; dst << sh
