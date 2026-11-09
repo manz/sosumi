@@ -1,7 +1,8 @@
 # AAC in mode 0's memory
 
 Mode 0 gives a program X:0..0x1BFF (7168 words of 24 bits) and Y:0..0x2E7F (11904 words of 16
-bits), plus Y:0x2E80..0x2EFF, 128 words that keep 24 bits (x17 handbook §2). The imported
+bits), plus Y:0x2E80..0x2EFF, 128 more 16-bit words: the DSP's Y store keeps 16 bits there too,
+so there is no 24-bit Y (specs/questions.md 15). The imported
 aac_packet uses X up to 0x5131 and Y up to 0x65FF. This is the plan to fit it, Y taking
 everything that 16 bits can carry.
 
@@ -63,7 +64,8 @@ Y (16-bit):
 | ... | 1152 | KBD halves |
 | ... | ~400 | swb_offset, the AK slots, stage slots |
 
-Y:0x2E80..0x2EFF (24-bit): stereo T, PNS T and seeds, TNS reflection table, the PNS generator.
+Stereo T, PNS T and seeds, the TNS reflection table and the PNS generator need 24 bits, so they stay in X
+(Y:0x2E80..0x2EFF keeps only 16 bits, specs/questions.md 15).
 
 Y is within a few hundred words of full, so each stage's slots get placed against this table
 before code moves.
