@@ -12,7 +12,7 @@ pub const at = map.at;
 
 const A = ref.dsp.aac;
 
-pub const Error = error{ Unsupported, Status, NotHalted } || h.emu.RunError || std.mem.Allocator.Error;
+pub const Error = error{ Unsupported, Status, NotHalted, MonoCopy } || h.emu.RunError || std.mem.Allocator.Error;
 
 const au_base = map.at("AU");
 const ak_nch = map.at("AK_NCH");
@@ -149,7 +149,12 @@ pub const Player = struct {
         self.status = st.getY(ak_st) orelse 0;
         if (self.status != 0) return error.Status;
         const slot = pcm_base + 0x800 * k;
-        for (self.pcm, 0..) |*s, i| s.* = @bitCast(@as(u16, @truncate(st.getY(slot + @as(u32, @intCast(i))) orelse 0)));
+        // the slot is always stereo; a mono channel sits on both sides
+        for (self.pcm, 0..) |*s, i| {
+            const off: u32 = @intCast(if (self.nch == 1) 2 * i else i);
+            s.* = @bitCast(@as(u16, @truncate(st.getY(slot + off) orelse 0)));
+            if (self.nch == 1 and st.getY(slot + off + 1) != st.getY(slot + off)) return error.MonoCopy;
+        }
         try st.y_mem.put(self.gpa, map.at("RING_E") + 2 * k, 0); // the host releases the slot
         return self.pcm;
     }
@@ -183,9 +188,8 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     defer st.deinit(gpa);
     try stageTables(&st, gpa, fi);
     try st.y_mem.put(gpa, ak_nch, nch);
-    // the ring's header (specs/aac.md output contract: host bytes +2 ring size, +4 units)
-    try st.y_mem.put(gpa, 1, 2);
-    try st.y_mem.put(gpa, 2, 0x800);
+    // the ring's header as the device's init pass leaves it (specs/aac.md output contract)
+    for ([_]u32{ 0, 2, 0x800, 0, 0x10 }, 0..) |v, i| try st.y_mem.put(gpa, @intCast(i), v);
     for (0..2048) |k| try st.x_mem.put(gpa, map.at("OVL0") + @as(u32, @intCast(k)), 0);
     try st.x_mem.put(gpa, map.at("XRNG"), 0);
     for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);

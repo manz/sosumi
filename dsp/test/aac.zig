@@ -66,7 +66,7 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
         }
         // the output contract: slot k owned with its length, output ready, the other slot next
         try testing.expectEqual(@as(?u32, 1), state.getY(map.at("RING_E") + 2 * k));
-        try testing.expectEqual(@as(?u32, @intCast(1024 * nch)), state.getY(map.at("RING_E") + 2 * k + 1));
+        try testing.expectEqual(@as(?u32, 0x800), state.getY(map.at("RING_E") + 2 * k + 1));
         try testing.expectEqual(@as(?u32, 0x8001), state.getY(map.at("HOST_ST")));
         try testing.expectEqual(@as(?u32, 0), state.getY(map.at("HOST_P0")));
         try testing.expectEqual(@as(?u32, 1 - k), state.getY(map.at("AK_OSL")));

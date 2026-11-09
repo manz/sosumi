@@ -21,7 +21,7 @@
 ; Y state kept between access units: AK_SHP + slot each channel's previous window_shape,
 ;   AK_OSL the output slot this access unit fills.
 ; Y out (the host's output contract, specs/aac.md): a two-slot ring, slot k's PCM at OUTY +
-;   0x800 k, 1024 frames of AK_NCH interleaved 16-bit samples; then its entry Y:5 + 2k = 1
+;   0x800 k, 1024 frames of 2 interleaved 16-bit samples (mono on both); then its entry Y:5 + 2k = 1
 ;   (owned) and Y:6 + 2k its length in words, HOST_ST bit 0 set (output ready), HOST_P0
 ;   cleared; the next access unit takes the other slot. AK_ST, for debugging only: 0 ok, 1 CCE
 ;   or PCE, 2 a syntax error, 3 an escape past 8 ones, 4 stereo tools without common_window, 5
@@ -1018,7 +1018,7 @@ done:
         ldi s4, #OUTY - 1
         alu s3, s3, s4, #OP_ADD
         yst(WIN_PCM)
-        yld(s5, AK_NCH)
+        ldi s5, #2              ; stride 2: the slot is always stereo
         x17.styr R6, s5, #0, e6, #0
 }
 
@@ -1073,11 +1073,36 @@ shape:  yld(s3, AK_FSL)
         x17.sty e8, #3, #0      ; prev_shape = window_shape
 }
 
-; Hands slot AK_OSL to the host (the output contract above) and flips AK_OSL. Uses s3..s7, e6.
+; Hands slot AK_OSL to the host (the output contract above) and flips AK_OSL. A mono channel,
+; written to the left samples, is copied to the right: the slot always holds 1024 stereo frames
+; (specs/aac.md). Uses s3..s7, s13, e6..e8, p3.
 .macro ak_publish() {
-        yld(s7, AK_NCH)
-        ldi s4, #-10
-        alu s7, s4, s7, #ASRRS  ; length: 1024 AK_NCH words
+        yld(s4, AK_NCH)
+        alu s4, s4, s14, #OP_SUB
+        ptst p3, s0, #EQ4, #PTST ; mono
+        jmp #IF_NOT, #3, stereo
+        nop()
+        nop()
+        yld(s5, AK_OSL)
+        ldi s4, #-11
+        alu s5, s4, s5, #ASRRS
+        ldi s4, #OUTY - 1       ; x17.mve adds 1
+        alu s13, s5, s4, #OP_ADD
+        x17.mve e8, s13         ; the left sample
+        alu s13, s13, s14, #OP_ADD
+        x17.mve e7, s13         ; the right
+        ldi s6, #1024
+dup:    ldy s3, e8
+        x17.sty e7, #3, #0
+        x18.eagu e8, e8, #AGU_INC
+        x18.eagu e8, e8, #AGU_INC
+        alu s6, s6, s14, #OP_SUB
+        alu s4, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ4, #PTST
+        jmp #IF_NOT, #3, dup
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
+stereo: ldi s7, #0x800          ; length: 1024 frames x 2 channels
         yld(s5, AK_OSL)
         alu s5, s5, s5, #OP_ADD
         ldi s13, #RING_E - 1    ; x17.mve adds 1

@@ -88,9 +88,9 @@ of ours must publish the same structure, because the host's output-ready path re
 
 | Address (sm1) | Contents | Evidence |
 |---|---|---|
-| Y:0 | entry table: +2 ring size, +4 units per buffer; entry i at +i*4: +0xA owned flag, +0xC length in 16-bit units | MEASURED; Y mapping INFERRED |
+| Y:0 | entry table: Y:1 ring size; entry i: Y:5 + 2i owned flag, Y:6 + 2i length in 16-bit units. The device's init pass writes Y:0..4 = 0, 2, 0x800, 0, 0x10 (what the host does with Y:4: OPEN) | MEASURED (fact 787) |
 | Y:0x80 | PCM buffers, buffer i at + i*units*2, interleaved 16-bit | MEASURED; Y mapping INFERRED |
-| Y:0xFD94 | status header: +0 bit 0 = output ready, +2 must be 0 | MEASURED; Y mapping INFERRED |
+| Y:0xFD94 | status header: Y:0xFD94 = 1 (output ready) and Y:0xFD95 = 0 per packet; Y:0xFD96, 0xFD97 are never written by the decode | MEASURED (facts 785, 787) |
 
 Offsets in the table are in host bytes. The host takes entry `idx` when it is owned, copies
 `length` units, clears the owned flag and advances `idx` modulo the ring size (**FIRMWARE**).
@@ -104,8 +104,11 @@ Slot k's PCM is Y:0x80 + 0x800 k, 2048 words (1024 frames x 2 channels, interlea
 entry Y:5 + 2k = 1 (owned), Y:6 + 2k = 0x800 (length in 16-bit units); then Y:0xFD94 bit 0 =
 1, Y:0xFD80 = 0 (the program clears it after reading it), and the program halts. The host
 releases a slot by writing 0 to its owned word. The program keeps the slot index itself; X and
-Y persist across arms (fact 760). How a mono track fills the slot and how errors are signalled:
-**OPEN**.
+Y persist across arms (fact 760). The host has no mono path: it copies 4 bytes per frame, so a mono track fills the
+slot as stereo with both samples equal, length 0x800 (**MEASURED** on the host's code; what the
+device's own program does for mono is not measured). The descriptor carries the access unit's
+exact byte count and the next one follows bit for bit (fact 784): no padding between them. How
+errors are signalled: **OPEN**.
 
 Also measured on silicon: a CPU read of engine SRAM while the program runs returns 0x74186A6A,
 and X memory keeps only 24 bits per word.
