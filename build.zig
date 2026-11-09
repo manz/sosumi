@@ -89,9 +89,30 @@ pub fn build(b: *std.Build) void {
     img.addArg("-g");
     const dbg = img.addOutputFileArg("aac.json");
     img.addFileArg(gen.captureStdOut(.{ .basename = "aac.sm" }));
-    const sm1 = b.step("sm1", "Build zig-out/sm1/aac.x17i, aac_packet's x17 image");
+    const sm1 = b.step("sm1", "Build zig-out/sm1/aac.x17i and mp3.x17i, the decoders' x17 images");
     sm1.dependOn(&b.addInstallFileWithDir(x17i, .{ .custom = "sm1" }, "aac.x17i").step);
     sm1.dependOn(&b.addInstallFileWithDir(dbg, .{ .custom = "sm1" }, "aac.json").step);
+
+    // mp3_packet's image, the same way: tools/mp3image writes the source
+    const mp3image = b.addExecutable(.{
+        .name = "mp3image",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/mp3image/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "dsp", .module = dspplay.root_module.import_table.get("dsp").? }},
+        }),
+    });
+    const mgen = b.addRunArtifact(mp3image);
+    mgen.addDirectoryArg(b.path("dsp/lib"));
+    const mimg = b.addRunArtifact(x17.artifact("x17"));
+    mimg.addArgs(&.{ "image", "-o" });
+    const mx17i = mimg.addOutputFileArg("mp3.x17i");
+    mimg.addArg("-g");
+    const mdbg = mimg.addOutputFileArg("mp3.json");
+    mimg.addFileArg(mgen.captureStdOut(.{ .basename = "mp3.sm" }));
+    sm1.dependOn(&b.addInstallFileWithDir(mx17i, .{ .custom = "sm1" }, "mp3.x17i").step);
+    sm1.dependOn(&b.addInstallFileWithDir(mdbg, .{ .custom = "sm1" }, "mp3.json").step);
 
     const compare = b.addExecutable(.{
         .name = "compare",
