@@ -64,7 +64,11 @@ fault; LAME writes it with empty main data.
   other). The mode byte is ctx+0x58.
 - The output ring contract is AAC's (`specs/aac.md`, the same host output path,
   **FIRMWARE**). MP3's init pass writes the header Y:0..4 = 0, 2, 0x900, 0, 0x10: two slots of
-  0x900 words, 1152 stereo frames (**MEASURED**, fact 788). The length word of a slot: **OPEN**.
+  0x900 words, 1152 stereo frames (**MEASURED**, fact 788). Per packet the slots alternate 0, 1;
+  the entry's length word is samples x the stream's channel count, mono not duplicated:
+  MPEG-1 stereo 0x900, MPEG-1 mono 0x480, MPEG-2 stereo 0x480, MPEG-2 mono 0x240; FD94 = 1,
+  FD95 = 0 after each packet (**MEASURED**, fact 797). With no slot released, the device's
+  program stops with FD95 = 0x21 (ring full, waiting on the host) and leaves the packet queued.
 - The host contract is AAC's (**MEASURED**, every packet of one track): the same handshake and
   arm, +0x98C on every packet including the first, no +0x420 block; only the per-mode patch
   words at +0x940, +0x960 and +0x964 differ, written by the driver from its table. No
