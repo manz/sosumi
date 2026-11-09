@@ -3,7 +3,7 @@
 ; One AAC-LC access unit (a raw_data_block): the twin of `Decoder.decode` in
 ; ref/dsp/aac/decoder.zig, its syntax from ref/aac/raw.zig and ref/aac/ics.zig. Needs
 ; lib/bits.sm, lib/mem.sm, lib/huffman.sm, lib/sections.sm, lib/dequant.sm, lib/stereo.sm,
-; lib/pns.sm, lib/tns.sm, lib/imdct.sm and lib/window.sm first; bits_init must point the
+; lib/pns.sm, lib/tns.sm, lib/imdct.sm, lib/window.sm and lib/ring.sm first; bits_init must point the
 ; reader at the access unit (16-bit words, the first byte high).
 ;
 ; Elements: SCE and LFE (one channel), CPE (two), FIL and DSE skipped, until END. CCE and PCE
@@ -79,10 +79,6 @@
 .const ESLOT    = 0x2353
 .const REVL     = 0x2354
 .const REVS     = 0x2554
-.const OUTY     = 0x0080        ; output slot 0; slot 1 at + 0x800
-.const RING_E   = 5             ; slot k's entry: Y:RING_E + 2k owned, + 1 its length
-.const HOST_ST  = 0xFD94        ; the engine's status header, bit 0 output ready
-.const HOST_P0  = 0xFD80        ; the parameter block's first word, cleared after a packet
 
 ; a channel record
 .const R_GG   = 0
@@ -1010,13 +1006,9 @@ done:
         ldi s4, #OVL0
         alu s3, s3, s4, #OP_ADD
         yst(WIN_OVL)
-        yld(s3, AK_OSL)         ; the ring slot: OUTY + 0x800 AK_OSL + AK_FSL, stride AK_NCH
-        ldi s4, #-11
-        alu s3, s4, s3, #ASRRS
-        yld(s4, AK_FSL)
-        alu s3, s3, s4, #OP_ADD
-        ldi s4, #OUTY - 1
-        alu s3, s3, s4, #OP_ADD
+        ring_base(s3, AK_OSL)   ; the ring slot: OUTY + 0x800 AK_OSL + AK_FSL, stride 2
+        yld(s5, AK_FSL)
+        alu s3, s3, s5, #OP_ADD
         yst(WIN_PCM)
         ldi s5, #2              ; stride 2: the slot is always stereo
         x17.styr R6, s5, #0, e6, #0
@@ -1083,51 +1075,9 @@ shape:  yld(s3, AK_FSL)
         jmp #IF_NOT, #3, stereo
         nop()
         nop()
-        yld(s5, AK_OSL)
-        ldi s4, #-11
-        alu s5, s4, s5, #ASRRS
-        ldi s4, #OUTY - 1       ; x17.mve adds 1
-        alu s13, s5, s4, #OP_ADD
-        x17.mve e8, s13         ; the left sample
-        alu s13, s13, s14, #OP_ADD
-        x17.mve e7, s13         ; the right
-        ldi s6, #1024
-dup:    ldy s3, e8
-        x17.sty e7, #3, #0
-        x18.eagu e8, e8, #AGU_INC
-        x18.eagu e8, e8, #AGU_INC
-        alu s6, s6, s14, #OP_SUB
-        alu s4, s6, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, dup
-        x18.eagu e7, e7, #AGU_INC ; (delay slot)
-        x18.eagu e7, e7, #AGU_INC ; (delay slot)
-stereo: ldi s7, #0x800          ; length: 1024 frames x 2 channels
-        yld(s5, AK_OSL)
-        alu s5, s5, s5, #OP_ADD
-        ldi s13, #RING_E - 1    ; x17.mve adds 1
-        alu s13, s13, s5, #OP_ADD
-        x17.mve e6, s13
-        ldi s3, #1
-        x17.sty e6, #3, #0      ; owned
-        x18.eagu e6, e6, #AGU_INC
-        alu s3, s7, s0, #OP_ADD
-        x17.sty e6, #3, #0      ; its length
-        yld(s3, HOST_ST)        ; bit 0 set, the others kept: v + 1 - (v & 1)
-        ldi s4, #1
-        alu s5, s4, s3, #ASR
-        ldi s4, #-1
-        alu s5, s4, s5, #ASRRS
-        alu s5, s3, s5, #OP_SUB
-        alu s3, s3, s14, #OP_ADD
-        alu s3, s3, s5, #OP_SUB
-        yst(HOST_ST)
-        ldi s3, #0
-        yst(HOST_ST + 1)        ; host bytes +2 must be 0
-        yst(HOST_P0)
-        yld(s3, AK_OSL)
-        alu s3, s14, s3, #OP_SUB
-        yst(AK_OSL)
+        ring_dup(AK_OSL, 1024)
+stereo: ldi s7, #RING_SLOT      ; length: 1024 frames x 2 channels
+        ring_publish(AK_OSL)
 }
 
 .macro aac_packet() {

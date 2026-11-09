@@ -38,6 +38,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
         \\.include "lib/tns.sm"
         \\.include "lib/imdct.sm"
         \\.include "lib/window.sm"
+        \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
         \\        bits_init(AU)
         \\        aac_packet()
@@ -148,7 +149,7 @@ pub const Player = struct {
         if (!st.halted) return error.NotHalted;
         self.status = st.getY(ak_st) orelse 0;
         if (self.status != 0) return error.Status;
-        const slot = pcm_base + 0x800 * k;
+        const slot = pcm_base + map.at("RING_SLOT") * k;
         // the slot is always stereo; a mono channel sits on both sides
         for (self.pcm, 0..) |*s, i| {
             const off: u32 = @intCast(if (self.nch == 1) 2 * i else i);
@@ -188,8 +189,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     defer st.deinit(gpa);
     try stageTables(&st, gpa, fi);
     try st.y_mem.put(gpa, ak_nch, nch);
-    // the ring's header as the device's init pass leaves it (specs/aac.md output contract)
-    for ([_]u32{ 0, 2, 0x800, 0, 0x10 }, 0..) |v, i| try st.y_mem.put(gpa, @intCast(i), v);
+    try h.stageRing(&st, gpa);
     for (0..2048) |k| try st.x_mem.put(gpa, map.at("OVL0") + @as(u32, @intCast(k)), 0);
     try st.x_mem.put(gpa, map.at("XRNG"), 0);
     for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);
@@ -198,7 +198,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
     try emitData(w, gpa, ".ydata", &st.y_mem, 0xFFFF);
     try w.writeAll("        x17.halt\n\n.pass decoder\n");
-    for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "aac" }) |f|
+    for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "ring", "aac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll(
         \\        bits_init(AU)

@@ -18,6 +18,7 @@ test "aac_packet fits program memory" {
         \\.include "lib/tns.sm"
         \\.include "lib/imdct.sm"
         \\.include "lib/window.sm"
+        \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
         \\        bits_init(AU)
         \\        aac_packet()

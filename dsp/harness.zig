@@ -7,6 +7,7 @@ pub const emu = @import("emu");
 pub const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/bits.sm", .text = @embedFile("lib/bits.sm") },
     .{ .path = "lib/mem.sm", .text = @embedFile("lib/mem.sm") },
+    .{ .path = "lib/ring.sm", .text = @embedFile("lib/ring.sm") },
     .{ .path = "lib/pcm.sm", .text = @embedFile("lib/pcm.sm") },
     .{ .path = "lib/huffman.sm", .text = @embedFile("lib/huffman.sm") },
     .{ .path = "lib/sections.sm", .text = @embedFile("lib/sections.sm") },
@@ -84,6 +85,13 @@ pub fn putY(st: *emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
 }
 
 /// A Y word read back as signed 16 bits; a missing word reads as 0xDEAD.
+/// The output ring's header as the init pass leaves it (lib/ring.sm, specs/aac.md output
+/// contract): Y:0..4 = 0, 2 slots, RING_SLOT words each, 0, 0x10.
+pub fn stageRing(st: *emu.State, gpa: std.mem.Allocator) !void {
+    const slot = @import("map.zig").at("RING_SLOT");
+    for ([_]u32{ 0, 2, slot, 0, 0x10 }, 0..) |v, i| try st.y_mem.put(gpa, @intCast(i), v);
+}
+
 pub fn sx16(v: ?u32) i32 {
     return @as(i16, @bitCast(@as(u16, @truncate(v orelse 0xDEAD))));
 }

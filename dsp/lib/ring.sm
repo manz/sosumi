@@ -1,0 +1,73 @@
+; The host's output ring, shared by every decoder program (specs/aac.md output contract).
+; Needs lib/mem.sm (yld, yst).
+;
+; Two slots of RING_SLOT words at OUTY, slot k at OUTY + RING_SLOT k: interleaved 16-bit stereo
+; frames. Slot k's entry: Y:RING_E + 2k = 1 (owned), Y:RING_E + 2k + 1 its length in words. The
+; host releases a slot by writing 0 to its owned word. The init pass leaves the header Y:0..4 =
+; 0, 2, RING_SLOT, 0, 0x10 (dsp/harness.zig `stageRing`). Per packet the program fills slot
+; Y[OSL], publishes it (status HOST_ST bit 0 set, HOST_ST + 1 = 0, HOST_P0 cleared; never
+; HOST_ST + 2 or + 3) and flips Y[OSL]; OSL is the program's own persistent word, 0 at start.
+
+.const OUTY      = 0x0080       ; slot 0; slot 1 at + RING_SLOT
+.const RING_SLOT = 0x800        ; words per slot: 1024 stereo frames
+.const RING_E    = 5            ; slot k's entry: Y:RING_E + 2k owned, + 1 its length
+.const HOST_ST   = 0xFD94       ; the engine's status header, bit 0 output ready
+.const HOST_P0   = 0xFD80       ; the parameter block's first word, cleared after a packet
+
+; dst = OUTY - 1 + RING_SLOT Y[OSL] (x17.mve adds the 1). dst is not s4. Uses s4, e6.
+.macro ring_base(dst, OSL) {
+        yld(dst, OSL)
+        ldi s4, #-11
+        alu dst, s4, dst, #ASRRS ; RING_SLOT = 1 << 11
+        ldi s4, #OUTY - 1
+        alu dst, dst, s4, #OP_ADD
+}
+
+; Copies slot Y[OSL]'s left samples onto its right ones, for N frames: a mono stream fills
+; both sides. Uses s3, s4, s6, s13, e6..e8, p3.
+.macro ring_dup(OSL, N) {
+        ring_base(s13, OSL)
+        x17.mve e8, s13         ; the left sample
+        alu s13, s13, s14, #OP_ADD
+        x17.mve e7, s13         ; the right
+        ldi s6, #(N)
+dup:    ldy s3, e8
+        x17.sty e7, #3, #0
+        x18.eagu e8, e8, #AGU_INC
+        x18.eagu e8, e8, #AGU_INC
+        alu s6, s6, s14, #OP_SUB
+        alu s4, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ4, #PTST
+        jmp #IF_NOT, #3, dup
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
+}
+
+; Hands slot Y[OSL] to the host with length s7 (words) and flips Y[OSL]. Uses s3..s5, s13, e6.
+.macro ring_publish(OSL) {
+        yld(s5, OSL)
+        alu s5, s5, s5, #OP_ADD
+        ldi s13, #RING_E - 1    ; x17.mve adds 1
+        alu s13, s13, s5, #OP_ADD
+        x17.mve e6, s13
+        ldi s3, #1
+        x17.sty e6, #3, #0      ; owned
+        x18.eagu e6, e6, #AGU_INC
+        alu s3, s7, s0, #OP_ADD
+        x17.sty e6, #3, #0      ; its length
+        yld(s3, HOST_ST)        ; bit 0 set, the others kept: v + 1 - (v & 1)
+        ldi s4, #1
+        alu s5, s4, s3, #ASR
+        ldi s4, #-1
+        alu s5, s4, s5, #ASRRS
+        alu s5, s3, s5, #OP_SUB
+        alu s3, s3, s14, #OP_ADD
+        alu s3, s3, s5, #OP_SUB
+        yst(HOST_ST)
+        ldi s3, #0
+        yst(HOST_ST + 1)        ; host bytes +2 must be 0
+        yst(HOST_P0)
+        yld(s3, OSL)
+        alu s3, s14, s3, #OP_SUB
+        yst(OSL)
+}
