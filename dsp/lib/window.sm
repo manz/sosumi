@@ -28,56 +28,44 @@
         aimm_e(2, T)
         aimm_e(3, WP)
         win_a8ovl()
-        ldi s13, #PCM - 1
-        x17.mve e7, s13         ; e7 = PCM
+        rimm R4, #0             ; set below: A8's end
+        lde e7, #PCM
         ldi s9, #32767
         ldi s10, #-32768
-        ldi s12, #-5
-        ldi s11, #1024
-first:  x19.xrd s1, #4          ; t
-        x02.ainc #4, #4
-        x19.xrd s3, #6          ; w
-        x02.ainc #6, #6
-        x02.mpy s5, s1, s3
-        x19.xrd s6, #8          ; overlap
-        x02.ainc #8, #8
-        alu s5, s5, s6, #OP_ADD
-        x19.alu s5, s5, s12, #SHIFT ; rshr 5
-        alu s4, s5, s9, #OP_SUB
-        ptst p3, s0, #LE4, #PTST
-        alu s7, s0, s4, #OP_SUB
-        psel s5, s7, s5, p3, #0, #4 ; v > 32767: 32767
-        alu s4, s5, s10, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        alu s7, s0, s4, #OP_SUB
-        psel s5, s7, s5, p3, #1, #4 ; v < -32768: -32768
-        x17.sty e7, #5, #0
-        x18.eagu e7, e7, #AGU_INC
-        alu s11, s11, s14, #OP_SUB
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, first
-        nop()
-        nop()
+        yld(s12, WIN_OVL)
+        ldi s13, #1024
+        alu s12, s12, s13, #OP_ADD
+        win_rset(s12, R4)       ; R4 = OVL + 1024
+        pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0) ; t
+first:  pk(s3, A6, s0, s0, s0, 0, s0, s0, 0, 0) ; w
+        pk(s6, A8, s5, s1, s3, 0, s0, s0, 0, 0) ; overlap; t w
+        pkn(s1, A4, s0, s0, s0, 5, s5, s6, 0, 4, 5) ; the next t; rshr(t w + overlap, 5)
+        x18.min s5, s5, s9
+        pcond p3, R4, A8, #30
+        jmp #3, #3, first
+        x18.max s5, s5, s10     ; (delay slot)
+        x17.styi e7, #5, #0, e7 ; (delay slot)
+        ; s1 holds T[1024], A4 = T + 1025
         ldi s12, #WC + 1023
-        amov_e(3, s12)           ; the current shape, falling
+        amov_e(3, s12)          ; the current shape, falling
         win_a8ovl()
-        rimm R2, #-1
-        ldi s11, #1024
-second: x19.xrd s1, #4
-        x02.ainc #4, #4
-        x19.xrd s3, #6
-        x18.rag101 s0, R3, A6, R2, #2
-        x12.aset #3, R3
-        x02.mpy s5, s1, s3
-        stx A8, s5
-        x02.ainc #8, #8
-        alu s11, s11, s14, #OP_SUB
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, second
-        nop()
-        nop()
+        ldi s12, #WC - 1
+        win_rset(s12, R4)       ; A6's end
+second: x19.xrd s3, #6          ; w
+        x02.aa A6, A6, R0, #1, A0, A0 ; A6 - 1 (fn 1, 403)
+        pk(s0, A0, s5, s1, s3, 0, s0, s0, 0, 0) ; t w
+        pcond p3, R4, A6, #30
+        jmp #3, #3, second
+        pks(5, A8, 0, s0, s0, 0) ; (delay slot)
+        pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) the next t
+}
+
+; RD = s<src> (mem.sm's amov R path). Uses s13, e6.
+.macro win_rset(src, RD) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, RD, e6, #25, #2, #0
 }
 
 ; The other sequences build the Q5 block in X B (2048 words) from runs, then win_out.

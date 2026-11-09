@@ -70,6 +70,11 @@
         x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE
 }
 
+; pkn: pk with the third slot's #n (CODE 4: (XA op XB + 2^(N-1)) >> N, the rounded shift, 730).
+.macro pkn(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE, N) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #N, #CODE
+}
+
 ; pks(SN, SA, XD, XA, XB, OP): X:[SA] <- s<SN>, SA + 1 (x02.vs: the store lands at the old SA,
 ;   513, 730), beside the third slot's adder as pk's CODE 0. SN and XD are register numbers.
 .macro pks(SN, SA, XD, XA, XB, OP) {
