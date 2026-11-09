@@ -27,7 +27,7 @@
 ;   window halves as w / 4 (s the shape); XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
-; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, PCMY, the AK_
+; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, the AK_
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
 .const HUFF0    = 0x0B80        ; scale factor code
@@ -73,7 +73,6 @@
 .const ESLOT    = 0x2553
 .const REVL     = 0x2554
 .const REVS     = 0x2754
-.const PCMY     = 0x3000
 .const OUTY     = 0x0080
 
 ; a channel record
@@ -1026,7 +1025,8 @@ fcopy:  alu s3, s5, s0, #OP_ADD
         yst(WIN_F)
 }
 
-; The window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence, into Y PCMY.
+; The window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence, into the
+; ring slot at Y:[WIN_PCM] + 1, stride R6.
 .macro ak_window() {
         yld(s2, FIN + R_WS)
         alu s4, s2, s0, #OP_ADD
@@ -1042,19 +1042,19 @@ fcopy:  alu s3, s5, s0, #OP_ADD
         jmp #3, #3, wsh
         nop()
         nop()
-        win_stop(IMT, WB, PCMY)
+        win_stop(IMT, WB)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wl:     win_long(IMT, PCMY)
+wl:     win_long(IMT)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wst:    win_start(IMT, WB, PCMY)
+wst:    win_start(IMT, WB)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wsh:    win_short(IMT, WB, PCMY)
+wsh:    win_short(IMT, WB)
 done:
 }
 
@@ -1110,6 +1110,12 @@ halves: ak_halves()
         ldi s4, #OVL0
         alu s3, s3, s4, #OP_ADD
         yst(WIN_OVL)
+        yld(s3, AK_FSL)         ; the ring slot: OUTY + AK_FSL, stride AK_NCH
+        ldi s4, #OUTY - 1
+        alu s3, s3, s4, #OP_ADD
+        yst(WIN_PCM)
+        yld(s5, AK_NCH)
+        x17.styr R6, s5, #0, e6, #0
         ak_window()
         yld(s3, AK_FSL)
         ldi s13, #AK_SHP - 1
@@ -1117,25 +1123,6 @@ halves: ak_halves()
         x17.mve e8, s13
         yld(s3, FIN + R_SH)
         x17.sty e8, #3, #0      ; prev_shape = window_shape
-        ; PCM into slot AK_FSL of the interleaved output
-        yld(s3, AK_FSL)
-        ldi s6, #OUTY - 1
-        alu s6, s6, s3, #OP_ADD
-        yld(s5, AK_NCH)
-        ldi s13, #PCMY - 1
-        x17.mve e7, s13
-        ldi s2, #1024
-il:     ldy s3, e7
-        x18.eagu e7, e7, #AGU_INC
-        x17.mve e8, s6
-        x17.sty e8, #3, #0
-        alu s6, s6, s5, #OP_ADD
-        alu s2, s2, s14, #OP_SUB
-        alu s4, s2, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, il
-        nop()
-        nop()
 }
 
 .macro aac_packet() {

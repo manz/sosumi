@@ -21,10 +21,10 @@ const pcm_at = map.at("OUTY");
 
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
     return switch (seq) {
-        .only_long => std.fmt.comptimePrint("win_long({d}, {d})", .{ t_at, pcm_at }),
-        .long_start => std.fmt.comptimePrint("win_start({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
-        .long_stop => std.fmt.comptimePrint("win_stop({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
-        .eight_short => std.fmt.comptimePrint("win_short({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
+        .only_long => std.fmt.comptimePrint("rimm R6, #2\n        win_long({d})", .{t_at}),
+        .long_start => std.fmt.comptimePrint("rimm R6, #2\n        win_start({d}, {d})", .{ t_at, b_at }),
+        .long_stop => std.fmt.comptimePrint("rimm R6, #2\n        win_stop({d}, {d})", .{ t_at, b_at }),
+        .eight_short => std.fmt.comptimePrint("rimm R6, #2\n        win_short({d}, {d})", .{ t_at, b_at }),
     };
 }
 
@@ -70,6 +70,7 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
             try h.putAllX(&state, gpa, sc_at, &W.short[cur]);
             try h.putAllX(&state, gpa, ovl_at, &st.overlap);
             try h.putY(&state, gpa, map.at("WIN_OVL"), ovl_at);
+            try h.putY(&state, gpa, map.at("WIN_PCM"), pcm_at - 1); // stride 2, every other word
             try h.putY(&state, gpa, map.at("WIN_R"), @intCast(halves(seq)[0]));
             try h.putY(&state, gpa, map.at("WIN_F"), @intCast(halves(seq)[1]));
             // B starts as garbage: every word must be written
@@ -85,7 +86,7 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
 
             for (pcm, st.overlap, 0..) |p, o, n| {
                 if (p == 32767 or p == -32768) clipped += 1;
-                try testing.expectEqual(@as(u32, @as(u16, @bitCast(p))), (state.getY(pcm_at + @as(u32, @intCast(n))) orelse 0xDEAD) & 0xFFFF);
+                try testing.expectEqual(@as(u32, @as(u16, @bitCast(p))), (state.getY(pcm_at + 2 * @as(u32, @intCast(n))) orelse 0xDEAD) & 0xFFFF);
                 try testing.expectEqual(@as(u32, @as(u24, @bitCast(o))), state.readX(ovl_at + @as(u32, @intCast(n))) orelse 0xDEAD);
             }
         };
