@@ -5,6 +5,7 @@
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
 //!     dspplay in.m4a --profile[=rows]
+//!     dspplay in.aac --profile-worst[=rows]   (the most expensive AAC packet alone)
 //!
 //! One emulator, packets in order, as the device runs them. The summary gives the device's
 //! speed from the bundles run, at 37.4 ns a bundle (x17 handbook §1): below 1x real time the
@@ -70,6 +71,8 @@ const Mode = enum { play, check, profile };
 
 /// Rows per table in --profile's report (--profile=N).
 var profile_rows: usize = 15;
+/// --profile-worst: report the most expensive packet alone.
+var profile_worst = false;
 
 fn usage() noreturn {
     std.debug.print("usage: dspplay in.m4a|in.aac [--check | --profile[=rows]]\n", .{});
@@ -181,6 +184,10 @@ pub fn main(init: std.process.Init) !void {
     if (args.len == 3) {
         mode = if (std.mem.eql(u8, args[2], "--check")) .check else if (std.mem.startsWith(u8, args[2], "--profile")) .profile else usage();
         if (std.mem.startsWith(u8, args[2], "--profile=")) profile_rows = std.fmt.parseInt(usize, args[2]["--profile=".len..], 10) catch usage();
+        if (std.mem.startsWith(u8, args[2], "--profile-worst")) {
+            profile_worst = true;
+            if (std.mem.startsWith(u8, args[2], "--profile-worst=")) profile_rows = std.fmt.parseInt(usize, args[2]["--profile-worst=".len..], 10) catch usage();
+        }
     } else if (args.len != 2) usage();
     const file = try std.Io.Dir.cwd().readFileAlloc(io, args[1], gpa, .limited(1 << 31));
     defer gpa.free(file);
@@ -311,14 +318,26 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
     defer gpa.free(silence);
     @memset(silence, 0);
 
+    // --profile-worst: the counts before the packet, and the worst packet's own
+    const before: []u64 = try gpa.alloc(u64, if (profile_worst) prof.counts.len else 0);
+    defer gpa.free(before);
+    const worst: []u64 = try gpa.alloc(u64, before.len);
+    defer gpa.free(worst);
+    var worst_at: usize = 0;
+
     var t: Tally = .{};
     while (try units.next()) |au| {
         const k = t.packets;
+        if (profile_worst) @memcpy(before, prof.counts);
         const pcm = player.feed(au) catch |e| blk: {
             if (t.failed < 5) std.debug.print("unit {d}: {s} (status {d})\n", .{ k, @errorName(e), player.status });
             t.failed += 1;
             break :blk silence;
         };
+        if (profile_worst and player.bundles > t.worst) {
+            for (worst, prof.counts, before) |*d, c, b| d.* = c - b;
+            worst_at = k;
+        }
         t.add(player.bundles, dsp.aac.frame_len);
         if (check) {
             twin.decode(au, want[0..n]) catch |e| {
@@ -336,5 +355,9 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(asc.sample_rate, check, "ref/dsp/aac");
-    if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
+    if (profile_worst) {
+        std.debug.print("worst packet: {d}\n", .{worst_at});
+        @memcpy(prof.counts, worst);
+        try prof.report(gpa, 1, profile_rows);
+    } else if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
 }
