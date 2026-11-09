@@ -182,7 +182,29 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i + 1)), @as(u24, @bitCast(a)));
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i + 2)), @as(u24, @bitCast(-a)));
     }
+    const Y = ref.dsp.mp3.synth;
+    var xn = at("MP_XN");
+    for (synth_rows) |r| {
+        const nt: usize = if (Y.rowN(r) & 1 == 1) 16 else 8;
+        for (Y.n_rows[r][0..nt]) |v| {
+            try st.x_mem.put(gpa, xn, @as(u24, @bitCast(v)));
+            xn += 1;
+        }
+    }
+    std.debug.assert(xn == at("MP_XN") + 384);
+    for (0..1024) |i| try st.x_mem.put(gpa, at("MP_XD") + @as(u32, @intCast(i)), @as(u24, @bitCast(Y.d[i % 512])));
 }
+
+/// The synthesis rows (ref/dsp/mp3/synth.zig n_rows) in mp3_synth's group order.
+pub const synth_rows = [_]usize{
+    1, 3, 5, 7, 9, 11, 13, 15, // h1
+    2, 6, 10, 14, // h2
+    4, 8, 12, // g2
+    0,
+    16, 18, 20, 22, 24, 26, 28, 30, // h1
+    17, 21, 25, 29, // h2
+    19, 23, 27, 31, // g2
+};
 
 test "the band lists and trees fit their Y" {
     const map = @import("../map.zig");

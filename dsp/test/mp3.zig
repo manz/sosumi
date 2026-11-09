@@ -329,3 +329,88 @@ test "mp3_hybrid matches ref/dsp/mp3/hybrid.zig over random granules" {
     std.debug.print("mp3 hybrid: {any} granules (long, start/stop, short, mixed), worst {d} bundles\n", .{ cases, worst });
 }
 
+
+test "mp3_synth matches ref/dsp/mp3/synth.zig over random granules" {
+    const gpa = testing.allocator;
+    const prog = try h.assemble(gpa,
+        \\.include "lib/ybits.sm"
+        \\.include "lib/stream.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/huffman.sm"
+        \\.include "lib/sections.sm"
+        \\.include "lib/dequant.sm"
+        \\.include "lib/mp3.sm"
+        \\        ldi s14, #1
+        \\        ldi s15, #16
+        \\        mp3_synth()
+        \\        x17.halt
+        \\
+    );
+    defer gpa.free(prog);
+    const S = ref.dsp.mp3.synth;
+    var prng = std.Random.DefaultPrng.init(0x5f);
+    const rnd = prng.random();
+    var state = h.emu.State{};
+    defer state.deinit(gpa);
+    try tables.put(&state, gpa, map.at);
+    const zeros: [2048]i24 = @splat(0);
+    try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
+    try h.putY(&state, gpa, map.at("MP_YP"), 0);
+    try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);
+    try h.putY(&state, gpa, map.at("MH_NCH"), 2);
+    const out = 0x80;
+    try h.putY(&state, gpa, map.at("MP_OUT"), out);
+    var twin: [2]S.State = .{ .{}, .{} };
+    var worst: usize = 0;
+    var clipped: usize = 0;
+    for (0..8) |n| {
+        const gr: u32 = @intCast(n % 2);
+        for (0..2) |ch| {
+            var c: [576]i24 = undefined;
+            const big: i24 = if (n == 5) 1 << 22 else 1 << 19;
+            for (&c) |*x| x.* = rnd.intRangeAtMost(i24, -big, big);
+            try h.putAllX(&state, gpa, map.at("MP_XS") + 576 * @as(u32, @intCast(ch)), &c);
+            try h.putY(&state, gpa, map.at("MP_SGR"), @intCast(gr));
+            try h.putY(&state, gpa, map.at("MP_HCH"), @intCast(ch));
+            state.halted = false;
+            const nb = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+            worst = @max(worst, nb);
+            try testing.expect(state.halted);
+            for (0..18) |t| {
+                var s: [32]i24 = undefined;
+                for (0..32) |k| s[k] = c[k * 18 + t];
+                var pcm: [32]i16 = undefined;
+                S.slot(&twin[ch], &s, &pcm);
+                for (pcm, 0..) |v, j| {
+                    clipped += @intFromBool(v == 32767 or v == -32768);
+                    const at: u32 = out + @as(u32, @intCast((gr * 576 + t * 32 + j) * 2 + ch));
+                    const got: i16 = @bitCast(@as(u16, @truncate(y(&state, at))));
+                    if (got != v) {
+                        std.debug.print("granule {d} ch {d} t {d} j {d}: want {d} got {d}\n", .{ n, ch, t, j, v, got });
+                        // the twin's V after the whole granule against the ring
+                        for (t + 1..18) |t2| {
+                            for (0..32) |k| s[k] = c[k * 18 + t2];
+                            S.slot(&twin[ch], &s, &pcm);
+                        }
+                        const p = y(&state, map.at("MP_YP") + @as(u32, @intCast(ch)));
+                        var bad: usize = 0;
+                        for (0..1024) |i| {
+                            const a = i / 64;
+                            const m = i % 64;
+                            const b = (p + a) % 16;
+                            const xa = map.at("MP_XV") + 1024 * @as(u32, @intCast(ch)) + 512 * @as(u32, @intFromBool(m >= 32)) + 32 * @as(u32, @intCast(b)) + @as(u32, @intCast(m % 32));
+                            const gv: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(xa) orelse 0xDEAD))));
+                            if (gv != twin[ch].v[i] and bad < 12) {
+                                std.debug.print("  V age {d} m {d}: want {d} got {d}\n", .{ a, m, twin[ch].v[i], gv });
+                                bad += 1;
+                            }
+                        }
+                        return error.TestExpectedEqual;
+                    }
+                }
+            }
+        }
+    }
+    std.debug.print("mp3 synth: {d} clipped samples, worst {d} bundles per granule-channel\n", .{ clipped, worst });
+    try testing.expect(clipped > 0);
+}
