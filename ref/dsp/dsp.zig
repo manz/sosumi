@@ -2,6 +2,7 @@
 //! only, checked bit for bit against the models in ref/.
 pub const ops = @import("ops.zig");
 pub const bits = @import("bits.zig");
+pub const huffman = @import("huffman.zig");
 pub const alac = @import("alac/alac.zig");
 pub const aac = @import("aac/aac.zig");
 pub const mp3 = @import("mp3/mp3.zig");
