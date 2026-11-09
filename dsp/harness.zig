@@ -6,6 +6,7 @@ pub const emu = @import("emu");
 
 pub const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/bitcore.sm", .text = @embedFile("lib/bitcore.sm") },
+    .{ .path = "lib/stream.sm", .text = @embedFile("lib/stream.sm") },
     .{ .path = "lib/bits.sm", .text = @embedFile("lib/bits.sm") },
     .{ .path = "lib/ybits.sm", .text = @embedFile("lib/ybits.sm") },
     .{ .path = "lib/mem.sm", .text = @embedFile("lib/mem.sm") },
@@ -24,6 +25,7 @@ pub const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/predictor.sm", .text = @embedFile("lib/predictor.sm") },
     .{ .path = "lib/unmix.sm", .text = @embedFile("lib/unmix.sm") },
     .{ .path = "lib/alac.sm", .text = @embedFile("lib/alac.sm") },
+    .{ .path = "lib/mp3.sm", .text = @embedFile("lib/mp3.sm") },
 };
 
 fn load(ctx: ?*anyopaque, gpa: std.mem.Allocator, path: []const u8) anyerror!?[]u8 {

@@ -39,6 +39,10 @@ pub fn build(b: *std.Build) void {
         const file = b.fmt("{s}.pkts", .{name});
         dsp_t.root_module.addAnonymousImport(file, .{ .root_source_file = b.path(b.fmt("testdata/alac/{s}", .{file})) });
     }
+    // whole MP3 files, cut into frames by the test, for the MP3 program's tests
+    for ([_][]const u8{ "clicks.vbr.mp3", "mono.cbr.mp3", "clicks.m2.mp3", "clicks.m25_8k.mp3" }) |file| {
+        dsp_t.root_module.addAnonymousImport(file, .{ .root_source_file = b.path(b.fmt("testdata/{s}", .{file})) });
+    }
     test_step.dependOn(&b.addRunArtifact(dsp_t).step);
 
     // ALAC on sm1, played through x17's host model

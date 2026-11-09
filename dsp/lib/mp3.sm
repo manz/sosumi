@@ -1,0 +1,313 @@
+; Twin: ref/mp3/header.zig, ref/mp3/sideinfo.zig; ISO/IEC 11172-3 2.4.1.3 and 2.4.1.7, 13818-3
+; 2.4.1.7. MPEG Layer III on sm1: the frame's intake from the input stream and its side
+; information (specs/mp3.md). Needs lib/ybits.sm and lib/stream.sm.
+;
+; Each packet is one whole frame (specs/mp3.md). mp3_header reads its 4 header bytes, takes the
+; frame length from MP_FLEN (the host's rule: 144 or 72 x kbps x 1000 / rate, free format as
+; 128 kbps), then copies the CRC and side information to MP_SIDE + 4 and the main data to
+; MP_MAIN, right after the reservoir's bytes (one byte per Y word, as ybits reads them).
+
+.const MP_HDR  = 0x1280         ; header fields, then what follows from them (MH_*)
+.const MH_VER  = MP_HDR + 1     ; version bits: 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
+.const MH_PROT = MP_HDR + 2     ; protection_bit: 0 = a CRC word follows the header
+.const MH_BR   = MP_HDR + 3
+.const MH_SR   = MP_HDR + 4
+.const MH_PAD  = MP_HDR + 5
+.const MH_MODE = MP_HDR + 6
+.const MH_EXT  = MP_HDR + 7
+.const MH_NCH  = MP_HDR + 8
+.const MH_MP1  = MP_HDR + 9     ; 1 for MPEG-1 (two granules)
+.const MH_FLEN = MP_HDR + 10    ; frame bytes
+.const MH_SIDE = MP_HDR + 11    ; CRC and side information bytes
+.const MH_MAIN = MP_HDR + 12    ; main data bytes in this frame
+.const MP_SI   = 0x1290         ; main_data_begin, scfsi[0], scfsi[1], then the granules
+.const MP_GR0  = MP_SI + 3      ; granule (gr, ch) at MP_GR0 + (2 gr + ch) MP_GR
+.const MP_GR   = 18
+.const MP_FLEN = 0x1300         ; 135 words: [MPEG-1, 2, 2.5][sr_index][bitrate_index]
+.const MP_SIDE = 0x1390         ; the header, CRC and side information bytes (<= 38)
+.const MP_RES  = 0x1400         ; the reservoir: up to 511 bytes ending at MP_MAIN - 1
+.const MP_MAIN = 0x1600         ; this frame's main data (<= 1440 bytes)
+
+; A granule record, word by word (ref/mp3/sideinfo.zig Granule): part2_3_length, big_values,
+; global_gain, scalefac_compress, window_switching, block_type, mixed, table_select[3],
+; subblock_gain[3], region0_count, region1_count, preflag, scalefac_scale, count1_table_b.
+
+; Y[s1 ..] <- the next s2 stream bytes. Uses s2, s3, s12, s13, e7, A1, A15.
+.macro mp3_copy() {
+        alu s13, s1, s14, #OP_SUB
+        x17.mve e7, s13         ; e7 = s1
+more:   alu s12, s2, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; nothing left
+        jmp #3, #3, done
+        nop()
+        nop()
+        sbyte(s3)
+        x17.styi e7, #3, #0, e7
+        alu s2, s2, s14, #OP_SUB
+        jmp #ALWAYS, #0, more
+        nop()
+        nop()
+done:
+}
+
+; Y[addr] <- r (r not s0 or s8). Uses e7.
+.macro mp3_put(addr, r) {
+        lde e7, #addr
+        x17.sty e7, #(r & 7), #(r >> 3)
+}
+
+; The frame's header and the bytes after it. Uses s1..s5, s7, s8 and the reader's registers.
+.macro mp3_header() {
+        ldi s1, #MP_SIDE
+        ldi s2, #4
+        mp3_copy()
+        ldi s1, #MP_SIDE
+        ybits_at(s1)
+        getbits(s8, 11)         ; sync
+        getbits(s1, 2)          ; version
+        getbits(s8, 2)          ; layer (III: the host admits no other)
+        getbits(s2, 1)          ; protection_bit
+        getbits(s3, 4)          ; bitrate_index
+        getbits(s4, 2)          ; sampling_frequency
+        getbits(s5, 1)          ; padding_bit
+        getbits(s8, 1)          ; private_bit
+        getbits(s7, 2)          ; mode
+        getbits(s13, 2)         ; mode_extension
+        mp3_put(MH_EXT, 13)
+        getbits(s8, 4)          ; copyright, original, emphasis
+        mp3_put(MH_VER, 1)
+        mp3_put(MH_PROT, 2)
+        mp3_put(MH_BR, 3)
+        mp3_put(MH_SR, 4)
+        mp3_put(MH_PAD, 5)
+        mp3_put(MH_MODE, 7)
+        ; the table row: MPEG-1 0, MPEG-2 1, MPEG-2.5 2 = 3 - version, less 1 for version 0
+        ldi s12, #3
+        alu s8, s12, s1, #OP_SUB
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; MPEG-2.5
+        jmp #IF_NOT, #3, row
+        nop()
+        nop()
+        alu s8, s8, s14, #OP_SUB
+row:    ldi s12, #45
+        x18.mpy s8, s0, s8, s12 ; row * 45 (x18.mpy's low product)
+        ldi s12, #15
+        x18.mpy s4, s0, s4, s12 ; sr * 15
+        alu s8, s8, s4, #OP_ADD
+        alu s8, s8, s3, #OP_ADD
+        ldi s12, #MP_FLEN - 1
+        alu s13, s8, s12, #OP_ADD
+        x17.mve e7, s13
+        ldy s3, e7              ; slots (the bitrate's table entry)
+        alu s3, s3, s5, #OP_ADD ; + padding: the frame's bytes
+        mp3_put(MH_FLEN, 3)
+        ; channels: mode 3 is one, the rest two
+        ldi s12, #3
+        alu s12, s7, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        ldi s4, #2
+        jmp #IF_NOT, #3, stereo
+        nop()
+        nop()
+        ldi s4, #1
+stereo: mp3_put(MH_NCH, 4)
+        ; side information: MPEG-1 17 / 32 bytes, MPEG-2 and 2.5 9 / 17
+        ldi s12, #3
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; MPEG-1
+        ldi s5, #0
+        jmp #IF_NOT, #3, lsf
+        ldi s7, #9              ; (delay slot) MPEG-2 mono
+        ldi s8, #17             ; (delay slot) MPEG-2 stereo
+        ldi s5, #1
+        ldi s7, #17
+        ldi s8, #32
+lsf:    mp3_put(MH_MP1, 5)
+        alu s12, s4, s14, #OP_SUB
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; stereo
+        jmp #IF_NOT, #3, mono
+        nop()
+        nop()
+        alu s7, s8, s0, #OP_ADD
+mono:   alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; protection_bit 0: a CRC word
+        jmp #IF_NOT, #3, nocrc
+        nop()
+        nop()
+        ldi s12, #2
+        alu s7, s7, s12, #OP_ADD
+nocrc:  mp3_put(MH_SIDE, 7)
+        ldi s12, #4
+        alu s3, s3, s12, #OP_SUB
+        alu s3, s3, s7, #OP_SUB ; main data bytes
+        mp3_put(MH_MAIN, 3)
+        ldi s1, #MP_SIDE + 4
+        alu s2, s7, s0, #OP_ADD
+        mp3_copy()
+        lde e7, #MH_MAIN
+        ldy s2, e7
+        ldi s1, #MP_MAIN
+        mp3_copy()
+}
+
+; Granule fields in record order through e5 (x17.styi). Uses s3, the reader's registers.
+.macro gfield(k) {
+        getbits(s3, k)
+        x17.styi e5, #3, #0, e5
+}
+
+.macro gzero() {
+        ldi s3, #0
+        x17.styi e5, #3, #0, e5
+}
+
+; The side information from MP_SIDE + 4 (after the CRC word, if any) into MP_SI.
+; Uses s1..s5, s7, s8, e5, e7 and the reader's registers.
+.macro mp3_sideinfo() {
+        ldi s12, #MP_SIDE + 4
+        alu s1, s12, s0, #OP_ADD
+        lde e7, #MH_PROT
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST ; a CRC word to skip
+        jmp #IF_NOT, #3, at
+        nop()
+        nop()
+        ldi s12, #2
+        alu s1, s1, s12, #OP_ADD
+at:     ybits_at(s1)
+        lde e7, #MH_NCH
+        ldy s2, e7              ; nch
+        lde e7, #MH_MP1
+        ldy s1, e7              ; MPEG-1
+        lde e5, #MP_SI
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; MPEG-2 / 2.5
+        jmp #3, #3, lsf
+        alu s12, s2, s14, #OP_SUB ; (delay slot) nch - 1
+        nop()
+        gfield(9)               ; main_data_begin
+        alu s12, s2, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; mono
+        jmp #IF_NOT, #3, priv2
+        nop()
+        nop()
+        getbits(s3, 5)          ; private bits, mono
+        gfield(4)               ; scfsi[0]
+        gzero()
+        jmp #ALWAYS, #0, grans
+        nop()
+        nop()
+priv2:  getbits(s3, 3)
+        gfield(4)
+        gfield(4)
+        jmp #ALWAYS, #0, grans
+        nop()
+        nop()
+lsf:    gfield(8)
+        alu s12, s2, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; mono
+        jmp #IF_NOT, #3, priv3
+        nop()
+        nop()
+        getbits(s3, 1)
+        jmp #ALWAYS, #0, lsfz
+        nop()
+        nop()
+priv3:  getbits(s3, 2)
+lsfz:   gzero()
+        gzero()
+        ; granules: s4 = granules left, s5 = this granule's first record
+grans:  alu s4, s1, s14, #OP_ADD ; MPEG-1 2, else 1
+        ldi s5, #MP_GR0
+gr:     alu s12, s4, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, done
+        alu s7, s2, s0, #OP_ADD ; (delay slot) channels left
+        alu s13, s5, s14, #OP_SUB ; (delay slot)
+        x17.mve e5, s13         ; e5 = the record
+ch:     gfield(12)              ; part2_3_length
+        gfield(9)               ; big_values
+        gfield(8)               ; global_gain
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, sfc9
+        nop()
+        nop()
+        gfield(4)               ; scalefac_compress, MPEG-1
+        jmp #ALWAYS, #0, ws
+        nop()
+        nop()
+sfc9:   gfield(9)               ; scalefac_compress, MPEG-2
+ws:     getbits(s8, 1)          ; window_switching_flag
+        alu s3, s8, s0, #OP_ADD
+        x17.styi e5, #3, #0, e5
+        ptst p3, s0, #EQ8, #PTST
+        jmp #3, #3, plain
+        nop()
+        nop()
+        getbits(s8, 2)          ; block_type
+        alu s3, s8, s0, #OP_ADD
+        x17.styi e5, #3, #0, e5
+        getbits(s3, 1)          ; mixed_block_flag
+        x17.styi e5, #3, #0, e5
+        ; region0_count: 8 for a short block that is not mixed, else 7
+        alu s8, s8, s14, #OP_SUB
+        alu s8, s8, s14, #OP_SUB ; block_type - 2
+        alu s8, s8, s3, #OP_ADD ; + mixed: 0 for short, not mixed
+        gfield(5)               ; table_select[0]
+        gfield(5)               ; table_select[1]
+        gzero()
+        gfield(3)               ; subblock_gain[0..2]
+        gfield(3)
+        gfield(3)
+        ldi s3, #7
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, r0
+        nop()
+        nop()
+        ldi s3, #8
+r0:     x17.styi e5, #3, #0, e5
+        ldi s3, #31
+        x17.styi e5, #3, #0, e5
+        jmp #ALWAYS, #0, tail
+        nop()
+        nop()
+plain:  gzero()                 ; block_type
+        gzero()                 ; mixed
+        gfield(5)
+        gfield(5)
+        gfield(5)
+        gzero()
+        gzero()
+        gzero()
+        gfield(4)               ; region0_count
+        gfield(3)               ; region1_count
+tail:   alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, nopre
+        nop()
+        nop()
+        gfield(1)               ; preflag, MPEG-1
+        jmp #ALWAYS, #0, scs
+        nop()
+        nop()
+nopre:  gzero()
+scs:    gfield(1)               ; scalefac_scale
+        gfield(1)               ; count1table_select
+        alu s7, s7, s14, #OP_SUB
+        alu s12, s7, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ch     ; the next channel's record follows
+        nop()
+        nop()
+        ldi s12, #2 * MP_GR
+        alu s5, s5, s12, #OP_ADD
+        alu s4, s4, s14, #OP_SUB
+        jmp #ALWAYS, #0, gr
+        nop()
+        nop()
+done:
+}

@@ -1,0 +1,29 @@
+; The host's input stream (specs/aac.md input contract, facts 783, 784, 789, 795): enabled once
+; per stream, then read a byte at a time with x16.getb. Needs lib/bitcore.sm.
+
+.const BITS_ON = 0x2EFE         ; DSP-only Y: the stream is enabled; 0 until the first packet
+
+; The enable, once per stream (783: it survives re-arms, a second one misbehaves); s14 is left
+; 4, so the caller sets its constants after. Uses s3, s12, e6, A13, p3.
+.macro stream_on() {
+        lde e6, #BITS_ON
+        ldy s12, e6
+        ptst p3, s0, #EQ12, #PTST ; p3 = not yet enabled
+        jmp #IF_NOT, #3, on
+        nop()
+        nop()
+        ldi s12, #1
+        ldi s14, #4
+        ld0e.sen #0, #3         ; the enable: s12 = 1, s14 = 4 (783); A13 <- 0
+        ldi s3, #1
+        x17.sty e6, #3, #0      ; BITS_ON = 1
+on:
+}
+
+; dst = the next stream byte: x16.getb into A15, read back by x02.asrc (A15 + 1, fresh at once,
+; 789; it also writes A1, 795). Needs s14 = 1.
+.macro sbyte(dst) {
+        x16.getb #7, #7
+        x02.asrc dst, A15
+        alu dst, dst, s14, #OP_SUB
+}
