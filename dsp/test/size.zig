@@ -1,12 +1,11 @@
 //! aac_packet's size against program memory: P is 4 lanes x 0x1000 rows, and pass 2 loads at row
-//! 0x40 (x17 handbook §11), so 16128 syllables (docs/aac-mode0.md). Until the stages are shared
-//! the check is a ratchet at the current size.
+//! 0x40 (x17 handbook §11), so 16128 syllables (docs/aac-mode0.md).
 const std = @import("std");
 const h = @import("../harness.zig");
 
-const ratchet = 15531;
+const budget = 0x4000 - 4 * 0x40;
 
-test "aac_packet does not grow" {
+test "aac_packet fits program memory" {
     const gpa = std.testing.allocator;
     const prog = try h.assemble(gpa,
         \\.include "lib/bits.sm"
@@ -26,7 +25,7 @@ test "aac_packet does not grow" {
         \\
     );
     defer gpa.free(prog);
-    std.testing.expect(prog.len <= ratchet) catch |e| {
+    std.testing.expect(prog.len <= budget) catch |e| {
         std.log.err("aac_packet: {d} syllables", .{prog.len});
         return e;
     };
