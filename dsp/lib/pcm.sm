@@ -4,6 +4,8 @@
 ; into the host's output ring (lib/ring.sm). Needs lib/bits.sm, lib/mem.sm and lib/ring.sm
 ; first; bits_init must point the reader at the packet.
 ;
+; Parked: the device's PCM modes (2, 4, 6) use another host interface, its output not yet
+; measured (specs/questions.md 18). This program keeps the AAC ring meanwhile.
 ; Contract (OURS, on x17's host model, src/host.zig; the ring and status are specs/aac.md's
 ; output contract):
 ;   Y:0x3FFF   packet length in bytes (host Q2 stub), even: whole 16-bit samples

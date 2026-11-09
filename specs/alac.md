@@ -64,6 +64,19 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
 - The host's +0x58 gate: mode 3 neither releases nor advances the input where modes 0, 1
   and 5 do (**FIRMWARE**).
 - Per packet the host hands the engine compressed bits (mode and length in bits, **INFERRED**); no host stage before the run found; after the run and the read-back **OPEN** (`specs/questions.md` 11).
+- Configure (fact 788, MEASURED from the host's configure): Y:0xFD80 |= 0x1F (bits 0-4),
+  Y:0xFD82 bit depth, Y:0xFD83 pb, Y:0xFD84 kb, Y:0xFD85 mb (kb before mb). Channel count,
+  frame length and sample rate are not passed, and the program never sees the cookie: channels
+  come from the frame's element tags, the frame length from the ring below.
+- Output ring (fact 788, MEASURED on Apple's ALAC init pass): Y:0..4 = 0, 1, 0x2000, 0, 0x10,
+  one slot of 0x2000 words (4096 frames x 2 channels) at Y:0x80. The host copy path is 16-bit
+  stereo (4 bytes a frame): assume 16-bit stereo out, a mono stream on both sides. A short
+  last frame's length as its frame count x 2: **INFERRED**. The host releases slots only for
+  modes 0, 1 and 5, so ALAC's slot is never released: the program does not wait on its owned
+  word (**OPEN**).
+- Input (fact 788): the stream read of `specs/aac.md`'s input contract. Before every arm the
+  host writes +0x40C = 0x801 and, at the register block +0x420, word 0 bit 16 and word 2 the
+  packet's length in bits. How a program reads that length: **OPEN**.
 - Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
   object, so at least part of it runs there (**INFERRED**).
 - Entry point, buffers, persistent state, error path: **OPEN**. Nothing is traced: the dev
