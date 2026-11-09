@@ -9,6 +9,8 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
     const gpa = testing.allocator;
     const prog = try h.assemble(gpa,
         \\.include "lib/bits.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/ring.sm"
         \\.include "lib/pcm.sm"
         \\        bits_init(0x4000)
         \\        pcm_packet()
@@ -21,6 +23,7 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
     for ([_]u32{ 1, 0 }) |little| {
         var hst = try host.Host.init(gpa, .{ .max_bundles = 1 << 24 });
         defer hst.deinit();
+        try h.stageRing(&hst.state, gpa);
         try hst.state.y_mem.put(gpa, 0xFD81, little);
         var want: std.ArrayList(i16) = .empty;
         defer want.deinit(gpa);
@@ -37,6 +40,7 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
             }
             const r = try hst.feed(prog, bytes);
             try testing.expectEqual(n, r.units);
+            try testing.expectEqual(@as(?u32, 1), hst.state.getY(0xFD94));
         }
         try testing.expectEqualSlices(i16, want.items, hst.pcm.items);
     }
