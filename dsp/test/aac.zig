@@ -56,19 +56,32 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
             try state.y_mem.put(gpa, map.at("AU") + @as(u32, @intCast(i)), hi << 8 | lo);
         }
         state.cur_lane = 0;
+        const k = state.getY(map.at("AK_OSL")) orelse 0;
+        try state.y_mem.put(gpa, map.at("HOST_ST"), 0x8000);
         _ = try h.emu.runFrom(gpa, state, prog, start, 1 << 30);
         try testing.expect(state.halted);
         try testing.expectEqual(@as(?u32, 0), state.getY(map.at("AK_ST")));
         for (0..1024 * nch) |i| {
-            try testing.expectEqual(le32(pcm, 4 * i) & 0xFFFF, state.getY(map.at("OUTY") + @as(u32, @intCast(i))) orelse 0xDEAD0000);
+            try testing.expectEqual(le32(pcm, 4 * i) & 0xFFFF, state.getY(map.at("OUTY") + 0x800 * k + @as(u32, @intCast(i))) orelse 0xDEAD0000);
         }
+        // the output contract: slot k owned with its length, output ready, the other slot next
+        try testing.expectEqual(@as(?u32, 1), state.getY(map.at("RING_E") + 2 * k));
+        try testing.expectEqual(@as(?u32, @intCast(1024 * nch)), state.getY(map.at("RING_E") + 2 * k + 1));
+        try testing.expectEqual(@as(?u32, 0x8001), state.getY(map.at("HOST_ST")));
+        try testing.expectEqual(@as(?u32, 0), state.getY(map.at("HOST_P0")));
+        try testing.expectEqual(@as(?u32, 1 - k), state.getY(map.at("AK_OSL")));
+        try state.y_mem.put(gpa, map.at("RING_E") + 2 * k, 0);
     }
     try testing.expectEqual(dump.len, p);
     // mode 0 (docs/aac-mode0.md): X below 0x1C00, Y below 0x2F00, the host's below 0x2E80
     var xi = state.x_mem.keyIterator();
     while (xi.next()) |k| try testing.expect(k.* < 0x1C00);
     var yi = state.y_mem.keyIterator();
-    while (yi.next()) |k| try testing.expect(k.* < 0x2F00);
+    while (yi.next()) |k| {
+        if (k.* >= map.at("AU") and k.* < map.at("AU") + 768) continue; // emulator-only staging
+        if (k.* >= map.at("HOST_P0") and k.* <= map.at("HOST_ST")) continue; // the host's block
+        try testing.expect(k.* < 0x2F00);
+    }
 }
 
 test "aac_packet decodes the dumped access units as the twin's Decoder" {

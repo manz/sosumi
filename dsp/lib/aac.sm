@@ -16,12 +16,16 @@
 ; Y, filled by the host once:
 ;   AK_NCH channels (1 or 2), AK_NSWBL / AK_NSWBS bands per window size, AK_TOPL / AK_TOPS
 ;   TNS_MAX_BANDS, AK_BOOKS + b the code of book b (1..11; the scale factor code at HUFF0, root
-;   width 8 for every code), SWB_L / SWB_S swb_offset (64 words each), the dequantiser's DQ_IE,
+;   width HUFF_ROOT for every code), SWB_L / SWB_S swb_offset (64 words each), the dequantiser's DQ_IE,
 ;   DQ_IR, the IMDCT's bit reversals at REVL (512) and REVS (64), Z + 2 rev(n) with Z = 0.
-; Y state kept between access units: AK_SHP + slot each channel's previous window_shape.
-; Y out: AK_ST status (0 ok, 1 CCE or PCE, 2 a syntax error, 3 an escape past 8 ones, 4 stereo
-;   tools without common_window, 5 more channels than AK_NCH), OUTY the PCM, 1024 frames of
-;   AK_NCH interleaved 16-bit samples.
+; Y state kept between access units: AK_SHP + slot each channel's previous window_shape,
+;   AK_OSL the output slot this access unit fills.
+; Y out (the host's output contract, specs/aac.md): a two-slot ring, slot k's PCM at OUTY +
+;   0x800 k, 1024 frames of AK_NCH interleaved 16-bit samples; then its entry Y:5 + 2k = 1
+;   (owned) and Y:6 + 2k its length in words, HOST_ST bit 0 set (output ready), HOST_P0
+;   cleared; the next access unit takes the other slot. AK_ST, for debugging only: 0 ok, 1 CCE
+;   or PCE, 2 a syntax error, 3 an escape past 8 ones, 4 stereo tools without common_window, 5
+;   more channels than AK_NCH.
 ; Y, filled by the host once: KBD_L and KBD_S (window.sm), the KBD rises.
 ; X, filled by the host once: the dequantiser's DQ_D, DQ_IT, DQ_G; SINE and SINE4 (window.sm),
 ;   the sine table every IMDCT twiddle and the sine window read;
@@ -31,9 +35,9 @@
 ; Scratch: X 0x0000 .. 0x0BFF (WORK, ST_L), XSAVE; Y CUR, STL, STR, FIN, the AK_
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
-.const HUFF0    = 0x0B80        ; scale factor code
+.const HUFF0    = 0x1080        ; scale factor code
 .const HUFF_END = 0x1D40        ; past the Huffman codes
-.const AU       = 0x0880        ; the access unit, staged by the host
+.const AU       = 0x4000        ; the access unit: emulator-only staging until the stream read (fact 783)
 .const AK       = 0x2D74
 .const AK_NCH   = AK + 0
 .const AK_ST    = AK + 1
@@ -67,6 +71,7 @@
 .const AK_IMW   = AK + 30       ; windows left
 .const AK_PNR   = AK + 31       ; the shared PNS core's way back (ak_pnc)
 .const AK_TNB   = AK + 32       ; tns_data's n_filt, length and order widths, 3 words
+.const AK_OSL   = AK + 35       ; the output slot, 0 or 1
 .const AK_BOOKS = AK + 0x40     ; 12 words
 .const SWB_L    = 0x2DC0
 .const SWB_S    = 0x2E00
@@ -74,7 +79,10 @@
 .const ESLOT    = 0x2353
 .const REVL     = 0x2354
 .const REVS     = 0x2554
-.const OUTY     = 0x0080
+.const OUTY     = 0x0080        ; output slot 0; slot 1 at + 0x800
+.const RING_E   = 5             ; slot k's entry: Y:RING_E + 2k owned, + 1 its length
+.const HOST_ST  = 0xFD94        ; the engine's status header, bit 0 output ready
+.const HOST_P0  = 0xFD80        ; the parameter block's first word, cleared after a packet
 
 ; a channel record
 .const R_GG   = 0
@@ -1002,7 +1010,11 @@ done:
         ldi s4, #OVL0
         alu s3, s3, s4, #OP_ADD
         yst(WIN_OVL)
-        yld(s3, AK_FSL)         ; the ring slot: OUTY + AK_FSL, stride AK_NCH
+        yld(s3, AK_OSL)         ; the ring slot: OUTY + 0x800 AK_OSL + AK_FSL, stride AK_NCH
+        ldi s4, #-11
+        alu s3, s4, s3, #ASRRS
+        yld(s4, AK_FSL)
+        alu s3, s3, s4, #OP_ADD
         ldi s4, #OUTY - 1
         alu s3, s3, s4, #OP_ADD
         yst(WIN_PCM)
@@ -1059,6 +1071,37 @@ shape:  yld(s3, AK_FSL)
         x17.mve e8, s13
         yld(s3, FIN + R_SH)
         x17.sty e8, #3, #0      ; prev_shape = window_shape
+}
+
+; Hands slot AK_OSL to the host (the output contract above) and flips AK_OSL. Uses s3..s7, e6.
+.macro ak_publish() {
+        yld(s7, AK_NCH)
+        ldi s4, #-10
+        alu s7, s4, s7, #ASRRS  ; length: 1024 AK_NCH words
+        yld(s5, AK_OSL)
+        alu s5, s5, s5, #OP_ADD
+        ldi s13, #RING_E - 1    ; x17.mve adds 1
+        alu s13, s13, s5, #OP_ADD
+        x17.mve e6, s13
+        ldi s3, #1
+        x17.sty e6, #3, #0      ; owned
+        x18.eagu e6, e6, #AGU_INC
+        alu s3, s7, s0, #OP_ADD
+        x17.sty e6, #3, #0      ; its length
+        yld(s3, HOST_ST)        ; bit 0 set, the others kept: v + 1 - (v & 1)
+        ldi s4, #1
+        alu s5, s4, s3, #ASR
+        ldi s4, #-1
+        alu s5, s4, s5, #ASRRS
+        alu s5, s3, s5, #OP_SUB
+        alu s3, s3, s14, #OP_ADD
+        alu s3, s3, s5, #OP_SUB
+        yst(HOST_ST)
+        ldi s3, #0
+        yst(HOST_P0)
+        yld(s3, AK_OSL)
+        alu s3, s14, s3, #OP_SUB
+        yst(AK_OSL)
 }
 
 .macro aac_packet() {
@@ -1334,5 +1377,5 @@ ak_next:
         jmp #ALWAYS, #0, ak_elemt
         nop()
         nop()
-ak_out:
+ak_out: ak_publish()
 }

@@ -143,11 +143,14 @@ pub const Player = struct {
             try st.y_mem.put(self.gpa, au_base + @as(u32, @intCast(i)), hi << 8 | lo);
         }
         st.cur_lane = 0;
+        const k = st.getY(map.at("AK_OSL")) orelse 0;
         self.bundles = try h.emu.runFrom(self.gpa, st, self.prog, 0, 1 << 30);
         if (!st.halted) return error.NotHalted;
         self.status = st.getY(ak_st) orelse 0;
         if (self.status != 0) return error.Status;
-        for (self.pcm, 0..) |*s, i| s.* = @bitCast(@as(u16, @truncate(st.getY(pcm_base + @as(u32, @intCast(i))) orelse 0)));
+        const slot = pcm_base + 0x800 * k;
+        for (self.pcm, 0..) |*s, i| s.* = @bitCast(@as(u16, @truncate(st.getY(slot + @as(u32, @intCast(i))) orelse 0)));
+        try st.y_mem.put(self.gpa, map.at("RING_E") + 2 * k, 0); // the host releases the slot
         return self.pcm;
     }
 };
