@@ -85,14 +85,14 @@ clr:    stx A9, s4
         jmp #ALWAYS, #0, SILENT
         nop()
         nop()
-nonzero: ldi s3, #22
-        x19.alu s3, s14, s3, #SHIFT ; 2^22
+nonzero: ldi s3, #-22
+        alu s3, s3, s14, #ASRRS ; 2^22
         alu s4, s10, s3, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, scale  ; max >= 2^22: one halving
         ldi s9, #1              ; (delay slot)
-        ldi s3, #21             ; (delay slot)
-        x19.alu s3, s14, s3, #SHIFT ; 2^21
+        ldi s3, #-21            ; (delay slot)
+        alu s3, s3, s14, #ASRRS ; 2^21
         ldi s9, #0
 dbl:    alu s4, s10, s3, #OP_SUB
         ptst p3, s0, #LT4, #PTST
@@ -115,13 +115,12 @@ scale:  yld(s3, ESLOT)
         x18.min s15, s15, T
 }
 
-; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - s15), s12 = -s6
-; (the rounded right shift its loads take), IM_SC += s6, s15 = 24 again. Uses s3.
+; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - s15), the rounded
+; right shift its loads take; IM_SC += s6, s15 = 24 again. Uses s3.
 .macro im_dec(LIM) {
         ldi s6, #23 - LIM
         alu s6, s6, s15, #OP_SUB
         x18.max s6, s6, s0
-        alu s12, s0, s6, #OP_SUB
         yld(s3, IM_SC)
         alu s3, s3, s6, #OP_ADD
         yst(IM_SC)
@@ -193,10 +192,10 @@ pre:    im_pre5(N2, IN)
 r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         x03.tap0 s5, #4, s0, s0, s0 ; br
         x03.tap0 s7, #4, s0, s0, s0 ; bi
-        x19.alu s1, s1, s12, #SHIFT
-        x19.alu s3, s3, s12, #SHIFT
-        x19.alu s5, s5, s12, #SHIFT
-        x19.alu s7, s7, s12, #SHIFT
+        alu s1, s6, s1, #ASRRS
+        alu s3, s6, s3, #ASRRS
+        alu s5, s6, s5, #ASRRS
+        alu s7, s6, s7, #ASRRS
         alu s8, s1, s5, #OP_ADD
         alu s9, s3, s7, #OP_ADD
         alu s1, s1, s5, #OP_SUB
@@ -342,8 +341,8 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         alu s3, s3, s3, #OP_ADD ; l * 4
         yst(IM_HALF)
         yld(s3, IM_GRPS)
-        ldi s4, #-2
-        x19.alu s3, s3, s4, #SHIFT ; groups / 4 (a multiple of 4 until the last stage: exact)
+        ldi s4, #2
+        alu s3, s4, s3, #ASRRS  ; groups / 4 (a multiple of 4 until the last stage: exact)
         yst(IM_GRPS)
         yld(s3, IM_STG)
         alu s3, s3, s14, #OP_SUB
@@ -402,21 +401,22 @@ fq:     pkf(s1, A8, s0, s0, s0, 3, s12, s5, 0, 7, FN, R5)
         pks(3, A9, 5, s0, s1, XOP) ; (delay slot)
 }
 
-; im_frun with the shift by x19 op 23 (s6, which saturates a left shift as shiftSat does): three
-; bundles per sample, the store's third slot idle.
+; im_frun with the shift by the alu head's ASRRS (s6 left, which saturates as shiftSat does; x17
+; fact 774): three bundles per sample, the store's third slot idle. Sets s12 = -s6.
 .macro im_frunx(FN, XOP) {
+        alu s12, s0, s6, #OP_SUB
         pkf(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0, FN, R5)
 fx:     pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
-        x19.alu s3, s5, s6, #SHIFT
+        alu s3, s12, s5, #ASRRS
         pks(3, A9, 0, s0, s0, 0)
         pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
-        x19.alu s3, s5, s6, #SHIFT
+        alu s3, s12, s5, #ASRRS
         pks(3, A9, 0, s0, s0, 0)
         pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
-        x19.alu s3, s5, s6, #SHIFT
+        alu s3, s12, s5, #ASRRS
         pks(3, A9, 0, s0, s0, 0)
         pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
-        x19.alu s3, s5, s6, #SHIFT
+        alu s3, s12, s5, #ASRRS
         pcond p3, R4, A9, #30   ; more: A9 != END
         jmp #3, #3, fx
         pks(3, A9, 0, s0, s0, 0) ; (delay slot)
@@ -441,7 +441,7 @@ fin:
 
 ; OUT[n] = shiftSat(fold(u)[n], scaled + E' - log2 n2 + 7): OUT[0 .. n2/2) = u[n2/2 ..], then
 ; -u falling from u[n2 - 1], then -u[0 .. n2/2). A right shift of 0..23 runs packed (im_frun); a
-; left shift, which saturates, or one of 24 and more, takes x19 op 23 (im_frunx).
+; left shift, which saturates, or one of 24 and more, takes im_frunx.
 .macro im_fold(N2, LOGN2, IN, OUT) {
         yld(s6, IM_SC)
         yld(s3, IM_EX)
