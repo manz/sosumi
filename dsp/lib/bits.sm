@@ -13,7 +13,8 @@
 ; refill(): one stream byte, cache = cache * 2^8 + the byte, avail + 8. The reader takes a byte
 ; only when it needs one of its bits, so it never reads into the next packet (a read past the
 ; armed bytes would wait for the next arm, 784); the bits left in the cache after a packet's
-; last element are its byte padding, dropped by the next bits_init. Uses s13, A15.
+; last element are its byte padding, dropped by the next bits_init. Uses s13, A15; x02.asrc
+; also steps A1 on silicon (fact 795), so A1 holds nothing across a read.
 ;
 ; getbits(dst, k), k in 0..15 (getbits_s takes k in s11; k = 0 reads 0): refill a byte at a
 ; time while avail < k (the cache stays below 2^23), then dst = floor(cache / 2^sh),
@@ -73,7 +74,7 @@ on:     ldi s9, #0
         x16.getb #7, #7         ; A15 <- the next 8 stream bits (783)
         ldi s13, #-8
         alu s9, s13, s9, #ASR   ; cache << 8 (alu asr, a negative count shifts left: fact 774)
-        x02.asrc s13, A15       ; A15 + 1 (own-x02asrc), two bundles after the read (unmeasured)
+        x02.asrc s13, A15       ; A15 + 1 (own-x02asrc; fresh from the read on, fact 789); A1 clobbered (795)
         alu s13, s13, s14, #OP_SUB ; the byte
         alu s9, s9, s13, #OP_ADD
         ldi s13, #8
