@@ -633,7 +633,20 @@ done:
 .const MP_LIN  = 0x1DA4         ; [table_select]: linbits
 .const MP_BP   = 0x1DC4         ; [(version bits * 3 + sr_index) * 3 + long / short / mixed]: widths
 .const MP_BW   = 0x1DE8         ; the band width lists, each ending in a 0
-.const MP_HUFF = 0x2100         ; the trees (lib/huffman.sm format)
+.const MP_PRET = 0x20A0         ; pretab[22] (ISO/IEC 11172-3 Table B.6)
+.const MP_Q    = 0x20C0         ; requantisation slots (MP_Q*)
+.const MP_QLST = MP_Q + 0       ; the granule's band list (mp3_spec)
+.const MP_QKIND = MP_Q + 1      ; 0 long, 1 short, 2 mixed
+.const MP_QE   = MP_Q + 2       ; the entry at hand's list address
+.const MP_QW   = MP_Q + 3       ; its window, 0..2, once past the long entries
+.const MP_QNL  = MP_Q + 4       ; long entries left
+.const MP_QT0  = MP_Q + 5       ; global_gain - 210
+.const MP_QSH  = MP_Q + 6       ; scalefac shift, 1 + scalefac_scale (as a left shift: negative)
+.const MP_QPF  = MP_Q + 7       ; the pretab address, or MP_QZ without preflag
+.const MP_QSF  = MP_Q + 8       ; the entry's scale factor address
+.const MP_QREC = MP_Q + 9       ; the granule record's offset
+.const MP_QZ   = MP_Q + 10      ; 40 zeros: no pretab
+.const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
 .const MP_YEND = 0x2E80         ; the host writes Y below here
 
 .const MP_RE   = 0x1D51         ; the three regions' ends, in coefficients (576 the last)
@@ -767,6 +780,7 @@ gc:     lde e7, #MP_CK
         mp3_seek()
         mp3_sf()
         mp3_spec()
+        mp3_requant()
         lde e7, #MP_LIM
         ldy s1, e7
         mp3_put(MP_P, 1)
@@ -855,6 +869,8 @@ kind:   lde e7, #MH_VER
         x18.mpy s7, s0, s7, s12
         alu s7, s7, s6, #OP_ADD
         yidx(s2, MP_BP, s7)     ; the list's address
+        mp3_put(MP_QLST, 2)
+        mp3_put(MP_QKIND, 6)
         ; region ends: the sum of widths through entry region0_count, and through
         ; region0_count + region1_count + 1; 576 where the list ends first
         yidx(s4, MP_GR0 + 13, s3) ; region0_count
@@ -967,8 +983,9 @@ pair:   lde e7, #MP_TB
         nop()
 rzero:  lde e7, #MP_N
         ldy s1, e7
-rz:     spec_put(s0)
-        spec_put(s0)
+        ldi s2, #0              ; stx from s0 stores the xd latch (fact 709)
+rz:     spec_put(s2)
+        spec_put(s2)
         alu s1, s1, s14, #OP_SUB
         alu s12, s1, s0, #OP_ADD
         ptst p3, s0, #EQ12, #PTST
@@ -1041,15 +1058,231 @@ quad:   lde e7, #MP_I
         ; zeros to 576
 tail:   lde e7, #MP_I
         ldy s1, e7
+        ldi s2, #0
 tl:     ldi s12, #576
         alu s12, s1, s12, #OP_SUB
         ptst p3, s0, #LT12, #PTST
         jmp #IF_NOT, #3, done
         nop()
         nop()
-        spec_put(s0)
+        spec_put(s2)
         alu s1, s1, s14, #OP_ADD
         jmp #ALWAYS, #0, tl
+        nop()
+        nop()
+done:
+}
+
+; ---------------------------------------------------------------------------
+; Requantisation (twin: ref/dsp/mp3/requant.zig; ISO/IEC 11172-3 2.4.3.4.7): each line of
+; X:MP_XS + 576 k in place, q -> sign(q) |q|^(4/3) 2^(t / 4) as a Q21 word, t per band entry:
+; global_gain - 210 - 8 subblock_gain[window] - (sf + preflag pretab) << (1 + scalefac_scale).
+; |q|^(4/3) = m 2^em 2^(rem / 3) by lib/dequant.sm's dq_mant, P = round(m G / 2^23) with G
+; = X:DQ_G[4 rem + b], b = t mod 4, then one alu asrrs by -(em + floor(t / 4) + 23), clamped
+; to 24 either way: rounding right, saturating left, as the twin. Needs lib/dequant.sm's
+; tables (X DQ_D, DQ_IT, DQ_G; Y DQ_IE, DQ_IR).
+
+; s<r> = clamp(s<r>, -24, 24). Uses s12, s13.
+.macro mp3_clamp24(r) {
+        ldi s13, #24
+        alu s12, s13, r, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; r > 24
+        jmp #IF_NOT, #3, lo
+        nop()
+        nop()
+        alu r, s13, s0, #OP_ADD
+lo:     alu s12, r, s13, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; r < -24
+        jmp #IF_NOT, #3, done
+        nop()
+        nop()
+        alu r, s0, s13, #OP_SUB
+done:
+}
+
+; The granule and channel in MP_CK, after mp3_spec. Uses every s register but s14, s15 (the
+; reader's state is dropped: each granule seeks afresh), e6, e7, A8, A10 and amov's registers.
+.macro mp3_requant() {
+        lde e7, #MP_CK
+        ldy s1, e7
+        ldi s12, #576
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_XS
+        alu s2, s2, s12, #OP_ADD
+        amov(A10, s2)
+        ldi s12, #40
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_SF
+        alu s2, s2, s12, #OP_ADD
+        mp3_put(MP_QSF, 2)
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s1, s12
+        mp3_put(MP_QREC, 3)
+        yidx(s2, MP_GR0 + 2, s3) ; global_gain
+        ldi s12, #210
+        alu s2, s2, s12, #OP_SUB
+        mp3_put(MP_QT0, 2)
+        yidx(s2, MP_GR0 + 16, s3) ; scalefac_scale
+        alu s2, s0, s2, #OP_SUB
+        alu s2, s2, s14, #OP_SUB ; -(1 + scalefac_scale)
+        mp3_put(MP_QSH, 2)
+        ; long entries: all (99) for a long block, none for short, 8 or 6 for mixed
+        lde e7, #MP_QKIND
+        ldy s4, e7
+        ldi s2, #99
+        alu s12, s4, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, nl
+        nop()
+        nop()
+        ldi s2, #0
+        alu s12, s4, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, nl
+        nop()
+        nop()
+        lde e7, #MH_MP1
+        ldy s2, e7
+        alu s2, s2, s2, #OP_ADD
+        ldi s12, #6
+        alu s2, s2, s12, #OP_ADD ; 6 + 2 MPEG-1
+nl:     mp3_put(MP_QNL, 2)
+        ; preflag: the side information's or MPEG-2's, long blocks only
+        ldi s2, #MP_QZ
+        alu s12, s4, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, pf
+        nop()
+        nop()
+        yidx(s5, MP_GR0 + 15, s3) ; preflag
+        lde e7, #MP_CK
+        ldy s1, e7
+        yidx(s6, MP_PRE, s1)
+        alu s12, s5, s6, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, pf
+        nop()
+        nop()
+        ldi s2, #MP_PRET
+pf:     mp3_put(MP_QPF, 2)
+        ldi s1, #0
+        mp3_put(MP_QW, 1)
+        lde e7, #MP_QLST
+        ldy s1, e7
+        mp3_put(MP_QE, 1)
+        ; each entry: t, then its lines
+ent:    lde e7, #MP_QE
+        ldy s1, e7
+        alu s13, s1, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s9, e7              ; width
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; the list's end
+        jmp #3, #3, done
+        nop()
+        nop()
+        lde e7, #MP_QT0
+        ldy s10, e7             ; t
+        lde e7, #MP_QNL
+        ldy s2, e7
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #LE12, #PTST ; past the long entries: a window's
+        jmp #3, #3, win
+        nop()
+        nop()
+        alu s2, s2, s14, #OP_SUB
+        mp3_put(MP_QNL, 2)
+        jmp #ALWAYS, #0, sf
+        nop()
+        nop()
+win:    lde e7, #MP_QW
+        ldy s1, e7
+        lde e7, #MP_QREC
+        ldy s2, e7
+        alu s2, s2, s1, #OP_ADD
+        yidx(s3, MP_GR0 + 10, s2) ; subblock_gain[window]
+        ldi s12, #-3
+        alu s3, s12, s3, #ASR
+        alu s10, s10, s3, #OP_SUB ; - 8 subblock_gain
+        alu s1, s1, s14, #OP_ADD
+        ldi s12, #3
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, wput
+        nop()
+        nop()
+        ldi s1, #0
+wput:   mp3_put(MP_QW, 1)
+sf:     lde e7, #MP_QSF
+        ldy s1, e7
+        alu s13, s1, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s2, e7              ; sf (an intensity mark at 0x100 dropped)
+        ldi s12, #0xFF
+        x18.and s2, s2, s12
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_QSF, 1)
+        lde e7, #MP_QPF
+        ldy s1, e7
+        alu s13, s1, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s3, e7              ; pretab or 0
+        alu s2, s2, s3, #OP_ADD
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_QPF, 1)
+        lde e7, #MP_QSH
+        ldy s3, e7
+        alu s2, s3, s2, #ASR    ; << shift
+        alu s10, s10, s2, #OP_SUB ; t
+        ldi s12, #2
+        alu s2, s12, s10, #ASR  ; sh = floor(t / 4)
+        ldi s12, #-2
+        alu s3, s12, s2, #ASR
+        alu s3, s10, s3, #OP_SUB ; b
+        ldi s11, #DQ_G
+        alu s11, s11, s3, #OP_ADD ; DQ_G + b
+        ldi s12, #23
+        alu s10, s2, s12, #OP_ADD ; sh + 23
+        lde e7, #MP_QE
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_QE, 1)
+        ; the lines: s9 left, s10 = sh + 23, s11 = DQ_G + b
+line:   x19.xrd s1, #10         ; q
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, next
+        nop()
+        nop()
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, mag
+        nop()
+        nop()
+        alu s1, s0, s1, #OP_SUB ; |q|
+mag:    dq_mant()
+        alu s4, s11, s5, #OP_ADD
+        amov_e(4, s4)
+        x19.xrd s7, #8          ; G
+        x02.mpy s8, s2, s7      ; P = round(m G / 2^23)
+        alu s3, s3, s10, #OP_ADD ; em + sh + 23
+        mp3_clamp24(s3)
+        alu s12, s0, s3, #OP_SUB
+        alu s8, s12, s8, #ASRRS ; rshr, or saturating shl (fact 774)
+        x19.xrd s4, #10
+        ptst p3, s0, #LT4, #PTST
+        jmp #IF_NOT, #3, put
+        nop()
+        nop()
+        alu s8, s0, s8, #OP_SUB
+put:    stx A10, s8
+next:   x02.ainc #10, #10
+        alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, line
+        nop()
+        nop()
+        jmp #ALWAYS, #0, ent
         nop()
         nop()
 done:

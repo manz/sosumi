@@ -166,6 +166,8 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
         try st.y_mem.put(gpa, at("MP_HR") + @as(u32, @intCast(i)), root[i]);
     }
     for (ht.linbits, 0..) |l, i| try st.y_mem.put(gpa, at("MP_LIN") + @as(u32, @intCast(i)), l);
+    for (ref.mp3.requant.pretab, 0..) |v, i| try st.y_mem.put(gpa, at("MP_PRET") + @as(u32, @intCast(i)), v);
+    for (0..40) |i| try st.y_mem.put(gpa, at("MP_QZ") + @as(u32, @intCast(i)), 0);
 }
 
 test "the band lists and trees fit their Y" {

@@ -71,13 +71,15 @@ test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
     try testing.expect(checked > 500);
 }
 
-test "mp3_granules reads scale factors and spectra through the reservoir as ref/mp3's Parser does" {
+test "mp3_granules reads and requantises each granule through the reservoir as ref/mp3's Parser does" {
     const gpa = testing.allocator;
     const prog = try h.assemble(gpa,
         \\.include "lib/ybits.sm"
         \\.include "lib/stream.sm"
         \\.include "lib/mem.sm"
         \\.include "lib/huffman.sm"
+        \\.include "lib/sections.sm"
+        \\.include "lib/dequant.sm"
         \\.include "lib/mp3.sm"
         \\        stream_on()
         \\        ybits_init()
@@ -109,6 +111,7 @@ test "mp3_granules reads scale factors and spectra through the reservoir as ref/
         var state = h.emu.State{};
         defer state.deinit(gpa);
         try tables.put(&state, gpa, map.at);
+        try h.stageDequant(&state, gpa);
         var parser: ref.mp3.decoder.Parser = .{};
         for (fr) |frame| {
             try h.stagePacket(gpa, &state, frame);
@@ -137,12 +140,13 @@ test "mp3_granules reads scale factors and spectra through the reservoir as ref/
                         return error.TestExpectedEqual;
                     }
                 }
+                const want = ref.dsp.mp3.requant.requantise(p.side.gr[gr][ch], ref.mp3.bands.of(hd, p.side.gr[gr][ch]), &p.sf[gr][ch], &p.is[gr][ch]);
                 for (0..576) |c| {
                     const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * k + @as(u32, @intCast(c))) orelse 0xDEAD))));
-                    nz += @intFromBool(got != 0);
-                    big += @intFromBool(@abs(got) > 15);
-                    if (got != p.is[gr][ch][c]) {
-                        std.debug.print("frame {d} k {d} coef {d}: want {d} got {d}\n", .{ decoded + skipped, k, c, p.is[gr][ch][c], got });
+                    nz += @intFromBool(p.is[gr][ch][c] != 0);
+                    big += @intFromBool(@abs(p.is[gr][ch][c]) > 15);
+                    if (got != want[c]) {
+                        std.debug.print("frame {d} k {d} coef {d}: q {d} want {d} got {d}\n", .{ decoded + skipped, k, c, p.is[gr][ch][c], want[c], got });
                         return error.TestExpectedEqual;
                     }
                 }
