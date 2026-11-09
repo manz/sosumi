@@ -45,9 +45,18 @@ The host's header parse and frame-length rule (**FIRMWARE**):
 | Output | 16-bit PCM declared by the reader | FIRMWARE |
 | CRC-protected frames | whether sm1 checks or skips the CRC | OPEN |
 | Seek | Xing TOC, else VBRI, else bytes × ms / duration, then resync | FIRMWARE |
+| Seek target | turned into samples, rounded down to a frame boundary, sync re-found from there | FIRMWARE |
+| Frame length | bitrate / 8 × samples per frame / rate + padding bit | FIRMWARE |
+| CRC, private bit, emphasis | not checked by the reader | FIRMWARE |
+| Xing / Info | in the first frame, 36 / 21 bytes past the header (MPEG-1 stereo / mono), 21 / 13 (MPEG-2): frame count, byte count, 100-entry TOC; the LAME tail and gapless fields are not read | FIRMWARE |
+| VBRI | 36 bytes past the header; a table longer than 0x5A0 bytes is refused | FIRMWARE |
+| Neither | duration from the first frame's bitrate over the bytes after it; seeks proportional by bytes | FIRMWARE |
+| Container | chosen by file extension only (".mp3"); Audible ".aa" files whose codec word is 0xC00D also play in mode 1; MPEG audio inside MP4 not checked | FIRMWARE |
 
 The decoder must handle MPEG-1, MPEG-2 and MPEG-2.5 Layer III: the device admits all three, so
-a file in any of them reaches sm1.
+a file in any of them reaches sm1. The Xing / Info / VBRI frame is an ordinary frame to the
+reader (INFERRED: nothing says it is skipped), so it reaches sm1 too and must decode without
+fault; LAME writes it with empty main data.
 
 ## The sm1 side
 
