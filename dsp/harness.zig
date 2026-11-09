@@ -88,5 +88,5 @@ pub fn stageImdct(st: *emu.State, gpa: std.mem.Allocator, comptime n2: usize, pr
         try putCx(st, gpa, post, k, c);
     }
     for (T.tw4, 0..) |w, i| for (w, 0..) |c, m| try putCx(st, gpa, tw, 3 * i + m, c);
-    for (T.rev, 0..) |r, n| try putY(st, gpa, rev + @as(u32, @intCast(n)), 2 * @as(i32, r) - 2);
+    for (T.rev, 0..) |r, n| try putY(st, gpa, rev + @as(u32, @intCast(n)), 2 * @as(i32, r));
 }

@@ -39,91 +39,34 @@
 .const IM_STG  = IM_Y + 5       ; stages left
 .const IM_J    = IM_Y + 6       ; groups left in the stage
 
-; s10 = max(0, X[BASE ..]), s11 = min(0, X[BASE ..]) over COUNT words. Uses s1, s4, s9, A8, p3.
+; s10 = max |X[BASE ..]| over COUNT words, a multiple of 4: pk loads with the third slot's
+; |b| (x02.vc code 0 op 7, fact 730) and x18.max (708). Uses s1, s3, s4, s5, s7, A8, R4, p3.
 .macro im_scan(BASE, COUNT) {
         aimm_e(4, BASE)
-        ldi s9, #COUNT
+        rimm R4, #BASE + COUNT
         ldi s10, #0
-        ldi s11, #0
-mm:     x19.xrd s1, #8
-        x02.ainc #8, #8
-        alu s4, s1, s10, #OP_SUB
-        ptst p3, s0, #LE4, #PTST
-        psel s10, s4, s10, p3, #0, #4 ; x > max: max + (x - max)
-        alu s4, s1, s11, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        psel s11, s4, s11, p3, #1, #4 ; x < min: min + (x - min)
-        alu s9, s9, s14, #OP_SUB
-        alu s4, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, mm
+        ldi s7, #0
+mm:     pk(s1, A8, s0, s0, s0, 3, s0, s7, 7, 0)
+        x18.max s10, s10, s3
+        pk(s4, A8, s0, s0, s0, 3, s0, s1, 7, 0)
+        x18.max s10, s10, s3
+        pk(s5, A8, s0, s0, s0, 3, s0, s4, 7, 0)
+        x18.max s10, s10, s3
+        pk(s7, A8, s0, s0, s0, 3, s0, s5, 7, 0)
+        pcond p3, R4, A8, #30   ; more: A8 != BASE + COUNT
+        jmp #3, #3, mm
+        x18.max s10, s10, s3    ; (delay slot)
         nop()
-        nop()
+        pk(s0, A0, s0, s0, s0, 3, s0, s7, 7, 0)
+        x18.max s10, s10, s3
 }
 
-; s6 = 2 when MX >= 2^22 or MN <= -2^22, else 1 when MX >= 2^21 or MN <= -2^21, else 0.
-; Uses s3, s4, p3.
-.macro im_decide(MX, MN) {
-        ldi s3, #22
-        x19.alu s3, s14, s3, #SHIFT ; 2^22
-        alu s4, MX, s3, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, two    ; max >= 2^22
-        alu s4, MN, s3, #OP_ADD ; (delay slot)
-        nop()
-        ptst p3, s0, #LE4, #PTST
-        jmp #3, #3, two         ; min <= -2^22
-        ldi s3, #21             ; (delay slot)
-        x19.alu s3, s14, s3, #SHIFT ; (delay slot) 2^21
-        alu s4, MX, s3, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, one
-        alu s4, MN, s3, #OP_ADD ; (delay slot)
-        nop()
-        ptst p3, s0, #LE4, #PTST
-        jmp #3, #3, one
-        nop()
-        nop()
-        jmp #ALWAYS, #0, done
-        ldi s6, #0              ; (delay slot)
-        nop()
-two:    jmp #ALWAYS, #0, done
-        ldi s6, #2              ; (delay slot)
-        nop()
-one:    ldi s6, #1
-done:
-}
-
-; X[BASE ..] = shift23(X[BASE ..], s6) over COUNT words: s6 < 0 a rounded right shift. Uses s1,
-; s4, s9, A8, A9 and aimm's registers.
-.macro im_shift(BASE, COUNT) {
-        aimm_e(4, BASE)
-        aimm_o(4, BASE)
-        ldi s9, #COUNT
-sl:     x19.xrd s1, #8
-        x02.ainc #8, #8
-        x19.alu s1, s1, s6, #SHIFT
-        stx A9, s1
-        x02.ainc #9, #9
-        alu s9, s9, s14, #OP_SUB
-        alu s4, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, sl
-        nop()
-        nop()
-}
-
-; Normalise IN; the zero block clears OUT and jumps to SILENT.
+; Normalise IN's scale: s9 = c, the right shift im_pre's loads take (1: one rounded halving when
+; max |x| >= 2^22; -k: k doublings while it is below 2^21), IM_EX = E + c. The zero block clears
+; OUT and jumps to SILENT.
 .macro im_norm(N2, IN, OUT, ESLOT, SILENT) {
         im_scan(IN, N2)
-        alu s1, s0, s11, #OP_SUB ; -min
-        alu s4, s1, s10, #OP_SUB
-        ptst p3, s0, #LE4, #PTST
-        jmp #3, #3, havebig
-        alu s5, s10, s0, #OP_ADD ; (delay slot) big = max
-        nop()
-        alu s5, s1, s0, #OP_ADD ; big = -min
-havebig: alu s4, s5, s0, #OP_ADD
+        alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, nonzero
         nop()
@@ -142,29 +85,27 @@ clr:    stx A9, s4
         jmp #ALWAYS, #0, SILENT
         nop()
         nop()
-nonzero: im_decide(s10, s11)
-        ldi s4, #2
-        alu s4, s6, s4, #OP_SUB
-        ptst p3, s0, #EQ4, #PTST ; big >= 2^22: one rounded halving
-        jmp #3, #3, scale
-        ldi s6, #-1             ; (delay slot)
-        nop()
-        ldi s6, #0
-        ldi s3, #21
+nonzero: ldi s3, #22
+        x19.alu s3, s14, s3, #SHIFT ; 2^22
+        alu s4, s10, s3, #OP_SUB
+        ptst p3, s0, #LT4, #PTST
+        jmp #IF_NOT, #3, scale  ; max >= 2^22: one halving
+        ldi s9, #1              ; (delay slot)
+        ldi s3, #21             ; (delay slot)
         x19.alu s3, s14, s3, #SHIFT ; 2^21
-dbl:    alu s4, s5, s3, #OP_SUB
+        ldi s9, #0
+dbl:    alu s4, s10, s3, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, scale
         nop()
         nop()
-        alu s5, s5, s5, #OP_ADD
+        alu s10, s10, s10, #OP_ADD
         jmp #ALWAYS, #0, dbl
-        alu s6, s6, s14, #OP_ADD ; (delay slot)
+        alu s9, s9, s14, #OP_SUB ; (delay slot)
         nop()
 scale:  yld(s3, ESLOT)
-        alu s3, s3, s6, #OP_SUB
-        yst(IM_EX)              ; E' = E - count
-        im_shift(IN, N2)
+        alu s3, s3, s9, #OP_ADD
+        yst(IM_EX)              ; E' = E + c
 }
 
 ; s15 = min(s15, norm(V)), the fewest redundant sign bits so far (x01.norm, x18.min: x17
@@ -194,49 +135,40 @@ scale:  yld(s3, ESLOT)
         x12.aset #k, R7
 }
 
-; Z[rev n] = (IN[2n], IN[n2 - 1 - 2n]) * PRE[n], tracking the fewest redundant sign bits in s15.
-; Y REV holds Z + 2 rev(n) - 2.
+; Z[rev n] = (IN[2n], IN[n2 - 1 - 2n]) >> s9 * PRE[n], tracking the fewest redundant sign bits
+; in s15. Y REV holds Z + 2 rev(n). Point n's loads and products (pk, A4 up and A6 down by
+; agu_xr fns 2 and 3 with R2 = 2, fact 738; the shift by x02.vc code 7, 730) overlap the
+; finish of point n - 1, which x03.acp's A10 <- Y:[e7] (fact 193) then scatters; x03.acp's
+; template zeroes s7.
+.macro im_pre5(N2, IN) {
+        pkf(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0, 2, R2) ; xr; s10 = xi pr
+        pk(s4, A8, s6, s3, s5, 1, s9, s1, 0, 7) ; pr; s6 = xi pi; xr >>= c
+        pkf(s3, A6, s2, s1, s4, 6, s2, s6, 5, 0, 3, R2) ; xi; s2 = xr pr; s6 = re
+        pk(s5, A8, s0, s0, s0, 3, s9, s3, 0, 7) ; pi; xi >>= c
+        pk(s0, A0, s13, s1, s5, 10, s13, s10, 0, 0) ; s13 = xr pi; s10 = im
+}
+
 .macro im_pre(N2, N4, IN, PRE, REV) {
-        ldi s12, #IN
-        amov_e(2, s12)
+        aimm_e(2, IN)
         ldi s12, #IN + N2 - 1
         amov_e(3, s12)
         aimm_e(4, PRE)
-        ldi s13, #REV - 1
-        x17.mve e7, s13         ; e7 = REV
-        rimm R2, #-2
-        ldi s11, #N4
+        lde e7, #REV
+        rimm R2, #2
+        rimm R4, #IN + N2 + 2
         ldi s15, #24
-pre:    x19.xrd s1, #4          ; xr
-        x02.ainc #4, #4
-        x02.ainc #4, #4
-        x19.xrd s12, #6         ; xi
-        x18.rag101 s0, R3, A6, R2, #2
-        x12.aset #3, R3
-        x19.xrd s3, #8          ; pr
-        x02.ainc #8, #8
-        x19.xrd s5, #8          ; pi
-        x02.ainc #8, #8
-        x02.mpy s6, s1, s3
-        x02.mpy s8, s12, s5
-        alu s6, s6, s8, #OP_SUB ; re
-        x02.mpy s8, s1, s5
-        x02.mpy s9, s12, s3
-        alu s8, s8, s9, #OP_ADD ; im
-        ldy s10, e7
-        x18.eagu e7, e7, #AGU_INC
-        im_aset(s10, 6)
-        stx A12, s6
-        x02.ainc #12, #12
-        stx A12, s8
-        im_trk(s6, s7)
-        im_trk(s8, s7)
-        alu s11, s11, s14, #OP_SUB
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, pre
-        nop()
-        nop()
+        im_pre5(N2, IN)
+pre:    im_pre5(N2, IN)
+        x03.acp A10, A0, e7, #1
+        pks(6, A10, 0, s0, s0, 0)
+        pks(10, A10, 0, s0, s0, 0)
+        x01.norm s8, s6
+        x18.min s15, s15, s8
+        x01.norm s8, s10
+        pcond p3, R4, A4, #30   ; more: A4 != IN + N2 + 2
+        jmp #3, #3, pre
+        x18.min s15, s15, s8    ; (delay slot)
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
 }
 
 ; RD = s<src> (the R write path of mem.sm's amov). Uses s13, e6.

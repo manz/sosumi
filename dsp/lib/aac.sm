@@ -17,7 +17,7 @@
 ;   AK_NCH channels (1 or 2), AK_NSWBL / AK_NSWBS bands per window size, AK_TOPL / AK_TOPS
 ;   TNS_MAX_BANDS, AK_BOOKS + b the code of book b (1..11; the scale factor code at HUFF0, root
 ;   width 8 for every code), SWB_L / SWB_S swb_offset (64 words each), the dequantiser's DQ_IE,
-;   DQ_IR, the IMDCT's bit reversals at REVL (512) and REVS (64), Z + 2 rev(n) - 2 with Z = 0.
+;   DQ_IR, the IMDCT's bit reversals at REVL (512) and REVS (64), Z + 2 rev(n) with Z = 0.
 ; Y state kept between access units: AK_SHP + slot each channel's previous window_shape.
 ; Y out: AK_ST status (0 ok, 1 CCE or PCE, 2 a syntax error, 3 an escape past 8 ones, 4 stereo
 ;   tools without common_window, 5 more channels than AK_NCH), OUTY the PCM, 1024 frames of
