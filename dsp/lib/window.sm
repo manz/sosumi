@@ -67,7 +67,7 @@
 ; X[T .. T + COUNT) = rnd(X[..] * w / 2^23) in place, w the half's w / 4 in Q23: the shape in
 ; Y:[SLOT] (0 sine, 1 KBD), LONG 1 for 1024 words (else 128), FALL 1 for the falling side (the
 ; table read backwards). The start address is s9 (win_mulr) or a constant (win_mul). Uses s1,
-; s3 .. s5, s9, s12, s13, e6, R4, R7, A4, A6, A8, p3 (amov_e and win_rset take s13).
+; s3 .. s7, s9, s12, s13, e6, R4, R7, A4, A6, A8, p3 (amov_e and win_rset take s13).
 .macro win_mul(T, COUNT, SLOT, LONG, FALL) {
         ldi s9, #T
         win_mulr(COUNT, SLOT, LONG, FALL)
@@ -95,7 +95,13 @@ sl:     pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7) ; t; s4 = rshr(w, 2)
         pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7)
         pks(5, A8, 0, s0, s0, 0)
         pkf(s3, A6, s5, s1, s4, 0, s0, s0, 0, 0, 2, R7)
-        pcond p3, R4, A4, #30   ; more: A4 != T + COUNT
+        pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7)
+        pks(5, A8, 0, s0, s0, 0)
+        pkf(s3, A6, s5, s1, s4, 0, s0, s0, 0, 0, 2, R7)
+        pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7)
+        pks(5, A8, 0, s0, s0, 0)
+        pkf(s3, A6, s5, s1, s4, 0, s0, s0, 0, 0, 2, R7)
+        pcond p3, R4, A4, #30   ; more: A4 != T + COUNT (four words a pass)
         jmp #3, #3, sl
         pks(5, A8, 0, s0, s0, 0) ; (delay slot)
         nop()                   ; (delay slot)
@@ -103,16 +109,34 @@ sl:     pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7) ; t; s4 = rshr(w, 2)
         nop()
         nop()
         ; KBD: Y from e6, w << 6 in the same third slot (a negative count shifts left)
-kbd:    lde e6, #LONG * KBD_L + (1 - LONG) * KBD_S + FALL * (COUNT - 1)
+; Pipelined: each pk loads a t and shifts its w while multiplying the word before, t and w
+; alternating between s1, s4 and s7, s6 (no bundle loads a register its product reads), so the
+; first word goes ahead of the loop (pairs) and the last after it.
+kbd:    ldi s12, #COUNT - 1
+        alu s12, s9, s12, #OP_ADD
+        win_rset(s12, R4)       ; R4 = T + COUNT - 1
+        lde e6, #LONG * KBD_L + (1 - LONG) * KBD_S + FALL * (COUNT - 1)
         ldi s12, #-6
-kl:     ldy s3, e6
+        ldy s3, e6
         x18.eagu e6, e6, #AGU_INC + FALL * (AGU_DEC - AGU_INC)
         pk(s1, A4, s0, s0, s0, 4, s12, s3, 0, 7) ; t; s4 = w << 6
-        pk(s0, A0, s5, s1, s4, 0, s0, s0, 0, 0) ; t w
-        pcond p3, R4, A4, #30
+kl:     ldy s3, e6
+        x18.eagu e6, e6, #AGU_INC + FALL * (AGU_DEC - AGU_INC)
+        pk(s7, A4, s5, s1, s4, 6, s12, s3, 0, 7) ; the next t and w; t w
+        pks(5, A8, 0, s0, s0, 0)
+        ldy s3, e6
+        x18.eagu e6, e6, #AGU_INC + FALL * (AGU_DEC - AGU_INC)
+        pk(s1, A4, s5, s7, s6, 4, s12, s3, 0, 7)
+        pcond p3, R4, A4, #30   ; more: A4 != T + COUNT - 1 (two words a pass)
         jmp #3, #3, kl
         pks(5, A8, 0, s0, s0, 0) ; (delay slot)
         nop()                   ; (delay slot)
+        ldy s3, e6
+        nop()
+        pk(s7, A4, s5, s1, s4, 6, s12, s3, 0, 7)
+        pks(5, A8, 0, s0, s0, 0)
+        pk(s0, A0, s5, s7, s6, 0, s0, s0, 0, 0)
+        pks(5, A8, 0, s0, s0, 0)
 done:
 }
 
@@ -247,7 +271,16 @@ sw:     yld(s9, WIN_T)
         pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
 sa:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         pk(s1, A4, s0, s0, s0, 7, s1, s6, 0, 0) ; the next t; t + b
-        pcond p3, R4, A4, #30
+        pks(7, A10, 0, s0, s0, 0)
+        pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s1, A4, s0, s0, s0, 7, s1, s6, 0, 0)
+        pks(7, A10, 0, s0, s0, 0)
+        pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s1, A4, s0, s0, s0, 7, s1, s6, 0, 0)
+        pks(7, A10, 0, s0, s0, 0)
+        pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s1, A4, s0, s0, s0, 7, s1, s6, 0, 0)
+        pcond p3, R4, A4, #30   ; four words a pass
         jmp #3, #3, sa
         pks(7, A10, 0, s0, s0, 0) ; (delay slot)
         nop()                   ; (delay slot)
