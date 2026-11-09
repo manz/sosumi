@@ -1794,8 +1794,8 @@ gch:    mp3_hybrid()
 ; (its multiply slot): nothing lives in s2 across one.
 
 ; Short block lines from band-major, window-minor runs to subband order: each band triple of
-; width len at src, [w][i], becomes [i][w] (through X:MP_XZ). Uses s1..s9, s12, s13, e7,
-; A8, A9, A12 and amov's registers.
+; width len at src, [w][i], becomes [i][w] (through X:MP_XZ). Uses s1..s10, s12, s13, e7,
+; A8..A10, A12 and amov's registers.
 .macro mp3_reorder() {
         lde e7, #MP_SGR
         ldy s1, e7
@@ -1852,50 +1852,54 @@ trl:    lde e7, #MP_HLP
         ldi s12, #3
         alu s2, s2, s12, #OP_ADD
         mp3_put(MP_HLP, 2)
-        ; MP_XZ[3 i + w] = src[w len + i]: walk the source in order, the scratch by 3, wrapping
+        ; MP_XZ[3 i + w] = src[w len + i]: three source pointers, w = 0..2, the scratch in
+        ; order; then back. Widths are even: two i a pass, 2 bundles a word (mem.sm pk / pks)
         lde e7, #MP_HSRC
         ldy s4, e7
         amov(A8, s4)
-        ldi s6, #0              ; w
-rw:     ldi s7, #MP_XZ
-        alu s7, s7, s6, #OP_ADD
-        amov(A9, s7)
-        rimm R5, #3
-        alu s8, s5, s0, #OP_ADD ; i left
-ri:     x19.xrd s1, #8
-        x02.ainc #8, #8
-        stx A9, s1
-        x02.aa A9, A9, R5, #2, A0, A0
-        alu s8, s8, s14, #OP_SUB
-        alu s12, s8, s0, #OP_ADD
+        alu s6, s4, s5, #OP_ADD
+        amov(A9, s6)
+        alu s6, s6, s5, #OP_ADD
+        amov(A10, s6)
+        aimm(A12, MP_XZ)
+        ldi s12, #1
+        alu s12, s12, s5, #ASR  ; len / 2 passes
+        alu s10, s12, s0, #OP_ADD
+gt:     pk(s1, A8, s0, s0, s0, 12, s12, s14, 5, 0)
+        pk(s2, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s3, A10, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s8, A9, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s9, A10, s0, s0, s0, 0, s0, s0, 0, 0)
         ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, ri
-        nop()
-        nop()
-        alu s6, s6, s14, #OP_ADD
-        ldi s12, #3
-        alu s12, s6, s12, #OP_SUB
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, rw
-        nop()
-        nop()
-        ; back: 3 len words to src
+        pks(1, A12, 0, s0, s0, 0)
+        pks(2, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(6, A12, 0, s0, s0, 0)
+        jmp #IF_NOT, #3, gt
+        pks(8, A12, 0, s0, s0, 0) ; (delay slot)
+        pks(9, A12, 0, s0, s0, 0) ; (delay slot)
         amov(A8, s4)
-        aimm(A9, MP_XZ)
+        aimm(A12, MP_XZ)
+        alu s12, s10, s0, #OP_ADD
+bk:     pk(s1, A12, s0, s0, s0, 12, s12, s14, 5, 0)
+        pk(s2, A12, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s3, A12, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s6, A12, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s8, A12, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s9, A12, s0, s0, s0, 0, s0, s0, 0, 0)
+        ptst p3, s0, #EQ12, #PTST
+        pks(1, A8, 0, s0, s0, 0)
+        pks(2, A8, 0, s0, s0, 0)
+        pks(3, A8, 0, s0, s0, 0)
+        pks(6, A8, 0, s0, s0, 0)
+        jmp #IF_NOT, #3, bk
+        pks(8, A8, 0, s0, s0, 0) ; (delay slot)
+        pks(9, A8, 0, s0, s0, 0) ; (delay slot)
         ldi s12, #3
         x18.mpy s8, s0, s5, s12
         alu s4, s4, s8, #OP_ADD
         mp3_put(MP_HSRC, 4)
-rb:     x19.xrd s1, #9
-        x02.ainc #9, #9
-        stx A8, s1
-        x02.ainc #8, #8
-        alu s8, s8, s14, #OP_SUB
-        alu s12, s8, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, rb
-        nop()
-        nop()
         jmp #ALWAYS, #0, trl
         nop()
         nop()
