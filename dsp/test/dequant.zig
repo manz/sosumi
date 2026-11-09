@@ -16,16 +16,7 @@ const fi = 4; // 44.1 kHz
 /// The twin's tables at the library's addresses: X DQ_D pairs (m, em), DQ_IT, DQ_G; Y DQ_IE,
 /// DQ_IR (4 rem), DQ_OFF.
 fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, offsets: []const u16) !void {
-    for (D.direct_m, D.direct_e, 0..) |m, e, k| {
-        try h.putX(st, gpa, map.at("DQ_D") + 2 * @as(u32, @intCast(k)), m);
-        try h.putX(st, gpa, map.at("DQ_D") + 1 + 2 * @as(u32, @intCast(k)), e);
-    }
-    for (D.interp, 0..) |v, j| try h.putX(st, gpa, map.at("DQ_IT") + @as(u32, @intCast(j)), v);
-    for (D.gain, 0..) |v, j| try h.putX(st, gpa, map.at("DQ_G") + @as(u32, @intCast(j)), v);
-    for (D.interp_e, D.interp_rem, 0..) |e, r, j| {
-        try h.putY(st, gpa, map.at("DQ_IE") + @as(u32, @intCast(j)), e);
-        try h.putY(st, gpa, map.at("DQ_IR") + @as(u32, @intCast(j)), 4 * r);
-    }
+    try h.stageDequant(st, gpa);
     for (offsets, 0..) |o, j| try h.putY(st, gpa, map.at("DQ_OFF") + @as(u32, @intCast(j)), @intCast(o));
 }
 

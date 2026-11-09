@@ -117,3 +117,20 @@ pub fn stageSine(st: *emu.State, gpa: std.mem.Allocator, odd: u32, four: u32) !v
     try putAllX(st, gpa, odd, &sine.odd);
     try putAllX(st, gpa, four, &sine.four);
 }
+
+/// lib/dequant.sm's |q|^(4/3) tables (ref/dsp/aac/dequant.zig) at their addresses: X DQ_D pairs
+/// (m, em), DQ_IT, DQ_G; Y DQ_IE, DQ_IR (4 rem).
+pub fn stageDequant(st: *emu.State, gpa: std.mem.Allocator) !void {
+    const map = @import("map.zig");
+    const D = @import("ref").dsp.aac.dequant;
+    for (D.direct_m, D.direct_e, 0..) |m, e, k| {
+        try putX(st, gpa, map.at("DQ_D") + 2 * @as(u32, @intCast(k)), m);
+        try putX(st, gpa, map.at("DQ_D") + 1 + 2 * @as(u32, @intCast(k)), e);
+    }
+    try putAllX(st, gpa, map.at("DQ_IT"), &D.interp);
+    try putAllX(st, gpa, map.at("DQ_G"), &D.gain);
+    for (D.interp_e, D.interp_rem, 0..) |e, r, j| {
+        try putY(st, gpa, map.at("DQ_IE") + @as(u32, @intCast(j)), e);
+        try putY(st, gpa, map.at("DQ_IR") + @as(u32, @intCast(j)), 4 * r);
+    }
+}

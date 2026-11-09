@@ -61,17 +61,7 @@ pub fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, fi: u4) !void {
         addr += @intCast(t.words.len);
     }
     std.debug.assert(addr <= map.at("HUFF_END"));
-    // dequantiser
-    for (A.dequant.direct_m, A.dequant.direct_e, 0..) |m, e, k| {
-        try h.putX(st, gpa, map.at("DQ_D") + 2 * @as(u32, @intCast(k)), m);
-        try h.putX(st, gpa, map.at("DQ_D") + 1 + 2 * @as(u32, @intCast(k)), e);
-    }
-    try h.putAllX(st, gpa, map.at("DQ_IT"), &A.dequant.interp);
-    try h.putAllX(st, gpa, map.at("DQ_G"), &A.dequant.gain);
-    for (A.dequant.interp_e, A.dequant.interp_rem, 0..) |e, r, j| {
-        try h.putY(st, gpa, map.at("DQ_IE") + @as(u32, @intCast(j)), e);
-        try h.putY(st, gpa, map.at("DQ_IR") + @as(u32, @intCast(j)), 4 * r);
-    }
+    try h.stageDequant(st, gpa);
     try h.stageImdct(st, gpa, 1024, map.at("REVL"));
     try h.stageImdct(st, gpa, 128, map.at("REVS"));
     try stageWindows(st, gpa);
