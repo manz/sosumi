@@ -135,26 +135,26 @@ rgw2:   x18.eagu e10, e10, #AGU_INC
         alu s12, s12, s12, #OP_ADD
         alu s12, s12, s14, #OP_ADD ; 0xFFFF
         x18.and s4, s4, s12     ; (2 a x)[15:0]
-        ldi s12, #-1
-        x19.alu s4, s4, s12, #SHIFT ; lo = (a x)[14:0] (exact on an even word)
+        ldi s12, #1
+        alu s4, s12, s4, #ASRRS ; lo = (a x)[14:0] (exact on an even word)
         ldi s12, #8192
         alu s5, s4, s12, #OP_SUB
-        ldi s12, #-14
-        x19.alu s5, s5, s12, #SHIFT ; lo's bit 14 (a floor shift)
+        ldi s12, #14
+        alu s5, s12, s5, #ASRRS ; lo's bit 14 (a floor shift)
         x02.mpy s6, s13, s1     ; round(a x / 2^15)
         alu s6, s6, s5, #OP_SUB ; hi = floor(a x / 2^15)
-        ldi s12, #-9
-        x19.alu s5, s6, s12, #SHIFT
-        ldi s12, #8
-        x19.alu s5, s5, s12, #SHIFT
+        ldi s12, #9
+        alu s5, s12, s6, #ASRRS
+        ldi s12, #-8
+        alu s5, s12, s5, #ASRRS
         alu s6, s6, s5, #OP_SUB
         alu s6, s6, s5, #OP_SUB ; hi's low 9 bits, sign-extended
-        ldi s12, #15
-        x19.alu s6, s6, s12, #SHIFT
+        ldi s12, #-15
+        alu s6, s12, s6, #ASRRS
         alu s1, s6, s4, #OP_ADD ; a x mod 2^24
         alu s1, s1, s8, #OP_ADD ; + c
-        ldi s12, #-1
-        x19.alu s3, s1, s12, #SHIFT
+        ldi s12, #1
+        alu s3, s12, s1, #ASRRS
 }
 
 ; The noise band at X PN_S + PN_ST, PN_LEN words, energy 2^(PN_NRG / 2): its words in place and
@@ -167,11 +167,11 @@ rgw2:   x18.eagu e10, e10, #AGU_INC
 sl:     alu s4, s10, s11, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #3, #3, sdone
-        ldi s12, #2             ; (delay slot)
+        ldi s12, #-2            ; (delay slot)
         nop()
-        x19.alu s11, s11, s12, #SHIFT
+        alu s11, s12, s11, #ASRRS
         jmp #ALWAYS, #0, sl
-        alu s9, s9, s12, #OP_ADD ; (delay slot)
+        alu s9, s9, s12, #OP_SUB ; (delay slot)
         nop()
 sdone:  pn_yst(PN_SH, 1, 1)     ; s9
         ; pass 1: the samples and the largest |v|
@@ -182,10 +182,10 @@ sdone:  pn_yst(PN_SH, 1, 1)     ; s9
         aimm_e(3, PN_RNG)
         x19.xrd s1, #6          ; x
         ldi s7, #0x7655
-        ldi s12, #8
-        x19.alu s13, s7, s12, #SHIFT ; a << 8
+        ldi s12, #-8
+        alu s13, s12, s7, #ASRRS ; a << 8
         ldi s8, #0x3C6E
-        x19.alu s8, s8, s12, #SHIFT
+        alu s8, s12, s8, #ASRRS
         ldi s12, #0xF3
         alu s8, s8, s12, #OP_ADD ; c = 0x3C6EF3
         ldi s11, #0             ; big
@@ -217,8 +217,8 @@ gdone:  stx A6, s1              ; the state back
         nop()
         nop()
         ; k: the largest scaled up to >= 2^21
-        ldi s12, #21
-        x19.alu s12, s14, s12, #SHIFT
+        ldi s12, #-21
+        alu s12, s12, s14, #ASRRS
         ldi s6, #0
 kl:     alu s4, s11, s12, #OP_SUB
         ptst p3, s0, #LT4, #PTST
@@ -227,7 +227,7 @@ kl:     alu s4, s11, s12, #OP_SUB
         nop()
         alu s11, s11, s11, #OP_ADD
         jmp #ALWAYS, #0, kl
-        alu s6, s6, s14, #OP_ADD ; (delay slot)
+        alu s6, s6, s14, #OP_SUB ; (delay slot) -k
         nop()
 kdone:                          ; pass 2: scale, and acc = sum rshr(rnd(v^2 / 2^23), s)
         ldi s4, #PN_S
@@ -236,7 +236,6 @@ kdone:                          ; pass 2: scale, and acc = sum rshr(rnd(v^2 / 2^
         amov_e(2, s4)
         yld(s10, PN_LEN)
         yld(s9, PN_SH)
-        alu s9, s0, s9, #OP_SUB ; -s
         ldi s11, #0
 sq:     alu s4, s10, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -244,11 +243,11 @@ sq:     alu s4, s10, s0, #OP_ADD
         nop()
         nop()
         x19.xrd s1, #4
-        x19.alu s1, s1, s6, #SHIFT
+        alu s1, s6, s1, #ASRRS
         stx A4, s1
         x02.ainc #4, #4
         x02.mpy s5, s1, s1
-        x19.alu s5, s5, s9, #SHIFT
+        alu s5, s9, s5, #ASRRS
         alu s11, s11, s5, #OP_ADD
         jmp #ALWAYS, #0, sq
         alu s10, s10, s14, #OP_SUB ; (delay slot)
@@ -260,40 +259,40 @@ sqdone: ldi s3, #PN_NONE
         nop()
         nop()
         ; p: acc * 4^p in [2^21, 2^23)
-        ldi s12, #21
-        x19.alu s12, s14, s12, #SHIFT
+        ldi s12, #-21
+        alu s12, s12, s14, #ASRRS
         ldi s10, #0
-        ldi s5, #2
+        ldi s5, #-2
 pl:     alu s4, s11, s12, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, pdone
         nop()
         nop()
-        x19.alu s11, s11, s5, #SHIFT
+        alu s11, s5, s11, #ASRRS
         jmp #ALWAYS, #0, pl
         alu s10, s10, s14, #OP_ADD ; (delay slot)
         nop()
 pdone:                          ; z = seed[floor(m / 2^20) - 2], then three Newton steps
-        ldi s12, #19
-        x19.alu s5, s14, s12, #SHIFT ; 2^19
-        ldi s12, #-20
+        ldi s12, #-19
+        alu s5, s12, s14, #ASRRS ; 2^19
+        ldi s12, #20
         alu s5, s11, s5, #OP_SUB
-        x19.alu s5, s5, s12, #SHIFT
+        alu s5, s12, s5, #ASRRS
         ldi s12, #PN_SEED - 2
         alu s5, s5, s12, #OP_ADD
         amov_e(4, s5)
         x19.xrd s1, #8          ; z
         ldi s12, #48
-        ldi s5, #16
-        x19.alu s12, s12, s5, #SHIFT ; 3 << 20
+        ldi s5, #-16
+        alu s12, s5, s12, #ASRRS ; 3 << 20
         ldi s9, #3
 nw:     x02.mpy s5, s1, s1
         x02.mpy s5, s11, s5     ; u = m z^2
         alu s5, s5, s5, #OP_ADD
         alu s5, s12, s5, #OP_SUB ; 3/8 - 2u
         x02.mpy s1, s1, s5
-        ldi s5, #2
-        x19.alu s1, s1, s5, #SHIFT
+        ldi s5, #-2
+        alu s1, s5, s1, #ASRRS
         alu s9, s9, s14, #OP_SUB
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -304,10 +303,9 @@ nw:     x02.mpy s5, s1, s1
         yld(s6, PN_NRG)
         ldi s5, #2
         alu s11, s6, s5, #OP_SUB
+        alu s11, s5, s11, #ASRRS ; q (s11: amov clobbers s7)
         ldi s5, #-2
-        x19.alu s11, s11, s5, #SHIFT ; q (s11: amov clobbers s7)
-        ldi s5, #2
-        x19.alu s5, s11, s5, #SHIFT
+        alu s5, s5, s11, #ASRRS
         alu s6, s6, s5, #OP_SUB ; b
         ldi s5, #PN_T
         alu s5, s5, s6, #OP_ADD
@@ -315,8 +313,8 @@ nw:     x02.mpy s5, s1, s1
         x19.xrd s6, #8
         x02.mpy s6, s1, s6      ; g
         yld(s9, PN_SH)
-        ldi s5, #-1
-        x19.alu s9, s9, s5, #SHIFT ; s/2
+        ldi s5, #1
+        alu s9, s5, s9, #ASRRS  ; s/2
         ldi s5, #20
         alu s9, s9, s5, #OP_ADD
         alu s3, s10, s11, #OP_ADD
@@ -348,10 +346,9 @@ ndone:
 .macro pn_copy() {
         ldi s5, #2
         alu s11, s6, s5, #OP_SUB
+        alu s11, s5, s11, #ASRRS ; q (s11: amov clobbers s7)
         ldi s5, #-2
-        x19.alu s11, s11, s5, #SHIFT ; q (s11: amov clobbers s7)
-        ldi s5, #2
-        x19.alu s5, s11, s5, #SHIFT
+        alu s5, s5, s11, #ASRRS
         alu s6, s6, s5, #OP_SUB ; b
         ldi s5, #PN_T
         alu s5, s5, s6, #OP_ADD
@@ -390,7 +387,6 @@ cpdone: yld(s3, PN_EL)
         alu s4, s12, s9, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         psel s9, s4, s9, p3, #1, #4 ; min(n, 24)
-        alu s9, s0, s9, #OP_SUB ; -n
         ldi s4, #SRC
         alu s4, s4, s2, #OP_ADD
         amov_e(3, s4)
@@ -404,7 +400,7 @@ dl:     alu s4, s10, s0, #OP_ADD
         nop()
         x19.xrd s1, #6
         x02.ainc #6, #6
-        x19.alu s1, s1, s9, #SHIFT
+        alu s1, s9, s1, #ASRRS
         stx A4, s1
         x02.ainc #4, #4
         jmp #ALWAYS, #0, dl
