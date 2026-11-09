@@ -102,15 +102,37 @@ found:  alu s8, s6, s14, #OP_SUB
 done:
 }
 
-; s1 = |s11|. Uses s4.
-.macro dq_abs() {
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, pos
-        alu s1, s11, s0, #OP_ADD ; (delay slot)
+; dq_mant's em alone, for pass 1: s1 = mag (1..16383) -> s3 = em. Uses s4, s6, s7, s12, s13,
+; A8 and amov's registers.
+.macro dq_em() {
+        ldi s12, #128
+        alu s12, s12, s1, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; mag > 128
+        jmp #3, #3, big
+        ldi s4, #DQ_D + 1       ; (delay slot)
         nop()
-        alu s1, s0, s11, #OP_SUB
-pos:
+        alu s4, s4, s1, #OP_ADD
+        alu s4, s4, s1, #OP_ADD ; DQ_D + 2 mag + 1
+        amov_e(4, s4)
+        jmp #ALWAYS, #0, done
+        x19.xrd s3, #8          ; (delay slot) em
+        nop()
+big:    ldi s6, #1              ; s
+        ldi s7, #256            ; 2^(7 + s)
+more:   alu s12, s1, s7, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, found
+        nop()
+        nop()
+        alu s6, s6, s14, #OP_ADD
+        jmp #ALWAYS, #0, more
+        alu s7, s7, s7, #OP_ADD ; (delay slot)
+        nop()
+found:  ldi s13, #DQ_IE - 1
+        alu s13, s13, s6, #OP_ADD
+        x17.mve e6, s13
+        ldy s3, e6              ; em
+done:
 }
 
 ; s7 = floor((sf - 100) / 4) + 2 and s6 = (sf - 100) mod 4, sf at Y:[e8]. Uses s4, s12.
@@ -125,6 +147,30 @@ pos:
         x19.alu s12, s7, s4, #SHIFT
         alu s6, s6, s12, #OP_SUB ; b
         alu s7, s7, s4, #OP_ADD ; + 2
+}
+
+; RD = s<src> (mem.sm's amov R path). Uses s13, e6.
+.macro dq_rset(src, RD) {
+        ldi s13, #2
+        alu s13, src, s13, #OP_SUB
+        x17.mve e6, s13
+        x19.a3 s0, RD, e6, #25, #2, #0
+}
+
+; Pass 2's run constants: s9 = 129, s11 = 23, s12 = 2^23 - 1, s13 = G = X[Y:[DQ_GB]] (rem 0),
+; A12 = DQ_D, R5 = DQ_OUT - DQ_SPEC - 1. Uses s3, s4 and amov's registers.
+.macro dq_fset() {
+        ldi s9, #129
+        ldi s11, #22
+        x19.alu s12, s14, s11, #SHIFT ; 2^22
+        alu s3, s12, s14, #OP_SUB
+        alu s12, s12, s3, #OP_ADD ; 2^23 - 1
+        ldi s11, #23
+        yld(s4, DQ_GB)
+        amov(A9, s4)
+        x19.xrd s13, #9         ; G
+        aimm_e(6, DQ_D)
+        rimm R5, #DQ_OUT - DQ_SPEC - 1
 }
 
 ; The group and band walk both passes share: e7 books, e8 scale factors, e9/e11 the band's
@@ -186,25 +232,24 @@ win:    yld(s4, DQ_WL)
         ldi s4, #DQ_SPEC
         alu s7, s7, s4, #OP_ADD
         amov_e(1, s7)
+        alu s7, s7, s9, #OP_ADD
+        dq_rset(s7, R4)         ; the run's end
         yld(s10, DQ_MQ)
-mx:     alu s4, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #3, #3, mxd
+        ldi s7, #0
+mx:     pk(s1, A2, s0, s0, s0, 3, s0, s7, 7, 0) ; q; s3 = |the previous|
+        x18.max s10, s10, s3
+        pk(s4, A2, s0, s0, s0, 3, s0, s1, 7, 0)
+        x18.max s10, s10, s3
+        pk(s5, A2, s0, s0, s0, 3, s0, s4, 7, 0)
+        x18.max s10, s10, s3
+        pk(s7, A2, s0, s0, s0, 3, s0, s5, 7, 0)
+        pcond p3, R4, A2, #30   ; more: A2 != the end (bands are multiples of 4)
+        jmp #3, #3, mx
+        x18.max s10, s10, s3    ; (delay slot)
         nop()
-        nop()
-        x19.xrd s11, #2
-        x02.ainc #2, #2
-        dq_abs()
-        alu s4, s10, s1, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, mx2
-        alu s9, s9, s14, #OP_SUB ; (delay slot)
-        nop()
-        alu s10, s1, s0, #OP_ADD
-mx2:    jmp #ALWAYS, #0, mx
-        nop()
-        nop()
-mxd:    alu s3, s10, s0, #OP_ADD
+        pk(s0, A0, s0, s0, s0, 3, s0, s7, 7, 0)
+        x18.max s10, s10, s3
+        alu s3, s10, s0, #OP_ADD
         yst(DQ_MQ)
         yld(s3, DQ_CW)
         yld(s4, DQ_WIN)
@@ -222,7 +267,7 @@ wdone:  yld(s1, DQ_MQ)
         jmp #3, #3, bnext
         nop()
         nop()
-        dq_mant()
+        dq_em()
         dq_sh()
         alu s3, s3, s7, #OP_ADD ; e = em + 2 + floor(t / 4)
         yld(s5, DQ_E)
@@ -313,22 +358,43 @@ win:    yld(s4, DQ_WL)
         ldi s4, #DQ_SPEC
         alu s4, s8, s4, #OP_ADD
         amov_e(1, s4)
-        ldi s4, #DQ_OUT
-        alu s4, s8, s4, #OP_ADD
-        amov(A3, s4)
-co:     alu s4, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #3, #3, cod
+        alu s8, s4, s9, #OP_ADD
+        dq_rset(s8, R4)         ; the run's end
+        jmp #ALWAYS, #0, fsx    ; the constants, then the first q at cnext
         nop()
         nop()
-        x19.xrd s11, #2
-        x02.ainc #2, #2
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST ; q = 0: DQ_OUT is already 0
-        jmp #3, #3, cnext
+co:     ptst p3, s0, #EQ8, #PTST
+        jmp #IF_NOT, #3, nz
+        x02.aa A3, A2, R5, #2, A0, A0 ; (delay slot) A3 = q's DQ_OUT word
+        nop()                   ; (delay slot)
+cnext:  pcond p3, R4, A2, #30   ; more: A2 != the end
+        jmp #3, #3, co
+        pk(s8, A2, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) the next q
+        nop()                   ; (delay slot)
+        jmp #ALWAYS, #0, cod
         nop()
         nop()
-        dq_abs()
+        ; |q| <= 128: m, em from DQ_D at 2 |q| (x17.styr, x02.aa), P = rnd(m G) (G = s13, rem 0),
+        ; v = rshr(P, min(base - em, 23)) by x02.vc code 7, and the sign as an exact product:
+        ; rnd(v * (2^23 - 1) / 2^23) = v for v < 2^22, rnd(v * -2^23 / 2^23) = -v, the factor
+        ; 2^23 - 1 - asr(q, 23) (code 6, fact 730).
+nz:     pk(s0, A0, s0, s0, s0, 1, s0, s8, 7, 0) ; |q|
+        pk(s0, A0, s0, s0, s0, 4, s1, s9, 5, 0) ; |q| - 129
+        x17.styr R6, s1, #1, e6, #0 ; R6 = 2 |q|
+        ptst p3, s0, #LT4, #PTST
+        jmp #IF_NOT, #3, big
+        x02.aa A9, A12, R6, #2, A0, A0 ; (delay slot) A9 = DQ_D + 2 |q|
+        pk(s0, A0, s0, s0, s0, 4, s11, s8, 0, 6) ; (delay slot) asr(q, 23)
+        pk(s2, A9, s0, s0, s0, 4, s12, s4, 5, 0) ; m; the sign factor
+        pk(s3, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; em
+        pk(s0, A0, s6, s2, s13, 5, s10, s3, 5, 0) ; P; n = base - em
+        x18.min s5, s5, s11
+        pk(s0, A0, s0, s0, s0, 6, s5, s6, 0, 7) ; v = rshr(P, n)
+        pk(s0, A0, s6, s6, s4, 0, s0, s0, 0, 0) ; the sign
+        jmp #ALWAYS, #0, cnext
+        pks(6, A3, 0, s0, s0, 0) ; (delay slot)
+        nop()                   ; (delay slot)
+big:    alu s11, s8, s0, #OP_ADD
         dq_mant()
         yld(s4, DQ_GB)
         alu s4, s4, s5, #OP_ADD
@@ -352,9 +418,9 @@ nok:    alu s12, s0, s12, #OP_SUB
         nop()
         alu s6, s0, s6, #OP_SUB
 put:    stx A3, s6
-cnext:  x02.ainc #3, #3
-        jmp #ALWAYS, #0, co
-        alu s9, s9, s14, #OP_SUB ; (delay slot)
+fsx:    dq_fset()
+        jmp #ALWAYS, #0, cnext
+        nop()
         nop()
 cod:    yld(s3, DQ_CW)
         yld(s4, DQ_WIN)
