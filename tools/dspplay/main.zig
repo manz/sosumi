@@ -176,6 +176,27 @@ const Profile = struct {
     }
 };
 
+/// --check: every address the run and the staged tables hold, as ranges (gaps below 16 merged).
+fn footprint(gpa: std.mem.Allocator, name: []const u8, map: *const std.AutoHashMapUnmanaged(u32, u32)) !void {
+    var keys: std.ArrayList(u32) = .empty;
+    defer keys.deinit(gpa);
+    var it = map.keyIterator();
+    while (it.next()) |k| try keys.append(gpa, k.*);
+    std.mem.sort(u32, keys.items, {}, std.sort.asc(u32));
+    if (keys.items.len == 0) return;
+    std.debug.print("{s} footprint, {d} words:", .{ name, keys.items.len });
+    var start = keys.items[0];
+    var prev = start;
+    for (keys.items[1..]) |k| {
+        if (k - prev >= 16) {
+            std.debug.print(" {x}..{x}", .{ start, prev });
+            start = k;
+        }
+        prev = k;
+    }
+    std.debug.print(" {x}..{x}\n", .{ start, prev });
+}
+
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
     const io = init.io;
@@ -355,6 +376,10 @@ fn playAac(gpa: std.mem.Allocator, w: *std.Io.Writer, config: []const u8, units:
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(asc.sample_rate, check, "ref/dsp/aac");
+    if (check) {
+        try footprint(gpa, "X", &player.state.x_mem);
+        try footprint(gpa, "Y", &player.state.y_mem);
+    }
     if (profile_worst) {
         std.debug.print("worst packet: {d}\n", .{worst_at});
         @memcpy(prof.counts, worst);
