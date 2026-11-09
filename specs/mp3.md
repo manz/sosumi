@@ -1,6 +1,6 @@
 # MP3 decoder
 
-Status: working draft. The reader side is known as host interface facts. The reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; the sm1 side is not started.
+Status: working draft. The reader side is known as host interface facts. The reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; its numeric half has an sm1-shaped twin (`ref/dsp/mp3/`); the sm1 program is not started.
 
 ## Goal and boundary
 
@@ -111,6 +111,21 @@ Not exercised by any file at hand (LAME writes none of them): intensity stereo (
 MPEG-2), mixed blocks, MPEG-2 preflag, CRC-protected frames, free format. ISO/IEC 11172-4
 compliance streams would cover them (OPEN). minimp3's mixed-block band row at MPEG-2.5 8 kHz
 covers 48 coefficients in its long part where the subband count says 72 (OPEN).
+
+## The sm1-shaped twin
+
+`ref/dsp/mp3/` redoes the numeric half (requantisation onward) in measured sm1 operations on
+`ref/mp3`'s parse: Q21 words, every sum of products one x03.tap sum (exact to 48 bits) rounded
+once, the IMDCT and synthesis matrices folded to their distinct rows (324 taps per long
+subband, 32 rows of V per slot), the synthesis window exact in Q17. Against `tools/compare`:
+
+| Reference | Result over the ten LAME fixtures |
+|---|---|
+| afconvert (Apple) | max diff 1 LSB on all |
+| ffmpeg binary | max diff 1 LSB, except sweep.m2 (2 LSB in 0.017% of samples) |
+
+Words wrap at 24 bits as sm1's do; only requantisation saturates. A stream louder than 4 at a
+filterbank stage would wrap (OPEN: whether the program saturates there instead).
 
 ## Host facts
 

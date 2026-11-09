@@ -1,5 +1,5 @@
 //! Joint stereo in measured sm1 operations: the twin of `ref/mp3/stereo.zig`, the same band
-//! logic on Q20 words.
+//! logic on Q21 words.
 //!
 //! M/S is one tap sum per output: 2 (m c + s c) read back at 2^24 is (m + s) c / 2^23 with
 //! c = 1/sqrt 2 in Q23, rounded once. The intensity gains reach 1, so they are Q22 and read
@@ -124,14 +124,14 @@ pub fn process(h: header.Header, gr: sideinfo.Granule, right_gr: sideinfo.Granul
 
 const testing = std.testing;
 
-test "M/S: (3, 1) becomes (4, 2) / sqrt 2 in Q20" {
-    var l: requant.Coefs = @splat(3 << 20);
-    var r: requant.Coefs = @splat(1 << 20);
+test "M/S: (3, 1) becomes (4, 2) / sqrt 2 in Q21" {
+    var l: requant.Coefs = @splat(3 << 21);
+    var r: requant.Coefs = @splat(1 << 21);
     const h = try header.parse(&.{ 0xFF, 0xFB, 0x90, 0x64 });
     process(h, .{}, .{}, &.{}, &l, &r);
     // c is 1/sqrt 2 rounded to Q23: one LSB of slack
-    try testing.expectApproxEqAbs(4.0 / @sqrt(2.0) * (1 << 20), @as(f64, @floatFromInt(l[100])), 1.0);
-    try testing.expectApproxEqAbs(2.0 / @sqrt(2.0) * (1 << 20), @as(f64, @floatFromInt(r[575])), 1.0);
+    try testing.expectApproxEqAbs(4.0 / @sqrt(2.0) * (1 << 21), @as(f64, @floatFromInt(l[100])), 1.0);
+    try testing.expectApproxEqAbs(2.0 / @sqrt(2.0) * (1 << 21), @as(f64, @floatFromInt(r[575])), 1.0);
 }
 
 test "intensity gain 1 is exact" {

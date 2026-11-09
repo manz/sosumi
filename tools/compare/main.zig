@@ -4,7 +4,7 @@
 //!
 //!     compare in.aac|in.mp3 ref.s16 [ours.wav] [--dsp]
 //!
-//! --dsp decodes AAC with ref/dsp/aac, the decoder in measured sm1 operations.
+//! --dsp decodes with ref/dsp/aac or ref/dsp/mp3, the decoders in measured sm1 operations.
 const std = @import("std");
 const ref = @import("ref");
 
@@ -150,6 +150,7 @@ pub fn main(init: std.process.Init) !void {
     var failed: usize = 0;
     if (std.mem.endsWith(u8, args[1], ".mp3")) {
         var mp3: ref.mp3.decoder.Decoder = .{};
+        var dmp3: ref.dsp.mp3.decoder.Decoder = .{};
         var pos: usize = 0;
         if (aac.len > 10 and std.mem.eql(u8, aac[0..3], "ID3")) {
             const size = (@as(usize, aac[6]) << 21) | (@as(usize, aac[7]) << 14) | (@as(usize, aac[8]) << 7) | aac[9];
@@ -166,7 +167,8 @@ pub fn main(init: std.process.Init) !void {
             const n = @as(usize, h.samples()) * h.channels();
             chans = h.channels();
             rate = h.sampleRate();
-            const f = mp3.decode(aac[pos .. pos + len], &pcm) catch |e| blk: {
+            const res = if (use_dsp) dmp3.decode(aac[pos .. pos + len], &pcm) else mp3.decode(aac[pos .. pos + len], &pcm);
+            const f = res catch |e| blk: {
                 if (failed < 5) std.debug.print("frame {d}: {s}\n", .{ frames, @errorName(e) });
                 failed += 1;
                 @memset(pcm[0..n], 0);
@@ -174,7 +176,7 @@ pub fn main(init: std.process.Init) !void {
             };
             if (f) |fr| {
                 if (!fr.decoded) failed += 1;
-                const t = mp3.last;
+                const t = if (use_dsp) dmp3.last else mp3.last;
                 inline for (.{ t.short, t.mixed, t.ms, t.intensity, t.scfsi, t.preflag, t.scalefac_scale }, 0..) |b, k| mp3_stats[k] += @intFromBool(b);
             }
             try ours.appendSlice(gpa, pcm[0..n]);

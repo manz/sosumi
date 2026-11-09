@@ -1,10 +1,12 @@
 //! Requantisation in measured sm1 operations: the twin of `ref/mp3/requant.zig`.
 //!
-//! Every coefficient leaves as a Q20 word (value * 2^20, so |value| < 8; a louder one
-//! saturates). The magnitude is AAC's dequantiser (`../aac/dequant.zig`): |q|^(4/3) as m * 2^e
-//! and one rounded multiply by the 12-entry gain table, P = m G / 2^23 below 2^22.42 with value
-//! P * 2^(e + 2 + floor(t / 4)), t the quarter-step exponent. The Q20 word is P shifted by
-//! that exponent + 20: right with rounding, or left, saturating when x01's norm shows no room.
+//! Every coefficient leaves as a Q21 word (value * 2^21, so |value| < 4; a louder one
+//! saturates). Q21 against the ffmpeg binary on mono.cbr: 71.0 dB at Q20 (max |diff| 2 on
+//! other fixtures), 74.3 at Q21, 77.3 at Q22; Q21 keeps two bits over the fixtures' peak.
+//! The magnitude is AAC's dequantiser (`../aac/dequant.zig`): |q|^(4/3) as m * 2^e and one
+//! rounded multiply by the 12-entry gain table, P = m G / 2^23 below 2^22.42 with value
+//! P * 2^(e + 2 + floor(t / 4)), t the quarter-step exponent. The Q21 word is P shifted by
+//! that exponent + 21: right with rounding, or left, saturating when x01's norm shows no room.
 const std = @import("std");
 const ops = @import("../ops.zig");
 const dequant = @import("../aac/dequant.zig");
@@ -18,11 +20,11 @@ const Word = ops.Word;
 const word_max: Word = std.math.maxInt(Word);
 
 /// Fraction bits of a coefficient word, here and through the filterbanks.
-pub const frac = 20;
+pub const frac = 21;
 
 pub const Coefs = [576]Word;
 
-/// sign(q) |q|^(4/3) 2^(t / 4) as a Q20 word, q in -16383..16383.
+/// sign(q) |q|^(4/3) 2^(t / 4) as a Q21 word, q in -16383..16383.
 pub fn value(q: Word, t: Word) Word {
     if (ops.isZero(q)) return 0;
     const neg = ops.isNeg(q);
@@ -31,7 +33,7 @@ pub fn value(q: Word, t: Word) Word {
     const sh = ops.floorShr(t, 2);
     const b = ops.sub(t, ops.shl(sh, 2));
     const p = ops.mulRound23(mt.m, dequant.gain[@intCast(ops.add(ops.shl(mt.rem, 2), b))]);
-    // value = p * 2^x, x = e + 2 + sh; the Q20 word is p * 2^(x + 20)
+    // value = p * 2^x, x = e + 2 + sh; the Q21 word is p * 2^(x + 21)
     const up = ops.add(ops.add(ops.add(mt.e, 2), sh), frac);
     var v: Word = undefined;
     if (ops.isNeg(up)) {
