@@ -12,7 +12,7 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
         \\.include "lib/mem.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/pcm.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init()
         \\        pcm_packet()
         \\        x17.halt
         \\
@@ -38,6 +38,7 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
                 const order: std.builtin.Endian = if (little == 1) .little else .big;
                 std.mem.writeInt(u16, bytes[2 * k ..][0..2], u, order);
             }
+            try hst.state.y_mem.put(gpa, 0x3FFF, @intCast(bytes.len)); // pcm.sm's length stub
             const r = try hst.feed(prog, bytes);
             try testing.expectEqual(n, r.units);
             try testing.expectEqual(@as(?u32, 1), hst.state.getY(0xFD94));

@@ -33,7 +33,7 @@ fn x24(w: Word) u32 {
 fn run(gpa: std.mem.Allocator, state: *h.emu.State, table: H.Table, data: []const u8, body: []const u8) !void {
     var src: std.ArrayList(u8) = .empty;
     defer src.deinit(gpa);
-    try src.appendSlice(gpa, ".include \"lib/bits.sm\"\n.include \"lib/huffman.sm\"\n        bits_init(0x4000)\n");
+    try src.appendSlice(gpa, ".include \"lib/bits.sm\"\n.include \"lib/huffman.sm\"\n        bits_init()\n");
     for (0..count) |_| try src.print(gpa, "        ldi s1, #{d}\n        ldi s11, #{d}\n{s}\n", .{ table_base, table.root, body });
     // two bundles after x17.halt still run, so the fail marker sits past them
     try src.appendSlice(gpa,
@@ -48,7 +48,7 @@ fn run(gpa: std.mem.Allocator, state: *h.emu.State, table: H.Table, data: []cons
     );
     const prog = try h.assemble(gpa, src.items);
     defer gpa.free(prog);
-    try h.stagePacket(gpa, state, 0x4000, data);
+    try h.stagePacket(gpa, state, data);
     for (table.words, 0..) |w, i| try state.y_mem.put(gpa, table_base + @as(u32, @intCast(i)), w);
     state.a[6] = out_base;
     _ = try h.emu.runFrom(gpa, state, prog, 0, 1 << 20);

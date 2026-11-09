@@ -2,11 +2,12 @@
 ; Twin: ref/dsp/alac/decoder.zig; Apple ALAC ALACDecoder.cpp (Apache 2.0), Decode.
 ; One ALAC packet: the twin of `Decoder.decode` in ref/dsp/alac/decoder.zig.
 ; Needs lib/bits.sm, lib/rice.sm, lib/predictor.sm, lib/unmix.sm and lib/ring.sm first;
-; bits_init must point the reader at the packet.
+; bits_init starts the reader on the packet the host armed on the input stream.
 ;
-; Elements: SCE, LFE (one lane) and CPE (two), until END or two channels are filled. Valid
-; streams only: the header checks the reference makes (the 12 zero bits, n <= frame length,
-; a CPE past the last channel) are not repeated. The status slot reports what stops it.
+; Elements: SCE, LFE (one lane) and CPE (two), until END, which is always read: the stream
+; runs on into the next packet. An element past two channels stops with status 2. Valid streams
+; only: the reference's other header checks (the 12 zero bits, n <= frame length) are not
+; repeated. The status slot reports what stops it.
 ;
 ; Everything lives in the mode-0 windows (X 0..0x1BFF, Y 0..0x2E7F), for frames up to 4096
 ; samples and two channels. X holds one lane at a time:
@@ -17,8 +18,6 @@
 ;   Y UY           a pair's lane 0 once decoded, as its low 16 bits, so that lane 1 can take X;
 ;                  unmix reads it back from here. The output is u + v - ... and its
 ;                  difference with v, sign-extended from depth <= 16: only u mod 2^16 counts.
-;   Y PKT          the packet, staged by the emulator's host (bits_init(PKT)) until the
-;                  stream read replaces it; outside mode 0.
 ;   Y RING         the output slot: n stereo frames, written once the element has read every
 ;                  bit. Its second half overlays UY; each word lands behind the read of the
 ;                  UY word it covers.
@@ -41,7 +40,6 @@
 .const MIX   = 0x0000
 .const CSCR  = 0x1000
 .const RING  = OUTY
-.const PKT   = 0x4000           ; emulator-only packet staging (specs/alac.md input)
 .const ALAC_FL = 4096          ; frame length: the ring's slot holds 4096 stereo frames
 .const UY    = 0x1D00           ; 4096 words, up to COEFY
 .const COEFY = 0x2D00
@@ -110,20 +108,25 @@ l0:
         nop()
 
 alac_elem:
-        yld(s3, PK_CH)
-        ldi s4, #2
-        alu s4, s3, s4, #OP_SUB
-        ptst p3, s0, #LT4, #PTST ; ch < 2
-        jmp #IF_NOT, #3, alac_end
-        nop()
-        nop()
-        getbits(s3, 3)          ; tag
+        getbits(s3, 3)          ; tag, END included: the stream runs on into the next packet
         ldi s4, #7
         alu s4, s3, s4, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, alac_end ; END
         nop()
         nop()
+        yld(s4, PK_CH)
+        ldi s12, #2
+        alu s4, s4, s12, #OP_SUB
+        ptst p3, s0, #LT4, #PTST ; ch < 2
+        jmp #3, #3, alac_room
+        nop()
+        nop()
+        ldi s3, #2              ; an element past two channels
+        jmp #ALWAYS, #0, alac_fail
+        nop()
+        nop()
+alac_room:
         ldi s1, #1              ; lanes
         alu s4, s3, s14, #OP_SUB
         ptst p3, s0, #LT4, #PTST ; SCE

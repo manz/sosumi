@@ -1,7 +1,6 @@
-//! AAC access units through dsp/lib/aac.sm in x17's emulator. The program still runs on the
-//! imported layout (docs/aac-mode0.md), so the tables are staged
-//! straight into the emulator's memory, not through the host model: the raw_data_block at
-//! Y:AU, AK_NCH and AK_ST, the interleaved PCM at Y:OUTY (addresses from dsp/map.zig).
+//! AAC access units through dsp/lib/aac.sm in x17's emulator. The tables are staged straight
+//! into the emulator's memory, not through the host model: the raw_data_block armed on the
+//! input stream, AK_NCH and AK_ST, the interleaved PCM at Y:OUTY (addresses from dsp/map.zig).
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("harness.zig");
@@ -12,9 +11,8 @@ pub const at = map.at;
 
 const A = ref.dsp.aac;
 
-pub const Error = error{ Unsupported, Status, NotHalted, MonoCopy } || h.emu.RunError || std.mem.Allocator.Error;
+pub const Error = error{ Unsupported, Status, NotHalted, Starved, MonoCopy } || h.emu.RunError || std.mem.Allocator.Error;
 
-const au_base = map.at("AU");
 const ak_nch = map.at("AK_NCH");
 const ak_st = map.at("AK_ST");
 const pcm_base = map.at("OUTY");
@@ -40,7 +38,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
         \\.include "lib/window.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
-        \\        bits_init(AU)
+        \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
         \\
@@ -137,15 +135,11 @@ pub const Player = struct {
     /// One access unit: its PCM, interleaved 16-bit, valid until the next call.
     pub fn feed(self: *Player, au: []const u8) Error![]const i16 {
         const st = &self.state;
-        // 16-bit words, the first byte high; an odd last byte gets a zero low half
-        for (0..(au.len + 1) / 2) |i| {
-            const hi: u32 = au[2 * i];
-            const lo: u32 = if (2 * i + 1 < au.len) au[2 * i + 1] else 0;
-            try st.y_mem.put(self.gpa, au_base + @as(u32, @intCast(i)), hi << 8 | lo);
-        }
+        try st.queueStream(self.gpa, au);
         st.cur_lane = 0;
         const k = st.getY(map.at("AK_OSL")) orelse 0;
         self.bundles = try h.emu.runFrom(self.gpa, st, self.prog, 0, 1 << 30);
+        if (st.stream_starved) return error.Starved; // it read past its access unit
         if (!st.halted) return error.NotHalted;
         self.status = st.getY(ak_st) orelse 0;
         if (self.status != 0) return error.Status;
@@ -201,7 +195,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "ring", "aac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll(
-        \\        bits_init(AU)
+        \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
         \\

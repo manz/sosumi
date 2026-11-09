@@ -23,14 +23,12 @@
         ldi s4, #5
         alu s3, s1, s0, #OP_ADD ; start of the code - 1
         ldi s8, #-5
-step:   alu s12, s10, s11, #OP_SUB ; avail - w
-        ptst p3, s0, #LT12, #PTST ; p3 = avail < w
-        jmp #IF_NOT, #3, have
-        ldy s13, e5             ; delay slot: next word, harmless if unused
-        nop()                   ; delay slot
-        refill()
-have:   alu s7, s10, s11, #OP_SUB ; sh = avail - w
-        alu s5, s7, s9, #ASR    ; t = floor(c / 2^sh), the peeked w bits (fact 774)
+; The peek takes w bits from the cache, zeros past its avail, so the reader never asks the
+; stream for bits past the code (a byte beyond the access unit would wait for the next packet,
+; fact 784). The entry holds only when the bits it rests on were cached: a leaf's f <= avail,
+; a pointer's w <= avail; otherwise a byte is refilled and the peek taken again.
+step:   alu s7, s10, s11, #OP_SUB ; sh = avail - w, negative when fewer are cached
+        alu s5, s7, s9, #ASR    ; t = floor(c / 2^sh), or c << -sh zero-padded (fact 774)
         alu s6, s0, s7, #OP_SUB ; -sh
         alu s13, s1, s5, #OP_ADD ; entry address - 1
         x17.mve e6, s13         ; e6 = entry address
@@ -41,15 +39,35 @@ have:   alu s7, s10, s11, #OP_SUB ; sh = avail - w
         alu s12, s2, s15, #OP_SUB ; f - 16
         ptst p3, s0, #LT12, #PTST ; p3 = leaf
         jmp #3, #3, leaf
-        alu s1, s3, s13, #OP_ADD ; (delay slot) pointer: next table
-        alu s11, s12, s0, #OP_ADD ; (delay slot) pointer: its width
+        nop()
+        nop()
+        alu s12, s7, s0, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; pointer with sh < 0: w bits not all cached
+        jmp #IF_NOT, #3, ptr
+        nop()
+        nop()
+        refill()
+        jmp #ALWAYS, #0, step
+        nop()
+        nop()
+ptr:    alu s1, s3, s13, #OP_ADD ; pointer: next table
+        alu s11, s2, s15, #OP_SUB ; pointer: its width, f - 16
         alu s12, s6, s5, #ASR   ; pointer: consume w bits, t << sh
         alu s9, s9, s12, #OP_SUB ;          cache keeps the low sh bits
         alu s10, s7, s0, #OP_ADD ;          avail = sh
         jmp #ALWAYS, #0, step
         nop()
         nop()
-leaf:   alu s11, s2, s0, #OP_ADD ; consume f bits
+leaf:   alu s12, s10, s2, #OP_SUB ; avail - f
+        ptst p3, s0, #LT12, #PTST ; f past the cached bits: the zero padding chose it
+        jmp #IF_NOT, #3, take
+        nop()
+        nop()
+        refill()
+        jmp #ALWAYS, #0, step
+        nop()
+        nop()
+take:   alu s11, s2, s0, #OP_ADD ; consume f bits
         alu s2, s13, s0, #OP_ADD ; keep the value past getbits_s
         getbits_s(s13)
         alu dst, s2, s0, #OP_ADD

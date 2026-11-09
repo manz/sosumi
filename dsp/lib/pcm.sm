@@ -2,14 +2,13 @@
 ; No ref twin: 16-bit PCM passthrough, byte order per WAV (little-endian) and AIFF (big-endian).
 ; PCM passthrough: one packet of 16-bit samples (WAV little-endian or AIFF big-endian) copied
 ; into the host's output ring (lib/ring.sm). Needs lib/bits.sm, lib/mem.sm and lib/ring.sm
-; first; bits_init must point the reader at the packet.
+; first; bits_init starts the reader on the packet the host armed on the input stream.
 ;
 ; Parked: the device's PCM modes (2, 4, 6) use another host interface, its output not yet
 ; measured (specs/questions.md 18). This program keeps the AAC ring meanwhile.
 ; Contract (OURS, on x17's host model, src/host.zig; the ring and status are specs/aac.md's
 ; output contract):
-;   Y:0x3FFF   packet length in bytes (host Q2 stub), even: whole 16-bit samples
-;   Y:0x4000   packet bytes, two per word, big-endian pairs (host Q2 stub)
+;   Y:0x3FFF   packet length in bytes, OURS (a stub the test writes), even: whole samples
 ;   Y:0xFD81   sample byte order, OURS: 0 big-endian (AIFF), 1 little-endian (WAV)
 ;   PCM_OSL    the ring slot this packet fills, 0 at start, flipped per packet (DSP-only Y)
 ; Samples stay interleaved as the file has them, at most RING_SLOT a packet; the slot's length

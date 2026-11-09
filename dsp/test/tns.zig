@@ -38,7 +38,7 @@ test "tns_channel filters every window as the twin's apply" {
         \\.include "lib/bits.sm"
         \\.include "lib/mem.sm"
         \\.include "lib/tns.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init()
         \\        tns_channel()
         \\        x17.halt
         \\

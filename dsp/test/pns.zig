@@ -24,7 +24,7 @@ test "pns_channel fills noise bands as the twin does, both modes" {
         \\.include "lib/bits.sm"
         \\.include "lib/mem.sm"
         \\.include "lib/pns.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init()
         \\        pns_channel()
         \\        x17.halt
         \\

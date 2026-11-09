@@ -108,7 +108,7 @@ test "aac_sections and aac_scalefactors decode as the twin does" {
             \\.include "lib/bits.sm"
             \\.include "lib/huffman.sm"
             \\.include "lib/sections.sm"
-            \\        bits_init(0x4000)
+            \\        bits_init()
             \\        ldi s1, #{d}
             \\        ldi s2, #{d}
             \\        aac_sections({d}, {d}, fail1)
@@ -131,7 +131,7 @@ test "aac_sections and aac_scalefactors decode as the twin does" {
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        try h.stagePacket(gpa, &state, 0x4000, &w.buf);
+        try h.stagePacket(gpa, &state, &w.buf);
         for (H.scalefactor.words, 0..) |x, i| try state.y_mem.put(gpa, 0x1000 + @as(u32, @intCast(i)), x);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
         try testing.expect(state.halted);

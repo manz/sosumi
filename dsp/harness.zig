@@ -60,9 +60,9 @@ pub fn assembleSites(gpa: std.mem.Allocator, src: []const u8, sites: ?*std.Array
     };
 }
 
-/// A packet staged in Y from `base` as 16-bit big-endian byte pairs (x17's host model).
-pub fn stagePacket(gpa: std.mem.Allocator, state: *emu.State, base: u32, data: []const u8) !void {
-    for (0..data.len / 2) |i| try state.y_mem.put(gpa, base + @as(u32, @intCast(i)), @as(u32, data[2 * i]) << 8 | data[2 * i + 1]);
+/// A packet armed on the input stream (fact 783), after any bytes still unread.
+pub fn stagePacket(gpa: std.mem.Allocator, state: *emu.State, data: []const u8) !void {
+    try state.queueStream(gpa, data);
 }
 
 const Word = @import("ref").dsp.ops.Word;

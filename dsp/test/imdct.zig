@@ -12,7 +12,7 @@ const testing = std.testing;
 
 fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
     const gpa = testing.allocator;
-    const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init(0x4000)\n        {s}\n        x17.halt\n", .{call});
+    const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init()\n        {s}\n        x17.halt\n", .{call});
     defer gpa.free(src);
     const prog = try h.assemble(gpa, src);
     defer gpa.free(prog);
@@ -66,7 +66,7 @@ fn twgen(comptime n2: usize) !void {
     const gpa = testing.allocator;
     const T = I.Tables(n2);
     const l = T.n4 / 4;
-    const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init(0x4000)\n        im_twgen(0x0400, 0x1400, {d})\n        x17.halt\n", .{l});
+    const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init()\n        im_twgen(0x0400, 0x1400, {d})\n        x17.halt\n", .{l});
     defer gpa.free(src);
     const prog = try h.assemble(gpa, src);
     defer gpa.free(prog);

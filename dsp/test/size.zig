@@ -20,7 +20,7 @@ test "aac_packet fits program memory" {
         \\.include "lib/window.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
-        \\        bits_init(AU)
+        \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
         \\

@@ -4,8 +4,11 @@
     .version = "0.0.0",
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        // the sm1 assembler and emulator; a path until x17 has a public URL
-        .x17 = .{ .path = "../x17" },
+        // the sm1 assembler and emulator, x17 master: the stream read (facts 783, 784)
+        .x17 = .{
+            .url = "git+https://github.com/manz/x17#74b1b9940d81492ab73d7a99765961a520c655d0",
+            .hash = "x17-0.0.0-vrV6NCaTEwAQZ4crzr_Yw0ZY7M4Q2it049utHeSR5OXi",
+        },
     },
     .paths = .{
         "build.zig",

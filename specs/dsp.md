@@ -55,8 +55,9 @@ State (`ref/dsp/`):
   multiplier returns slices, not a wide result: floor(ab / 2^24) or round(ab / 2^23), plus
   (2ab)[15:0]. No persistent accumulator, carry flag, data AND/OR or leading-zero count is
   measured. `mulWide` gets an exact 16 x 24 product from two multiplies (hi * 2^15 + lo).
-- `bits.zig`: the bit reader. The packet is 16-bit words (x17's host staging; the engine
-  path is OPEN); fields of up to 8 bits come from a 23-bit window, AND-free.
+- `bits.zig`: the bit reader. On sm1 the packet arrives through the input stream (facts 783,
+  784), a byte at a time into a cache, never past the bits the decoder needs; fields of up
+  to 15 bits come from a 23-bit window, AND-free.
 - `alac/`: the whole ALAC decoder, done.
   - `predictor.zig`: lo and hi parts sum in separate words; only the low `chan_bits` bits of
     the prediction reach the output, exact while den_shift + chan_bits <= 32.

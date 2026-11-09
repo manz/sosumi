@@ -49,16 +49,12 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
         p += 4 + len;
         const pcm = dump[p .. p + 4 * 1024 * nch];
         p += 4 * 1024 * nch;
-        // 16-bit words, the first byte high; an odd last byte gets a zero low half
-        for (0..(len + 1) / 2) |i| {
-            const hi: u32 = au[2 * i];
-            const lo: u32 = if (2 * i + 1 < len) au[2 * i + 1] else 0;
-            try state.y_mem.put(gpa, map.at("AU") + @as(u32, @intCast(i)), hi << 8 | lo);
-        }
+        try state.queueStream(gpa, au); // the host arms the access unit (fact 783)
         state.cur_lane = 0;
         const k = state.getY(map.at("AK_OSL")) orelse 0;
         try state.y_mem.put(gpa, map.at("HOST_ST"), 0x8000);
         _ = try h.emu.runFrom(gpa, state, prog, start, 1 << 30);
+        try testing.expect(!state.stream_starved); // never past its own access unit (784)
         try testing.expect(state.halted);
         try testing.expectEqual(@as(?u32, 0), state.getY(map.at("AK_ST")));
         for (0..1024 * nch) |i| {
@@ -78,7 +74,6 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
     while (xi.next()) |k| try testing.expect(k.* < 0x1C00);
     var yi = state.y_mem.keyIterator();
     while (yi.next()) |k| {
-        if (k.* >= map.at("AU") and k.* < map.at("AU") + 768) continue; // emulator-only staging
         if (k.* >= map.at("HOST_P0") and k.* <= map.at("HOST_ST") + 1) continue; // the host's block
         try testing.expect(k.* < 0x2F00);
     }

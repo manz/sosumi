@@ -39,7 +39,7 @@ test "dq_channel dequantises as the twin does: words and exponent" {
         \\.include "lib/huffman.sm"
         \\.include "lib/sections.sm"
         \\.include "lib/dequant.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init()
         \\        dq_channel()
         \\        x17.halt
         \\

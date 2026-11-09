@@ -19,7 +19,7 @@ test "getbits reads what ref/dsp's Reader reads, across refills" {
 
         var src: std.ArrayList(u8) = .empty;
         defer src.deinit(gpa);
-        try src.appendSlice(gpa, ".include \"lib/bits.sm\"\n        bits_init(0x4000)\n");
+        try src.appendSlice(gpa, ".include \"lib/bits.sm\"\n        bits_init()\n");
         for (widths[0..skip]) |w| try src.print(gpa, "        getbits(s8, {d})\n", .{w});
         for (dsts, widths[skip .. skip + dsts.len]) |d, w| try src.print(gpa, "        getbits(s{d}, {d})\n", .{ d, w });
         try src.appendSlice(gpa, "        x17.halt\n");
@@ -28,7 +28,7 @@ test "getbits reads what ref/dsp's Reader reads, across refills" {
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        try h.stagePacket(gpa, &state, 0x4000, &data);
+        try h.stagePacket(gpa, &state, &data);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 16);
         try testing.expect(state.halted);
 
@@ -52,13 +52,13 @@ test "readn reads up to 24 bits as the Reader does" {
         const n = rnd.intRangeAtMost(u5, 0, 23);
         var src: std.ArrayList(u8) = .empty;
         defer src.deinit(gpa);
-        try src.print(gpa, ".include \"lib/bits.sm\"\n        bits_init(0x4000)\n        getbits(s8, {d})\n        ldi s7, #{d}\n        readn(s1)\n        x17.halt\n", .{ lead, n });
+        try src.print(gpa, ".include \"lib/bits.sm\"\n        bits_init()\n        getbits(s8, {d})\n        ldi s7, #{d}\n        readn(s1)\n        x17.halt\n", .{ lead, n });
         const prog = try h.assemble(gpa, src.items);
         defer gpa.free(prog);
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        try h.stagePacket(gpa, &state, 0x4000, &data);
+        try h.stagePacket(gpa, &state, &data);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 16);
         try testing.expect(state.halted);
 

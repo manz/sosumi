@@ -3,8 +3,8 @@
 ; One AAC-LC access unit (a raw_data_block): the twin of `Decoder.decode` in
 ; ref/dsp/aac/decoder.zig, its syntax from ref/aac/raw.zig and ref/aac/ics.zig. Needs
 ; lib/bits.sm, lib/mem.sm, lib/huffman.sm, lib/sections.sm, lib/dequant.sm, lib/stereo.sm,
-; lib/pns.sm, lib/tns.sm, lib/imdct.sm, lib/window.sm and lib/ring.sm first; bits_init must point the
-; reader at the access unit (16-bit words, the first byte high).
+; lib/pns.sm, lib/tns.sm, lib/imdct.sm, lib/window.sm and lib/ring.sm first; bits_init starts
+; the reader on the access unit the host armed on the input stream.
 ;
 ; Elements: SCE and LFE (one channel), CPE (two), FIL and DSE skipped, until END. CCE and PCE
 ; stop with status 1. Per channel: parse into the record at CUR, pulses, dequantise, then for a
@@ -33,11 +33,10 @@
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
 ; Scratch: X 0x0000 .. 0x0BFF (WORK, ST_L), XSAVE; Y CUR, STL, STR, FIN, the AK_
-; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
+; slots and every stage's block. The reader's s9, s10 are saved around the stages.
 
 .const HUFF0    = 0x1080        ; scale factor code
 .const HUFF_END = 0x1D40        ; past the Huffman codes
-.const AU       = 0x4000        ; the access unit: emulator-only staging until the stream read (fact 783)
 .const AK       = 0x2D74
 .const AK_NCH   = AK + 0
 .const AK_ST    = AK + 1
@@ -47,7 +46,6 @@
 .const AK_CW    = AK + 5
 .const AK_MSP   = AK + 6
 .const AK_FSL   = AK + 7        ; the slot being finished
-.const AK_RE5   = AK + 8
 .const AK_RAV   = AK + 9
 .const AK_NSWBL = AK + 10
 .const AK_NSWBS = AK + 11
@@ -251,8 +249,6 @@ done:   alu s4, s5, s0, #OP_ADD
 
 ; The bit reader out of the way of the stages, and back.
 .macro ak_rsave() {
-        x03.esrc s3, e5
-        yst(AK_RE5)
         alu s3, s10, s0, #OP_ADD
         yst(AK_RAV)
         aimm_e(6, XSAVE)
@@ -260,9 +256,6 @@ done:   alu s4, s5, s0, #OP_ADD
 }
 
 .macro ak_rload() {
-        yld(s13, AK_RE5)
-        alu s13, s13, s14, #OP_SUB
-        x17.mve e5, s13
         yld(s10, AK_RAV)
         aimm_e(6, XSAVE)
         x19.xrd s9, #12

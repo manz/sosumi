@@ -1,6 +1,6 @@
-//! ALAC packets through x17's host model and dsp/lib/alac.sm: the host stages each packet at
-//! Y:PKT (emulator only until the stream read), writes the configure words, runs alac_packet
-//! to its stop and drains the ring's one stereo slot (specs/alac.md).
+//! ALAC packets through x17's host model and dsp/lib/alac.sm: the host arms each packet on the
+//! input stream, writes the configure words, runs alac_packet to its stop and drains the
+//! ring's one stereo slot (specs/alac.md).
 const std = @import("std");
 const ref = @import("ref");
 const host = @import("host");
@@ -9,12 +9,11 @@ const h = @import("harness.zig");
 pub const emu = h.emu;
 pub const aac = @import("aac_player.zig");
 
-const packet_base = 0x4000; // alac.sm PKT, emulator-only staging
 const pk = 0x2E00;
 const pk_n = pk + 6;
 const pk_status = pk + 7;
 
-pub const Error = error{ Unsupported, Status, MonoCopy } || host.Error || std.mem.Allocator.Error;
+pub const Error = error{ Unsupported, Status, Starved, MonoCopy } || host.Error || std.mem.Allocator.Error;
 
 pub const Site = h.Site;
 
@@ -33,7 +32,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(Site)) ![]u32
         \\.include "lib/mem.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/alac.sm"
-        \\        bits_init(PKT)
+        \\        bits_init()
         \\        alac_packet()
         \\        x17.halt
         \\
@@ -73,7 +72,6 @@ pub const Player = struct {
         var p: Player = .{
             .host = try host.Host.init(gpa, .{
                 .rate_hz = cfg.sample_rate,
-                .packet = .{ .base = packet_base, .len_at = packet_base - 1 },
                 .params = params,
                 .max_bundles = 1 << 30,
             }),
@@ -98,6 +96,7 @@ pub const Player = struct {
         self.host.pcm.clearRetainingCapacity();
         const r = try self.host.feed(self.prog, packet);
         self.bundles = r.bundles;
+        if (r.waiting) return error.Starved; // it read past its packet (784)
         self.status = self.host.state.y_mem.get(pk_status) orelse 0;
         if (self.status != 0) return error.Status;
         if (self.nch == 2) return self.host.pcm.items;

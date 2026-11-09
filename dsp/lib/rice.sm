@@ -42,7 +42,7 @@ done:
 pfx:    alu s12, s10, s14, #OP_SUB ; sh = avail - 1
         ptst p3, s0, #LT12, #PTST ; cache empty
 pfx2:   jmp #IF_NOT, #3, pbit
-        ldy s13, e5             ; (delay slot) next word
+        nop()                   ; (delay slot)
         nop()
         refill()
         alu s12, s10, s14, #OP_SUB

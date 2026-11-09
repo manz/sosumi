@@ -45,7 +45,7 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
         \\.include "lib/bits.sm"
         \\.include "lib/mem.sm"
         \\.include "lib/stereo.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init()
         \\        stereo_pair()
         \\        x17.halt
         \\

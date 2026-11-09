@@ -1,21 +1,23 @@
 ; Audited from x17 1160023 examples/lib/bits.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/bits.zig; ISO/IEC 14496-3 bit order (bslbf, MSB first). ISA: x17 docs/sm1/reference.md entries named below.
-; MSB-first bit reader over a packet staged in Y as 16-bit words (x17's host model).
+; MSB-first bit reader over the host's input stream (specs/aac.md input contract, facts 783,
+; 784): the packet's bytes arrive through x16.getb, one stream across packets, never realigned.
 ; The twin of ref/dsp/bits.zig, streaming instead of random access:
 ;
-;   e5   address of the next packet word
 ;   s9   cache: the `avail` unread bits, right-aligned (below 2^23)
 ;   s10  avail
 ;   s14  1, s15 16 (constants); unconditional jumps use mode 1 (`jmp #ALWAYS, #0`):
 ;        an x19alu sets p2 on silicon, so no predicate is assumed clear
 ;   s6, s11, s12, s13 scratch; s0 stays 0
 ;
-; refill(): cache = cache * 2^16 + the word in s13 (ldy sign-extends, reference.md `ldy`, own-ldysx, so a
-; negative word gets 2^16 back), e5 + 1, avail + 16. Uses s12 and p3.
+; refill(): one stream byte, cache = cache * 2^8 + the byte, avail + 8. The reader takes a byte
+; only when it needs one of its bits, so it never reads into the next packet (a read past the
+; armed bytes would wait for the next arm, 784); the bits left in the cache after a packet's
+; last element are its byte padding, dropped by the next bits_init. Uses s12, s13, A15.
 ;
-; getbits(dst, k), k in 0..8 (getbits_s takes k in s11; k = 0 reads 0): refill 16 bits when avail < k (avail <= 7 then, so the cache
-; stays below 2^23), then dst = floor(cache / 2^sh), sh = avail - k, by the alu head's
-; arithmetic shift (fact 774). Every form used is gated on silicon.
+; getbits(dst, k), k in 0..15 (getbits_s takes k in s11; k = 0 reads 0): refill a byte at a
+; time while avail < k (the cache stays below 2^23), then dst = floor(cache / 2^sh),
+; sh = avail - k, by the alu head's arithmetic shift (fact 774). Every form used is gated on silicon.
 
 .const OP_ADD  = 14
 .const OP_SUB  = 0x10
@@ -39,10 +41,23 @@
 .const IF_NOT = 2               ; jmp mode: taken when the predicate is clear
 .const ALWAYS = 1               ; jmp mode: always taken (reference.md `jmp`, own-jmp)
 
-.macro bits_init(base) {
-        ldi s13, #base - 1
-        x17.mve e5, s13         ; e5 = base
-        ldi s9, #0
+.const BITS_ON = 0x2EFE         ; DSP-only Y: the stream is enabled; 0 until the first packet
+
+; Each packet: an empty cache and the constants; the stream enabled once per stream (783: the
+; enable survives re-arms, a second one misbehaves). Uses s3, s12, e6, A13, p2, p3.
+.macro bits_init() {
+        lde e6, #BITS_ON
+        ldy s12, e6
+        ptst p3, s0, #EQ12, #PTST ; p3 = not yet enabled
+        jmp #IF_NOT, #3, on
+        nop()
+        nop()
+        ldi s12, #1
+        ldi s14, #4
+        ld0e.sen #0, #3         ; the enable: s12 = 1, s14 = 4 (783); A13 <- 0
+        ldi s3, #1
+        x17.sty e6, #3, #0      ; BITS_ON = 1
+on:     ldi s9, #0
         ldi s10, #0
         ldi s14, #1
         ldi s15, #16
@@ -55,18 +70,15 @@
 }
 
 .macro refill() {
-        alu s12, s0, s15, #OP_SUB ; -16
-        alu s9, s12, s9, #ASR   ; cache << 16 (alu asr, a negative count shifts left: fact 774)
-        alu s9, s9, s13, #OP_ADD ; + the word as ldy gave it
-        alu s12, s13, s0, #OP_ADD
-        ptst p3, s0, #LT12, #PTST ; ldy sign-extended it
-        jmp #IF_NOT, #3, done
-        x18.eagu e5, e5, #AGU_INC ; (delay slot) next word
-        alu s10, s10, s15, #OP_ADD ; (delay slot) avail += 16
-        alu s12, s0, s15, #OP_SUB
-        alu s12, s12, s14, #ASR ; 2^16
-        alu s9, s9, s12, #OP_ADD ; its 16 bits, unsigned
-done:
+        x16.getb #7, #7         ; A15 <- the next 8 stream bits (783)
+        nop()                   ; A15 readable after the read: unmeasured, one bundle given
+        x02.asrc s13, A15       ; A15 + 1 (own-x02asrc)
+        ldi s12, #-8
+        alu s9, s12, s9, #ASR   ; cache << 8 (alu asr, a negative count shifts left: fact 774)
+        alu s13, s13, s14, #OP_SUB ; the byte
+        alu s9, s9, s13, #OP_ADD
+        ldi s12, #8
+        alu s10, s10, s12, #OP_ADD ; avail += 8
 }
 
 .macro getbits(dst, k) {
@@ -77,13 +89,15 @@ done:
 ; dst = floor(c / 2^sh) by alu's asr (fact 774), then the cache keeps c - dst * 2^sh. dst is
 ; not s6, s9, s10 or s12.
 .macro getbits_s(dst) {
-        alu s12, s10, s11, #OP_SUB ; sh = avail - k
+need:   alu s12, s10, s11, #OP_SUB ; sh = avail - k
         ptst p3, s0, #LT12, #PTST ; p3 = avail < k
         jmp #IF_NOT, #3, have
-        ldy s13, e5             ; (delay slot) the next word, harmless if unused
-        nop()                   ; (delay slot)
-        refill()
-        alu s12, s10, s11, #OP_SUB ; sh, avail grown
+        nop()
+        nop()
+        refill()                ; a byte at a time: k may pass 8 (a Huffman leaf's f)
+        jmp #ALWAYS, #0, need
+        nop()
+        nop()
 have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
         alu s6, s0, s12, #OP_SUB ; -sh
         alu s6, s6, dst, #ASR   ; dst << sh

@@ -36,7 +36,7 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
     const seqs = [_]ref.aac.ics.WindowSequence{ .only_long, .long_start, .long_stop, .eight_short };
     var clipped: usize = 0;
     for (seqs) |seq| {
-        const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/window.sm\"\n        bits_init(0x4000)\n        {s}\n        x17.halt\n", .{call(seq)});
+        const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/window.sm\"\n        bits_init()\n        {s}\n        x17.halt\n", .{call(seq)});
         defer gpa.free(src);
         const prog = try h.assemble(gpa, src);
         defer gpa.free(prog);
