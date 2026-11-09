@@ -93,7 +93,6 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
         \\        nop()
         \\        nop()
         \\        mp3_granules()
-        \\        mp3_joint()
         \\keep:   mp3_keep()
         \\        x17.halt
         \\
@@ -150,10 +149,12 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
                 var want: [2]ref.dsp.mp3.requant.Coefs = undefined;
                 for (0..hd.channels()) |ch| want[ch] = ref.dsp.mp3.requant.requantise(p.side.gr[gr][ch], p.bandsOf(gr, ch), &p.sf[gr][ch], &p.is[gr][ch]);
                 if (hd.channels() == 2) ref.dsp.mp3.stereo.process(hd, p.side.gr[gr][0], p.side.gr[gr][1], &p.sf[gr][1], &want[0], &want[1]);
+                // the slots keep the frame's last granule
+                if (gr + 1 < hd.granules()) continue;
                 for (0..hd.channels()) |ch| {
                     const k: u32 = @intCast(2 * gr + ch);
                     for (0..576) |c| {
-                        const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * k + @as(u32, @intCast(c))) orelse 0xDEAD))));
+                        const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * @as(u32, @intCast(ch)) + @as(u32, @intCast(c))) orelse 0xDEAD))));
                         nz += @intFromBool(p.is[gr][ch][c] != 0);
                         big += @intFromBool(@abs(p.is[gr][ch][c]) > 15);
                         if (got != want[ch][c]) {

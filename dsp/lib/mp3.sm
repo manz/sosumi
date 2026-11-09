@@ -654,8 +654,8 @@ done:
 .const MP_SPOS = MP_Q + 57      ; 40 words: the right channel's positions, bit 8 illegal
 .const MP_SSH  = MP_Q + 97      ; MPEG-2: scalefac_compress & 1
 .const MP_SLP  = MP_Q + 98      ; list pointer
-.const MP_XST  = 0x1980         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
-.const MP_XDUM = 0x0000         ; X: the taps' unused loads walk from here
+.const MP_XST  = 0x1B70         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
+.const MP_XDUM = 0x0000         ; X: the taps' unused loads walk from here (any readable X)
 .const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
 .const MP_YEND = 0x2E80         ; the host writes Y below here
 
@@ -668,7 +668,7 @@ done:
 .const MP_TL   = 0x1D59         ; its linbits
 .const MP_N    = 0x1D5A         ; pairs left in the region
 .const MP_RG   = 0x1D5B         ; the region at hand
-.const MP_XS   = 0x0400         ; X: the spectrum of granule and channel k at MP_XS + 576 k
+.const MP_XS   = 0x0000         ; X: the granule's lines, channel ch at MP_XS + 576 ch
 
 .const MP_RLEN = 0x1D4E         ; reservoir bytes, 0..512 (0 at the stream's start)
 .const MP_OK   = 0x1D4F         ; 1: main_data_begin within the reservoir, the frame decodes
@@ -796,6 +796,24 @@ gc:     lde e7, #MP_CK
         mp3_put(MP_P, 1)
 next:   lde e7, #MP_CK
         ldy s1, e7
+        x18.and s12, s1, s14
+        ptst p3, s0, #EQ12, #PTST ; the granule's last channel slot
+        jmp #3, #3, inc
+        nop()
+        nop()
+        alu s1, s14, s1, #ASR   ; gr
+        lde e7, #MH_MP1
+        ldy s12, e7
+        alu s12, s1, s12, #OP_SUB
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; gr < granules
+        jmp #IF_NOT, #3, inc
+        nop()
+        nop()
+        mp3_put(MP_SGR, 1)
+        mp3_grdone()
+inc:    lde e7, #MP_CK
+        ldy s1, e7
         alu s1, s1, s14, #OP_ADD
         mp3_put(MP_CK, 1)
         ldi s12, #4
@@ -809,7 +827,7 @@ next:   lde e7, #MP_CK
 ; ---------------------------------------------------------------------------
 ; The spectrum (ref/mp3/spectrum.zig; ISO/IEC 11172-3 2.4.2.7, 2.4.3.4.6): big_values pairs in
 ; three regions by table_select, then count1 quadruples while bits of part2_3_length remain,
-; then zeros to 576, as integers to X:MP_XS + 576 k. Pair leaves hold x * 16 + y, quadruple
+; then zeros to 576, as integers to X:MP_XS + 576 ch. Pair leaves hold x * 16 + y, quadruple
 ; leaves vwxy (dsp/mp3/tables.zig). Tables 0, 4 and 14 read nothing and give zeros (ref fails
 ; on 4 and 14: no stream uses them). Needs lib/huffman.sm, lib/mem.sm.
 
@@ -876,13 +894,15 @@ done:
 ; The granule and channel in MP_CK, the reader after its scale factors, MP_LIM set.
 ; Uses s1..s8, s11..s13, e6, e7, A6, A14, R7 and the reader's registers.
 .macro mp3_spec() {
-        lde e7, #MP_CK
-        ldy s1, e7
+        lde e7, #MP_CCH
+        ldy s2, e7
         ldi s12, #576
-        x18.mpy s2, s0, s1, s12
+        x18.mpy s2, s0, s2, s12
         ldi s12, #MP_XS
         alu s2, s2, s12, #OP_ADD
         amov(A6, s2)
+        lde e7, #MP_CK
+        ldy s1, e7
         mp3_blist()
         ldi s12, #MP_GR
         x18.mpy s3, s0, s1, s12 ; the record's offset
@@ -1092,7 +1112,7 @@ done:
 
 ; ---------------------------------------------------------------------------
 ; Requantisation (twin: ref/dsp/mp3/requant.zig; ISO/IEC 11172-3 2.4.3.4.7): each line of
-; X:MP_XS + 576 k in place, q -> sign(q) |q|^(4/3) 2^(t / 4) as a Q21 word, t per band entry:
+; X:MP_XS + 576 ch in place, q -> sign(q) |q|^(4/3) 2^(t / 4) as a Q21 word, t per band entry:
 ; global_gain - 210 - 8 subblock_gain[window] - (sf + preflag pretab) << (1 + scalefac_scale).
 ; |q|^(4/3) = m 2^em 2^(rem / 3) by lib/dequant.sm's dq_mant, P = round(m G / 2^23) with G
 ; = X:DQ_G[4 rem + b], b = t mod 4, then one alu asrrs by -(em + floor(t / 4) + 23), clamped
@@ -1120,13 +1140,15 @@ done:
 ; The granule and channel in MP_CK, after mp3_spec. Uses every s register but s14, s15 (the
 ; reader's state is dropped: each granule seeks afresh), e6, e7, A8, A10 and amov's registers.
 .macro mp3_requant() {
-        lde e7, #MP_CK
-        ldy s1, e7
+        lde e7, #MP_CCH
+        ldy s2, e7
         ldi s12, #576
-        x18.mpy s2, s0, s1, s12
+        x18.mpy s2, s0, s2, s12
         ldi s12, #MP_XS
         alu s2, s2, s12, #OP_ADD
         amov(A10, s2)
+        lde e7, #MP_CK
+        ldy s1, e7
         ldi s12, #40
         x18.mpy s2, s0, s1, s12
         ldi s12, #MP_SF
@@ -1307,7 +1329,7 @@ done:
 
 ; ---------------------------------------------------------------------------
 ; Joint stereo (twin: ref/dsp/mp3/stereo.zig; ISO/IEC 11172-3 2.4.3.4.9, 13818-3 2.4.3.2) on
-; granule MP_SGR's two channels, X:MP_XS + 576 (2 gr) and + 576 (2 gr + 1). M/S: l, r =
+; granule MP_SGR's two channels, X:MP_XS and MP_XS + 576. M/S: l, r =
 ; rshr(2 (m c +- s c), 24), c = 1/sqrt 2 in Q23, two x03.tap sums (exact 48 bits, 790..794)
 ; read back as hi + [lo < 0]. Intensity: l, r = rshr(rshr(2 x k, 23), d), k Q22 from MP_XST.
 ; The taps' X loads are unused: they walk A11 from MP_XDUM.
@@ -1396,16 +1418,8 @@ il:     x19.xrd s1, #8          ; x
         nop()
         nop()
         aimm(A11, MP_XDUM)
-        lde e7, #MP_SGR
-        ldy s1, e7
-        ldi s12, #1152
-        x18.mpy s2, s0, s1, s12
-        ldi s12, #MP_XS
-        alu s2, s2, s12, #OP_ADD
-        amov(A8, s2)
-        ldi s12, #576
-        alu s2, s2, s12, #OP_ADD
-        amov(A9, s2)
+        aimm(A8, MP_XS)
+        aimm(A9, MP_XS + 576)
         lde e7, #MH_EXT
         ldy s1, e7
         x18.and s12, s1, s14
@@ -1435,13 +1449,7 @@ ist:    lde e7, #MP_SGR
         mp3_put(MP_SMB, 1)
         mp3_put(MP_SMB + 1, 1)
         mp3_put(MP_SMB + 2, 1)
-        lde e7, #MP_SGR
-        ldy s1, e7
-        ldi s12, #1152
-        x18.mpy s2, s0, s1, s12
-        ldi s12, #MP_XS + 576
-        alu s2, s2, s12, #OP_ADD
-        amov(A10, s2)
+        aimm(A10, MP_XS + 576)
         ldi s3, #0              ; e
         ldi s4, #0              ; e mod 3
         lde e7, #MP_SLP
@@ -1733,21 +1741,7 @@ wok:    mp3_put(MP_SW, 1)
 done:
 }
 
-; Joint stereo on each granule of the frame. Uses mp3_stereo's registers.
-.macro mp3_joint() {
-        ldi s1, #0
-        mp3_put(MP_SGR, 1)
-jg:     mp3_stereo()
-        lde e7, #MP_SGR
-        ldy s1, e7
-        alu s1, s1, s14, #OP_ADD
-        mp3_put(MP_SGR, 1)
-        lde e7, #MH_MP1
-        ldy s12, e7
-        alu s12, s1, s12, #OP_SUB
-        alu s12, s12, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; gr < granules
-        jmp #3, #3, jg
-        nop()
-        nop()
+; A granule's channels are in: joint stereo, then each channel on through the filterbanks.
+.macro mp3_grdone() {
+        mp3_stereo()
 }
