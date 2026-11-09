@@ -646,6 +646,16 @@ done:
 .const MP_QSF  = MP_Q + 8       ; the entry's scale factor address
 .const MP_QREC = MP_Q + 9       ; the granule record's offset
 .const MP_QZ   = MP_Q + 10      ; 40 zeros: no pretab
+.const MP_SMB  = MP_Q + 50      ; stereo: max_band[3] (-1: none)
+.const MP_SN   = MP_Q + 53      ; entries in the list
+.const MP_SGR  = MP_Q + 54      ; the granule at hand
+.const MP_SE   = MP_Q + 55      ; entry index
+.const MP_SW   = MP_Q + 56      ; entry index mod 3
+.const MP_SPOS = MP_Q + 57      ; 40 words: the right channel's positions, bit 8 illegal
+.const MP_SSH  = MP_Q + 97      ; MPEG-2: scalefac_compress & 1
+.const MP_SLP  = MP_Q + 98      ; list pointer
+.const MP_XST  = 0x1980         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
+.const MP_XDUM = 0x0000         ; X: the taps' unused loads walk from here
 .const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
 .const MP_YEND = 0x2E80         ; the host writes Y below here
 
@@ -803,6 +813,33 @@ next:   lde e7, #MP_CK
 ; leaves vwxy (dsp/mp3/tables.zig). Tables 0, 4 and 14 read nothing and give zeros (ref fails
 ; on 4 and 14: no stream uses them). Needs lib/huffman.sm, lib/mem.sm.
 
+; s2 = the band list of granule and channel s1 (MP_BP[(version * 3 + sr) * 3 + kind]), s6 =
+; its kind: 0 long, 1 short, 2 mixed. Uses s3, s4, s5, s7, s8, s12, s13, e7.
+.macro mp3_blist() {
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s1, s12 ; the record's offset
+        yidx(s4, MP_GR0 + 5, s3) ; block_type
+        yidx(s5, MP_GR0 + 6, s3) ; mixed
+        ldi s6, #0
+        ldi s12, #2
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, kind
+        nop()
+        nop()
+        alu s6, s14, s5, #OP_ADD ; short: 1, mixed: 2
+kind:   lde e7, #MH_VER
+        ldy s7, e7
+        ldi s12, #3
+        x18.mpy s7, s0, s7, s12
+        lde e7, #MH_SR
+        ldy s8, e7
+        alu s7, s7, s8, #OP_ADD
+        x18.mpy s7, s0, s7, s12
+        alu s7, s7, s6, #OP_ADD
+        yidx(s2, MP_BP, s7)     ; the list's address
+}
+
 ; s<x> += linbits bits when x = 15 (with linbits 0 the read takes nothing). Uses s5, s11, s12.
 .macro mp3_lin(x) {
         ldi s12, #15
@@ -846,29 +883,9 @@ done:
         ldi s12, #MP_XS
         alu s2, s2, s12, #OP_ADD
         amov(A6, s2)
-        ; the band list: MP_BP[(version * 3 + sr) * 3 + kind], kind 1 short, 2 mixed
+        mp3_blist()
         ldi s12, #MP_GR
         x18.mpy s3, s0, s1, s12 ; the record's offset
-        yidx(s4, MP_GR0 + 5, s3) ; block_type
-        yidx(s5, MP_GR0 + 6, s3) ; mixed
-        ldi s6, #0
-        ldi s12, #2
-        alu s12, s4, s12, #OP_SUB
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, kind
-        nop()
-        nop()
-        alu s6, s14, s5, #OP_ADD ; short: 1, mixed: 2
-kind:   lde e7, #MH_VER
-        ldy s7, e7
-        ldi s12, #3
-        x18.mpy s7, s0, s7, s12
-        lde e7, #MH_SR
-        ldy s8, e7
-        alu s7, s7, s8, #OP_ADD
-        x18.mpy s7, s0, s7, s12
-        alu s7, s7, s6, #OP_ADD
-        yidx(s2, MP_BP, s7)     ; the list's address
         mp3_put(MP_QLST, 2)
         mp3_put(MP_QKIND, 6)
         ; region ends: the sum of widths through entry region0_count, and through
@@ -1286,4 +1303,451 @@ next:   x02.ainc #10, #10
         nop()
         nop()
 done:
+}
+
+; ---------------------------------------------------------------------------
+; Joint stereo (twin: ref/dsp/mp3/stereo.zig; ISO/IEC 11172-3 2.4.3.4.9, 13818-3 2.4.3.2) on
+; granule MP_SGR's two channels, X:MP_XS + 576 (2 gr) and + 576 (2 gr + 1). M/S: l, r =
+; rshr(2 (m c +- s c), 24), c = 1/sqrt 2 in Q23, two x03.tap sums (exact 48 bits, 790..794)
+; read back as hi + [lo < 0]. Intensity: l, r = rshr(rshr(2 x k, 23), d), k Q22 from MP_XST.
+; The taps' X loads are unused: they walk A11 from MP_XDUM.
+
+; acc {hi, lo} read back: dst = rshr(acc, 24) = hi + [lo < 0]. Uses s12, s13.
+.macro mp3_rd24(dst, hi, lo) {
+        ldi s12, #23
+        alu s13, s12, lo, #ASR  ; -1 when lo < 0
+        alu dst, hi, s13, #OP_SUB
+}
+
+; M/S on s9 line pairs at A8 (m -> l), A9 (s -> r). Uses s1..s13, A10, R7.
+.macro mp3_ms_lines() {
+        aimm_e(5, MP_XST + 18)
+        x19.xrd s4, #10         ; 1/sqrt 2, Q23 (A10)
+        alu s5, s0, s4, #OP_SUB
+ml:     x19.xrd s1, #8          ; m
+        x19.xrd s7, #9          ; s
+        alu s6, s1, s0, #OP_ADD
+        alu s8, s7, s0, #OP_ADD
+        x03.tap0 s1, #11, s4, s2, s3 ; 2 m c
+        x03.tap s7, #11, s4, s2, s3 ; + 2 s c
+        x03.tap0 s6, #11, s4, s10, s11 ; 2 m c
+        x03.tap s8, #11, s5, s10, s11 ; - 2 s c
+        mp3_rd24(s1, s2, s3)
+        mp3_rd24(s7, s10, s11)
+        stx A8, s1
+        stx A9, s7
+        x02.ainc #8, #8
+        x02.ainc #9, #9
+        alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ml
+        nop()
+        nop()
+}
+
+; Intensity on s9 line pairs: x at A8, l = gain(x, s4, s6), r = gain(x, s5, s7) to A8, A9.
+; gain(x, k, d) = rshr(rshr(2 x k, 23), d), d in 0..24. Uses s1..s3, s8, s10..s13.
+.macro mp3_is_lines() {
+il:     x19.xrd s1, #8          ; x
+        alu s8, s1, s0, #OP_ADD
+        x03.tap0 s1, #11, s4, s2, s3 ; 2 x kl
+        x03.tap0 s8, #11, s5, s10, s11 ; 2 x kr
+        ; rshr(acc, 23) = 2 (hi + [lo < 0]) + rshr(lo, 23)
+        mp3_rd24(s1, s2, s3)
+        alu s1, s1, s1, #OP_ADD
+        ldi s12, #23
+        alu s13, s12, s3, #ASRRS
+        alu s1, s1, s13, #OP_ADD
+        alu s1, s6, s1, #ASRRS  ; rshr by dl
+        mp3_rd24(s8, s10, s11)
+        alu s8, s8, s8, #OP_ADD
+        ldi s12, #23
+        alu s13, s12, s11, #ASRRS
+        alu s8, s8, s13, #OP_ADD
+        alu s8, s7, s8, #ASRRS  ; rshr by dr
+        stx A8, s1
+        stx A9, s8
+        x02.ainc #8, #8
+        x02.ainc #9, #9
+        alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, il
+        nop()
+        nop()
+}
+
+; The granule in MP_SGR. Uses every s register but s14, s15, e5, e7, A8..A11 and amov's.
+.macro mp3_stereo() {
+        lde e7, #MH_NCH
+        ldy s12, e7
+        ldi s13, #2
+        alu s12, s12, s13, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, done
+        nop()
+        nop()
+        lde e7, #MH_MODE
+        ldy s12, e7
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; joint stereo
+        jmp #IF_NOT, #3, done
+        nop()
+        nop()
+        aimm(A11, MP_XDUM)
+        lde e7, #MP_SGR
+        ldy s1, e7
+        ldi s12, #1152
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_XS
+        alu s2, s2, s12, #OP_ADD
+        amov(A8, s2)
+        ldi s12, #576
+        alu s2, s2, s12, #OP_ADD
+        amov(A9, s2)
+        lde e7, #MH_EXT
+        ldy s1, e7
+        x18.and s12, s1, s14
+        ptst p3, s0, #EQ12, #PTST ; no intensity
+        jmp #IF_NOT, #3, ist
+        nop()
+        nop()
+        ldi s12, #2
+        x18.and s12, s1, s12
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        ldi s9, #576
+        mp3_ms_lines()
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+        ; intensity: max_band[e mod 3], the last entry whose right lines are not all zero
+ist:    lde e7, #MP_SGR
+        ldy s1, e7
+        alu s1, s1, s1, #OP_ADD ; k = 2 gr
+        mp3_blist()
+        mp3_put(MP_SLP, 2)
+        mp3_put(MP_QKIND, 6)
+        ldi s1, #-1
+        mp3_put(MP_SMB, 1)
+        mp3_put(MP_SMB + 1, 1)
+        mp3_put(MP_SMB + 2, 1)
+        lde e7, #MP_SGR
+        ldy s1, e7
+        ldi s12, #1152
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_XS + 576
+        alu s2, s2, s12, #OP_ADD
+        amov(A10, s2)
+        ldi s3, #0              ; e
+        ldi s4, #0              ; e mod 3
+        lde e7, #MP_SLP
+        ldy s5, e7              ; list pointer
+scan:   alu s13, s5, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s9, e7              ; width
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, scand
+        nop()
+        nop()
+        ldi s6, #0              ; any non-zero
+sl:     x19.xrd s1, #10
+        x02.ainc #10, #10
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, sz
+        nop()
+        nop()
+        ldi s6, #1
+sz:     alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, sl
+        nop()
+        nop()
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, snext
+        nop()
+        nop()
+        ldi s13, #MP_SMB - 1
+        alu s13, s13, s4, #OP_ADD
+        x17.mve e7, s13
+        x17.sty e7, #3, #0      ; max_band[e mod 3] = e
+snext:  alu s3, s3, s14, #OP_ADD
+        alu s4, s4, s14, #OP_ADD
+        ldi s12, #3
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, s3ok
+        nop()
+        nop()
+        ldi s4, #0
+s3ok:   alu s5, s5, s14, #OP_ADD
+        jmp #ALWAYS, #0, scan
+        nop()
+        nop()
+scand:  mp3_put(MP_SN, 3)
+        ; a block with long entries (long, mixed) takes the largest of the three
+        lde e7, #MP_QKIND
+        ldy s6, e7
+        alu s12, s6, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; short
+        jmp #3, #3, mbok
+        nop()
+        nop()
+        lde e7, #MP_SMB
+        ldy s1, e7
+        lde e7, #MP_SMB + 1
+        ldy s2, e7
+        alu s12, s1, s2, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, m1
+        nop()
+        nop()
+        alu s1, s2, s0, #OP_ADD
+m1:     lde e7, #MP_SMB + 2
+        ldy s2, e7
+        alu s12, s1, s2, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, m2
+        nop()
+        nop()
+        alu s1, s2, s0, #OP_ADD
+m2:     mp3_put(MP_SMB, 1)
+        mp3_put(MP_SMB + 1, 1)
+        mp3_put(MP_SMB + 2, 1)
+        ; positions: the right channel's scale factors, the top entries per block extended
+mbok:   lde e7, #MP_SGR
+        ldy s1, e7
+        alu s1, s1, s1, #OP_ADD
+        alu s1, s1, s14, #OP_ADD ; k = 2 gr + 1
+        ldi s12, #40
+        x18.mpy s2, s0, s1, s12
+        ldi s13, #MP_SF - 1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e5, s13
+        lde e7, #MP_SPOS
+        ldi s9, #40
+pc:     ldy s3, e5
+        alu s13, s13, s14, #OP_ADD
+        x17.mve e5, s13
+        x17.styi e7, #3, #0, e7
+        alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, pc
+        nop()
+        nop()
+        ldi s12, #MP_GR
+        x18.mpy s2, s0, s1, s12
+        yidx(s3, MP_GR0 + 3, s2) ; the right granule's scalefac_compress
+        x18.and s3, s3, s14
+        mp3_put(MP_SSH, 3)
+        ; blocks = 3 with short entries (short, mixed), else 1
+        ldi s7, #1
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, blk
+        nop()
+        nop()
+        ldi s7, #3
+blk:    ldi s8, #0              ; i
+top:    lde e7, #MP_SN
+        ldy s2, e7
+        alu s2, s2, s7, #OP_SUB
+        alu s2, s2, s8, #OP_ADD ; top = n - blocks + i
+        alu s3, s2, s7, #OP_SUB ; prev = top - blocks
+        yidx(s4, MP_SMB, s8)
+        alu s12, s4, s3, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; max_band[i] < prev: copy prev
+        jmp #3, #3, cpy
+        nop()
+        nop()
+        lde e7, #MH_MP1
+        ldy s5, e7
+        alu s4, s5, s5, #OP_ADD
+        alu s5, s4, s5, #OP_ADD ; 3 MPEG-1, else 0; legal
+        jmp #ALWAYS, #0, tput
+        nop()
+        nop()
+cpy:    yidx(s5, MP_SPOS, s3)
+tput:   ldi s13, #MP_SPOS - 1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e7, s13
+        x17.sty e7, #5, #0
+        alu s8, s8, s14, #OP_ADD
+        alu s12, s8, s7, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, top
+        nop()
+        nop()
+        ; each entry: intensity above max_band[e mod 3] where legal, else M/S if on
+        ldi s1, #0
+        mp3_put(MP_SE, 1)
+        mp3_put(MP_SW, 1)
+ent:    lde e7, #MP_SLP
+        ldy s1, e7
+        alu s13, s1, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s9, e7              ; width
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_SLP, 1)
+        lde e7, #MP_SE
+        ldy s2, e7
+        lde e7, #MP_SW
+        ldy s3, e7
+        yidx(s4, MP_SMB, s3)
+        alu s12, s4, s2, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; e > max_band
+        jmp #IF_NOT, #3, nois
+        nop()
+        nop()
+        yidx(s1, MP_SPOS, s2)   ; p, bit 8 illegal
+        lde e7, #MH_MP1
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, m2pos
+        nop()
+        nop()
+        ldi s12, #7
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; p < 7
+        jmp #IF_NOT, #3, nois
+        nop()
+        nop()
+        ; MPEG-1: kl, kr = pan[p]
+        alu s2, s1, s1, #OP_ADD
+        ldi s12, #MP_XST
+        alu s2, s2, s12, #OP_ADD
+        amov_e(5, s2)           ; A10 (A8, A9 hold the lines)
+        x19.xrd s4, #10
+        x02.ainc #10, #10
+        x19.xrd s5, #10
+        ldi s6, #0
+        ldi s7, #0
+        jmp #ALWAYS, #0, isgo
+        nop()
+        nop()
+m2pos:  ldi s12, #0x100
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; legal
+        jmp #IF_NOT, #3, nois
+        nop()
+        nop()
+        ; MPEG-2: nq = ((p + 1) >> 1) << sh, k = quarter[nq & 3] down nq >> 2, on the side p
+        ; picks (odd: left), 1 on the other
+        alu s2, s1, s14, #OP_ADD
+        alu s2, s14, s2, #ASR
+        lde e7, #MP_SSH
+        ldy s3, e7
+        alu s3, s0, s3, #OP_SUB
+        alu s2, s3, s2, #ASR    ; nq
+        ldi s12, #3
+        x18.and s3, s2, s12
+        ldi s12, #2
+        alu s2, s12, s2, #ASR   ; nq >> 2
+        ldi s12, #24
+        alu s12, s12, s2, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, dok
+        nop()
+        nop()
+        ldi s2, #24
+dok:    ldi s12, #MP_XST + 14
+        alu s3, s3, s12, #OP_ADD
+        amov_e(5, s3)
+        x19.xrd s8, #10         ; quarter[nq & 3]
+        aimm_e(5, MP_XST + 14)
+        x19.xrd s10, #10        ; quarter[0] = 1
+        x18.and s12, s1, s14
+        ptst p3, s0, #EQ12, #PTST ; p even: right
+        jmp #3, #3, rside
+        nop()
+        nop()
+        alu s4, s8, s0, #OP_ADD
+        alu s6, s0, s2, #OP_SUB
+        alu s5, s10, s0, #OP_ADD
+        ldi s7, #0
+        jmp #ALWAYS, #0, isgo
+        nop()
+        nop()
+rside:  alu s4, s10, s0, #OP_ADD
+        ldi s6, #0
+        alu s5, s8, s0, #OP_ADD
+        alu s7, s0, s2, #OP_SUB
+isgo:   alu s6, s0, s6, #OP_SUB ; dl, dr (negated above)
+        alu s7, s0, s7, #OP_SUB
+        mp3_is_lines()
+        jmp #ALWAYS, #0, enext
+        nop()
+        nop()
+nois:   lde e7, #MH_EXT
+        ldy s1, e7
+        ldi s12, #2
+        x18.and s12, s1, s12
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, skip
+        nop()
+        nop()
+        mp3_ms_lines()
+        jmp #ALWAYS, #0, enext
+        nop()
+        nop()
+skip:   alu s1, s9, s0, #OP_ADD
+sk:     x02.ainc #8, #8
+        x02.ainc #9, #9
+        alu s1, s1, s14, #OP_SUB
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, sk
+        nop()
+        nop()
+enext:  lde e7, #MP_SE
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_SE, 1)
+        lde e7, #MP_SW
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        ldi s12, #3
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, wok
+        nop()
+        nop()
+        ldi s1, #0
+wok:    mp3_put(MP_SW, 1)
+        jmp #ALWAYS, #0, ent
+        nop()
+        nop()
+done:
+}
+
+; Joint stereo on each granule of the frame. Uses mp3_stereo's registers.
+.macro mp3_joint() {
+        ldi s1, #0
+        mp3_put(MP_SGR, 1)
+jg:     mp3_stereo()
+        lde e7, #MP_SGR
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_SGR, 1)
+        lde e7, #MH_MP1
+        ldy s12, e7
+        alu s12, s1, s12, #OP_SUB
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; gr < granules
+        jmp #3, #3, jg
+        nop()
+        nop()
 }

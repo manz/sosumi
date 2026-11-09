@@ -19,7 +19,7 @@ fn q(comptime x: f64, comptime f: u5) Word {
     return @intFromFloat(@round(x * @as(f64, @floatFromInt(@as(u32, 1) << f))));
 }
 
-const inv_sqrt2: Word = q(0.7071067811865476, 23);
+pub const inv_sqrt2: Word = q(0.7071067811865476, 23);
 
 /// MPEG-1 intensity, Q22: kl = tan(p pi/12) / (1 + tan), kr = 1 / (1 + tan), p = 0..6.
 pub const pan: [7][2]Word = blk: {

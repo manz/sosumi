@@ -93,6 +93,7 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
         \\        nop()
         \\        nop()
         \\        mp3_granules()
+        \\        mp3_joint()
         \\keep:   mp3_keep()
         \\        x17.halt
         \\
@@ -104,6 +105,7 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
     var pre: usize = 0;
     var nz: usize = 0;
     var worst: usize = 0;
+    var msf: usize = 0;
     var big: usize = 0;
     for (fixtures) |file| {
         const fr = try tables.frames(gpa, file);
@@ -140,22 +142,117 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
                         return error.TestExpectedEqual;
                     }
                 }
-                const want = ref.dsp.mp3.requant.requantise(p.side.gr[gr][ch], ref.mp3.bands.of(hd, p.side.gr[gr][ch]), &p.sf[gr][ch], &p.is[gr][ch]);
-                for (0..576) |c| {
-                    const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * k + @as(u32, @intCast(c))) orelse 0xDEAD))));
-                    nz += @intFromBool(p.is[gr][ch][c] != 0);
-                    big += @intFromBool(@abs(p.is[gr][ch][c]) > 15);
-                    if (got != want[c]) {
-                        std.debug.print("frame {d} k {d} coef {d}: q {d} want {d} got {d}\n", .{ decoded + skipped, k, c, p.is[gr][ch][c], want[c], got });
-                        return error.TestExpectedEqual;
-                    }
-                }
                 pre += @intFromBool(s.preflag);
                 try testing.expectEqual(@as(u32, @intFromBool(s.preflag)), y(&state, map.at("MP_PRE") + k));
             };
+            msf += @intFromBool(hd.msStereo());
+            for (0..hd.granules()) |gr| {
+                var want: [2]ref.dsp.mp3.requant.Coefs = undefined;
+                for (0..hd.channels()) |ch| want[ch] = ref.dsp.mp3.requant.requantise(p.side.gr[gr][ch], p.bandsOf(gr, ch), &p.sf[gr][ch], &p.is[gr][ch]);
+                if (hd.channels() == 2) ref.dsp.mp3.stereo.process(hd, p.side.gr[gr][0], p.side.gr[gr][1], &p.sf[gr][1], &want[0], &want[1]);
+                for (0..hd.channels()) |ch| {
+                    const k: u32 = @intCast(2 * gr + ch);
+                    for (0..576) |c| {
+                        const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * k + @as(u32, @intCast(c))) orelse 0xDEAD))));
+                        nz += @intFromBool(p.is[gr][ch][c] != 0);
+                        big += @intFromBool(@abs(p.is[gr][ch][c]) > 15);
+                        if (got != want[ch][c]) {
+                            std.debug.print("frame {d} k {d} coef {d}: q {d} want {d} got {d} mode {d} ext {d}\n", .{ decoded + skipped, k, c, p.is[gr][ch][c], want[ch][c], got, @intFromEnum(hd.mode), hd.mode_ext });
+                            return error.TestExpectedEqual;
+                        }
+                    }
+                }
+            }
             decoded += 1;
         }
     }
-    std.debug.print("mp3 sf: {d} frames decoded, {d} skipped, {d} illegal, {d} preflag; {d} non-zero lines, {d} past 15; {d} syllables, worst frame {d} bundles\n", .{ decoded, skipped, ill, pre, nz, big, prog.len, worst });
+    std.debug.print("mp3 sf: {d} frames decoded, {d} skipped, {d} illegal, {d} preflag; {d} non-zero lines, {d} past 15; {d} syllables, worst frame {d} bundles; {d} M/S frames\n", .{ decoded, skipped, ill, pre, nz, big, prog.len, worst, msf });
     try testing.expect(decoded > 500);
+}
+
+test "mp3_stereo's intensity matches ref/dsp/mp3/stereo.zig on random granules" {
+    // no fixture carries intensity stereo (LAME writes none): random side information and lines,
+    // below 2 in Q21 so M/S sums stay inside a word (past it the twin wraps, the taps do not)
+    const gpa = testing.allocator;
+    const prog = try h.assemble(gpa,
+        \\.include "lib/ybits.sm"
+        \\.include "lib/stream.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/huffman.sm"
+        \\.include "lib/sections.sm"
+        \\.include "lib/dequant.sm"
+        \\.include "lib/mp3.sm"
+        \\        ldi s14, #1
+        \\        ldi s15, #16
+        \\        mp3_stereo()
+        \\        x17.halt
+        \\
+    );
+    defer gpa.free(prog);
+    const S = ref.dsp.mp3.stereo;
+    const Coefs = ref.dsp.mp3.requant.Coefs;
+    var prng = std.Random.DefaultPrng.init(0x15);
+    const rnd = prng.random();
+    var cases: [6]usize = @splat(0); // mpeg1 long/short/mixed, mpeg2 long/short/mixed
+    for (0..300) |n| {
+        var state = h.emu.State{};
+        defer state.deinit(gpa);
+        try tables.put(&state, gpa, map.at);
+        const vbs = [_]u2{ 3, 2, 0 };
+        const vb = vbs[n % 3];
+        const ver: ref.mp3.header.Version = switch (vb) {
+            3 => .mpeg1,
+            2 => .mpeg2,
+            else => .mpeg25,
+        };
+        const hd: ref.mp3.header.Header = .{ .version = ver, .crc = false, .bitrate_index = 9, .sr_index = rnd.uintLessThan(u2, 3), .padding = false, .mode = .joint_stereo, .mode_ext = if (rnd.boolean()) 1 else 3 };
+        const kind = rnd.uintLessThan(u32, 3);
+        const g0: ref.mp3.sideinfo.Granule = .{ .window_switching = kind != 0, .block_type = if (kind != 0) 2 else 0, .mixed = kind == 2 };
+        const g1: ref.mp3.sideinfo.Granule = .{ .scalefac_compress = rnd.int(u9) };
+        var sf: ref.mp3.scalefactors.Scalefactors = .{};
+        for (0..40) |e| {
+            sf.sf[e] = if (vb == 3) rnd.uintLessThan(u8, 9) else rnd.uintLessThan(u8, 16);
+            sf.illegal[e] = vb != 3 and rnd.uintLessThan(u8, 5) == 0;
+        }
+        var l: Coefs = undefined;
+        var r: Coefs = undefined;
+        const b = ref.mp3.bands.of(hd, g0);
+        // right lines zero past a random entry per window
+        var cut: [3]usize = undefined;
+        for (&cut) |*c| c.* = rnd.uintLessThan(usize, b.len() + 1);
+        var k: usize = 0;
+        for (b.widths, 0..) |w, e| {
+            for (k..k + w) |i| {
+                l[i] = rnd.intRangeAtMost(i24, -(1 << 22) + 1, (1 << 22) - 1);
+                r[i] = if (e < cut[e % 3] and rnd.uintLessThan(u8, 4) != 0) rnd.intRangeAtMost(i24, -(1 << 22) + 1, (1 << 22) - 1) else 0;
+            }
+            k += w;
+        }
+        try h.putY(&state, gpa, map.at("MH_VER"), vb);
+        try h.putY(&state, gpa, map.at("MH_SR"), hd.sr_index);
+        try h.putY(&state, gpa, map.at("MH_MODE"), 1);
+        try h.putY(&state, gpa, map.at("MH_EXT"), hd.mode_ext);
+        try h.putY(&state, gpa, map.at("MH_NCH"), 2);
+        try h.putY(&state, gpa, map.at("MH_MP1"), @intFromBool(vb == 3));
+        try h.putY(&state, gpa, map.at("MP_SGR"), 0);
+        try h.putY(&state, gpa, map.at("MP_GR0") + 5, g0.block_type);
+        try h.putY(&state, gpa, map.at("MP_GR0") + 6, @intFromBool(g0.mixed));
+        try h.putY(&state, gpa, map.at("MP_GR0") + 18 + 3, g1.scalefac_compress);
+        for (0..40) |e| try h.putY(&state, gpa, map.at("MP_SF") + 40 + @as(u32, @intCast(e)), @as(i32, sf.sf[e]) + (if (sf.illegal[e]) @as(i32, 0x100) else 0));
+        try h.putAllX(&state, gpa, map.at("MP_XS"), &l);
+        try h.putAllX(&state, gpa, map.at("MP_XS") + 576, &r);
+        _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+        try testing.expect(state.halted);
+        S.process(hd, g0, g1, &sf, &l, &r);
+        for (0..1152) |i| {
+            const want = if (i < 576) l[i] else r[i - 576];
+            const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + @as(u32, @intCast(i))) orelse 0xDEAD))));
+            if (got != want) {
+                std.debug.print("case {d} ver {d} kind {d} ext {d} line {d}: want {d} got {d}\n", .{ n, vb, kind, hd.mode_ext, i, want, got });
+                return error.TestExpectedEqual;
+            }
+        }
+        cases[(if (vb == 3) @as(usize, 0) else 3) + kind] += 1;
+    }
+    std.debug.print("mp3 intensity: {any} cases\n", .{cases});
 }
