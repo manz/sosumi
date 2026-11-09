@@ -522,17 +522,7 @@ more:   yld(s4, AK_WN)
 ; spectral_data() for CUR into X DQ_SPEC, window-major (w * 128 + k); zero, noise and
 ; intensity bands stay 0. An escape past 8 ones jumps to FAIL.
 .macro ak_walk(FAIL) {
-        aimm_e(4, DQ_SPEC)
-        ldi s3, #1024
-        alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
-wz:     stx A8, s4
-        x02.ainc #8, #8
-        alu s3, s3, s14, #OP_SUB
-        alu s4, s3, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, wz
-        alu s4, s0, s0, #OP_ADD ; (delay slot) 0 again for the store
-        nop()
+        xzero(DQ_SPEC, 1024)
         ldi s3, #0
         yst(AK_WGI)
         yst(AK_WFW)

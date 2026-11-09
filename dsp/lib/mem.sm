@@ -90,3 +90,19 @@
 .macro pks(SN, SA, XD, XA, XB, OP) {
         x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #0, R0
 }
+
+; X[B .. B + COUNT) = 0, COUNT even and >= 4: x03.rep's counted loop storing s3 at A8 (x17
+; reference.md x03.rep, facts 263, 675) over the first half, a pks at A9 in its delay slot over
+; the second. Uses s3, s12, e11, p3, A8, A9.
+.macro xzero(B, COUNT) {
+        aimm_e(4, B)
+        aimm_o(4, B + COUNT / 2)
+        ldi s3, #0
+        ldi s12, #COUNT / 2 - 2
+        x17.mve e11, s12        ; e11 = COUNT / 2 - 1
+        alu s12, s0, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; p3 = 1
+        x03.rep p3
+        pks(3, A9, 0, s0, s0, 0) ; (delay slot)
+        nop()                   ; (delay slot)
+}
