@@ -75,6 +75,9 @@ fault; LAME writes it with empty main data.
 - The bit reservoir is the program's: main_data_begin reaches back into earlier frames'
   bytes, which the stream has already delivered, so the program keeps them in its own
   buffer (**INFERRED** from the input contract).
+- A seek sends the program nothing (**MEASURED**): the next frame is armed like any other, so
+  the reservoir and filterbank state carry across the discontinuity, and a frame whose
+  main_data_begin reaches before the seek must decode without fault.
 - Entry point, reservoir storage and synthesis history are ours to lay out.
 
 ## Decoding stages
