@@ -31,6 +31,8 @@
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
 .const HUFF0    = 0x4800        ; scale factor code
+.const HUFF_END = 0x5C00        ; past the Huffman codes
+.const AU       = 0x4000        ; the access unit, staged by the host
 .const AK       = 0x3C00
 .const AK_NCH   = AK + 0
 .const AK_ST    = AK + 1

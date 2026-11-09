@@ -3,6 +3,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 
 const St = ref.dsp.aac.stereo;
 const Block = ref.dsp.aac.dequant.Block;
@@ -12,7 +13,7 @@ const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
 const fi = 4;
-const Y = 0x2600;
+const Y = map.at("ST_Y");
 
 fn emptyChannel(info: ics.IcsInfo) ics.Channel {
     return .{ .global_gain = 100, .info = info, .sections = .{}, .scalefactors = @splat(@splat(0)), .pulse = null, .tns = null, .spectrum = @splat(0) };
@@ -111,7 +112,7 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
                 if (rb == ics.intensity_hcb2 and pair.ms.?.present == 1) seen_is_neg += 1;
             } else if (pair.ms.?.used[g][sfb] and pair.left.sections.sfb_cb[g][sfb] < ics.noise_hcb) seen_ms += 1;
         };
-        for (St.quarter, 0..) |t, b| try h.putX(&state, gpa, 0x1F00 + @as(u32, @intCast(b)), t);
+        for (St.quarter, 0..) |t, b| try h.putX(&state, gpa, map.at("ST_T") + @as(u32, @intCast(b)), t);
         for (l.w, r.w, 0..) |a, b, k| {
             try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), a);
             try h.putX(&state, gpa, 0x800 + @as(u32, @intCast(k)), b);

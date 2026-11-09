@@ -3,6 +3,8 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
+const rev_eslot = std.fmt.comptimePrint("{d}, {d})", .{ map.at("REVL"), map.at("ESLOT") });
 
 const I = ref.dsp.aac.imdct;
 const Word = ref.dsp.ops.Word;
@@ -41,8 +43,8 @@ fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
         var state = h.emu.State{};
         defer state.deinit(gpa);
         for (w, 0..) |v, k| try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
-        try h.stageImdct(&state, gpa, n2, 0x1000, 0x1400, 0x1A00, 0x2400);
-        try h.putY(&state, gpa, 0x2390, e);
+        try h.stageImdct(&state, gpa, n2, 0x1000, 0x1400, 0x1A00, map.at("REVL"));
+        try h.putY(&state, gpa, map.at("ESLOT"), e);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 26);
         try testing.expect(state.halted);
         for (want, 0..) |v, k| {
@@ -52,9 +54,9 @@ fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
 }
 
 test "imdct transforms a long block as the twin does" {
-    try runs(1024, "imdct(1024, 512, 10, 9, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, 0x2400, 0x2390)", 0x1DC7);
+    try runs(1024, "imdct(1024, 512, 10, 9, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, " ++ rev_eslot, 0x1DC7);
 }
 
 test "imdct transforms a short block as the twin does" {
-    try runs(128, "imdct_even(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, 0x2400, 0x2390)", 0x5B7);
+    try runs(128, "imdct_even(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, " ++ rev_eslot, 0x5B7);
 }

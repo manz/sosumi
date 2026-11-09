@@ -1,19 +1,20 @@
 //! AAC access units through dsp/lib/aac.sm in x17's emulator. The program still runs on the
-//! imported layout (X up to 0x5131, Y up to 0x65FF: docs/aac-mode0.md), so the tables are staged
+//! imported layout (docs/aac-mode0.md), so the tables are staged
 //! straight into the emulator's memory, not through the host model: the raw_data_block at
-//! Y:0x4000, AK_NCH and AK_ST at Y:0x3C00 and 0x3C01, the interleaved PCM at Y:0x3400.
+//! Y:AU, AK_NCH and AK_ST, the interleaved PCM at Y:OUTY (addresses from dsp/map.zig).
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("harness.zig");
+const map = @import("map.zig");
 
 const A = ref.dsp.aac;
 
 pub const Error = error{ Unsupported, Status, NotHalted } || h.emu.RunError || std.mem.Allocator.Error;
 
-const au_base = 0x4000;
-const ak_nch = 0x3C00;
-const ak_st = 0x3C01;
-const pcm_base = 0x3400;
+const au_base = map.at("AU");
+const ak_nch = map.at("AK_NCH");
+const ak_st = map.at("AK_ST");
+const pcm_base = map.at("OUTY");
 pub const frame_len = 1024;
 
 /// aac_packet, assembled from the audited libs (caller frees).
@@ -35,7 +36,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
         \\.include "lib/imdct.sm"
         \\.include "lib/window.sm"
         \\.include "lib/aac.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init(AU)
         \\        aac_packet()
         \\        x17.halt
         \\
@@ -50,47 +51,47 @@ pub fn supported(asc: ref.aac.asc.Asc) bool {
 /// Every table aac.sm reads, filled once by the host, for sampling frequency index `fi`.
 pub fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, fi: u4) !void {
     // Huffman codes in Y from HUFF0, the scale factor code first; AK_BOOKS + b points at book b
-    var addr: u32 = 0x4800;
+    var addr: u32 = map.at("HUFF0");
     for (0..12) |b| {
         const t = if (b == 0) A.huffman.scalefactor else A.huffman.spectral[b - 1];
         for (t.words, 0..) |w, i| try st.y_mem.put(gpa, addr + @as(u32, @intCast(i)), w);
-        if (b > 0) try h.putY(st, gpa, 0x3C40 + @as(u32, @intCast(b)), @intCast(addr));
+        if (b > 0) try h.putY(st, gpa, map.at("AK_BOOKS") + @as(u32, @intCast(b)), @intCast(addr));
         addr += @intCast(t.words.len);
     }
-    std.debug.assert(addr <= 0x5C00); // CUR
+    std.debug.assert(addr <= map.at("HUFF_END"));
     // dequantiser
     for (A.dequant.direct_m, A.dequant.direct_e, 0..) |m, e, k| {
-        try h.putX(st, gpa, 0x1800 + 2 * @as(u32, @intCast(k)), m);
-        try h.putX(st, gpa, 0x1801 + 2 * @as(u32, @intCast(k)), e);
+        try h.putX(st, gpa, map.at("DQ_D") + 2 * @as(u32, @intCast(k)), m);
+        try h.putX(st, gpa, map.at("DQ_D") + 1 + 2 * @as(u32, @intCast(k)), e);
     }
-    try h.putAllX(st, gpa, 0x1910, &A.dequant.interp);
-    try h.putAllX(st, gpa, 0x1960, &A.dequant.gain);
+    try h.putAllX(st, gpa, map.at("DQ_IT"), &A.dequant.interp);
+    try h.putAllX(st, gpa, map.at("DQ_G"), &A.dequant.gain);
     for (A.dequant.interp_e, A.dequant.interp_rem, 0..) |e, r, j| {
-        try h.putY(st, gpa, 0x2140 + @as(u32, @intCast(j)), e);
-        try h.putY(st, gpa, 0x2148 + @as(u32, @intCast(j)), 4 * r);
+        try h.putY(st, gpa, map.at("DQ_IE") + @as(u32, @intCast(j)), e);
+        try h.putY(st, gpa, map.at("DQ_IR") + @as(u32, @intCast(j)), 4 * r);
     }
-    try h.stageImdct(st, gpa, 1024, 0x1000, 0x1400, 0x3000, 0x2400);
-    try h.stageImdct(st, gpa, 128, 0x1A00, 0x1A80, 0x1B00, 0x2D00);
+    try h.stageImdct(st, gpa, 1024, map.at("PREL"), map.at("POSTL"), map.at("TWL"), map.at("REVL"));
+    try h.stageImdct(st, gpa, 128, map.at("PRES"), map.at("POSTS"), map.at("TWS"), map.at("REVS"));
     for (0..2) |s| {
-        try h.putAllX(st, gpa, 0x4800 + 0x400 * @as(u32, @intCast(s)), &A.window.long[s]);
-        try h.putAllX(st, gpa, 0x5000 + 0x80 * @as(u32, @intCast(s)), &A.window.short[s]);
+        try h.putAllX(st, gpa, map.at("WLONG") + 0x400 * @as(u32, @intCast(s)), &A.window.long[s]);
+        try h.putAllX(st, gpa, map.at("WSHORT") + 0x80 * @as(u32, @intCast(s)), &A.window.short[s]);
     }
-    try h.putAllX(st, gpa, 0x5100, &A.stereo.quarter);
-    try h.putAllX(st, gpa, 0x5104, &A.pns.quarter);
-    try h.putAllX(st, gpa, 0x5108, &A.pns.seed);
-    try h.putAllX(st, gpa, 0x5110, A.tns.refl[0][0..8]);
-    try h.putAllX(st, gpa, 0x5118, &A.tns.refl[1]);
+    try h.putAllX(st, gpa, map.at("XSTT"), &A.stereo.quarter);
+    try h.putAllX(st, gpa, map.at("XPNT"), &A.pns.quarter);
+    try h.putAllX(st, gpa, map.at("XSEED"), &A.pns.seed);
+    try h.putAllX(st, gpa, map.at("XTNK"), A.tns.refl[0][0..8]);
+    try h.putAllX(st, gpa, map.at("XTNK") + 8, &A.tns.refl[1]);
     // swb_offset (64 words each, the last value repeated), band counts, TNS_MAX_BANDS
     const long = ref.aac.swb.long[fi];
     const short = ref.aac.swb.short[fi];
     for (0..64) |k| {
-        try h.putY(st, gpa, 0x3D00 + @as(u32, @intCast(k)), long[@min(k, long.len - 1)]);
-        try h.putY(st, gpa, 0x3D40 + @as(u32, @intCast(k)), short[@min(k, short.len - 1)]);
+        try h.putY(st, gpa, map.at("SWB_L") + @as(u32, @intCast(k)), long[@min(k, long.len - 1)]);
+        try h.putY(st, gpa, map.at("SWB_S") + @as(u32, @intCast(k)), short[@min(k, short.len - 1)]);
     }
-    try h.putY(st, gpa, 0x3C0A, @intCast(long.len - 1));
-    try h.putY(st, gpa, 0x3C0B, @intCast(short.len - 1));
-    try h.putY(st, gpa, 0x3C0C, ref.aac.tns.max_bands_long[fi]);
-    try h.putY(st, gpa, 0x3C0D, ref.aac.tns.max_bands_short[fi]);
+    try h.putY(st, gpa, map.at("AK_NSWBL"), @intCast(long.len - 1));
+    try h.putY(st, gpa, map.at("AK_NSWBS"), @intCast(short.len - 1));
+    try h.putY(st, gpa, map.at("AK_TOPL"), ref.aac.tns.max_bands_long[fi]);
+    try h.putY(st, gpa, map.at("AK_TOPS"), ref.aac.tns.max_bands_short[fi]);
 }
 
 pub const Player = struct {

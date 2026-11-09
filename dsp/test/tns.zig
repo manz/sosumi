@@ -3,6 +3,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 
 const T = ref.dsp.aac.tns;
 const Block = ref.dsp.aac.dequant.Block;
@@ -12,7 +13,7 @@ const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
 const fi = 4;
-const Y = 0x2600;
+const Y = map.at("TN_Y");
 
 /// tns_data() as the library's TN_REC wants it: per window n_filt, then if n_filt > 0
 /// coef_res and per filter length, order, then if order > 0 direction and the order codes.
@@ -94,8 +95,8 @@ test "tns_channel filters every window as the twin's apply" {
         for (offsets, 0..) |o, k| try h.putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
         for (rec.items, 0..) |v, k| try h.putY(&state, gpa, Y + 0x60 + @as(u32, @intCast(k)), v);
         // coef_res 0 at TN_K + 4 + c, coef_res 1 at TN_K + 16 + c
-        for (T.refl[0][0..8], 0..) |v, k| try h.putX(&state, gpa, 0x1F00 + @as(u32, @intCast(k)), v);
-        for (T.refl[1], 0..) |v, k| try h.putX(&state, gpa, 0x1F08 + @as(u32, @intCast(k)), v);
+        for (T.refl[0][0..8], 0..) |v, k| try h.putX(&state, gpa, map.at("TN_K") + @as(u32, @intCast(k)), v);
+        for (T.refl[1], 0..) |v, k| try h.putX(&state, gpa, map.at("TN_K") + 8 + @as(u32, @intCast(k)), v);
         for (blk.w, 0..) |v, k| try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
 
         const st = T.apply(&t, info, fi, &blk);

@@ -4,6 +4,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 
 const W = ref.dsp.aac.window;
 const Word = ref.dsp.ops.Word;
@@ -16,7 +17,7 @@ const sp_at = 0x1000; // previous shape's short rising half
 const sc_at = 0x1080; // current shape's
 const b_at = 0x1100;
 const ovl_at = 0x1900;
-const pcm_at = 0x2400; // clear of WIN_OVL
+const pcm_at = map.at("OUTY");
 
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
     return switch (seq) {
@@ -68,9 +69,9 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
             try h.putAllX(&state, gpa, sp_at, &W.short[prev]);
             try h.putAllX(&state, gpa, sc_at, &W.short[cur]);
             try h.putAllX(&state, gpa, ovl_at, &st.overlap);
-            try h.putY(&state, gpa, 0x2388, ovl_at); // WIN_OVL
-            try h.putY(&state, gpa, 0x2389, @intCast(halves(seq)[0])); // WIN_R
-            try h.putY(&state, gpa, 0x238A, @intCast(halves(seq)[1])); // WIN_F
+            try h.putY(&state, gpa, map.at("WIN_OVL"), ovl_at);
+            try h.putY(&state, gpa, map.at("WIN_R"), @intCast(halves(seq)[0]));
+            try h.putY(&state, gpa, map.at("WIN_F"), @intCast(halves(seq)[1]));
             // B starts as garbage: every word must be written
             for (0..2048) |k| try h.putX(&state, gpa, b_at + @as(u32, @intCast(k)), 0x5A5A5A);
 

@@ -4,6 +4,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 
 const P = ref.dsp.aac.pns;
 const Block = ref.dsp.aac.dequant.Block;
@@ -11,7 +12,7 @@ const ics = ref.aac.ics;
 const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
-const Y = 0x2600;
+const Y = map.at("PN_Y");
 
 fn emptyChannel(info: ics.IcsInfo) ics.Channel {
     return .{ .global_gain = 100, .info = info, .sections = .{}, .scalefactors = @splat(@splat(0)), .pulse = null, .tns = null, .spectrum = @splat(0) };
@@ -114,9 +115,9 @@ test "pns_channel fills noise bands as the twin does, both modes" {
             try h.putY(&state, gpa, Y + 0x1E0 + i, pair.left.scalefactors[g][sfb]);
             try h.putY(&state, gpa, Y + 0x260 + i, @intFromBool(pair.ms.?.used[g][sfb]));
         };
-        for (P.quarter, 0..) |t, b| try h.putX(&state, gpa, 0x1F00 + @as(u32, @intCast(b)), t);
-        for (P.seed, 0..) |s, i| try h.putX(&state, gpa, 0x1F04 + @as(u32, @intCast(i)), s);
-        try h.putX(&state, gpa, 0x1F10, rng.x);
+        for (P.quarter, 0..) |t, b| try h.putX(&state, gpa, map.at("PN_T") + @as(u32, @intCast(b)), t);
+        for (P.seed, 0..) |s, i| try h.putX(&state, gpa, map.at("PN_SEED") + @as(u32, @intCast(i)), s);
+        try h.putX(&state, gpa, map.at("PN_RNG"), rng.x);
         for (blk.w, left.w, 0..) |a, b, k| {
             try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), a);
             try h.putX(&state, gpa, 0x800 + @as(u32, @intCast(k)), b);

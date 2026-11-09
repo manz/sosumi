@@ -4,6 +4,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 const aac = @import("../aac_player.zig");
 
 const A = ref.dsp.aac;
@@ -26,15 +27,15 @@ fn check(gpa: std.mem.Allocator, prog: []const u32, dump: []const u8) !void {
     var state = h.emu.State{};
     defer state.deinit(gpa);
     try aac.stageTables(&state, gpa, fi);
-    try h.putY(&state, gpa, 0x3C00, @intCast(nch));
+    try h.putY(&state, gpa, map.at("AK_NCH"), @intCast(nch));
     var p: usize = 20;
     for (0..nch) |c| {
-        try h.putY(&state, gpa, 0x3C0E + @as(u32, @intCast(c)), @intCast(le32(dump, p)));
+        try h.putY(&state, gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), @intCast(le32(dump, p)));
         p += 4;
-        for (0..1024) |k| try state.x_mem.put(gpa, @intCast(0x3C00 + 0x400 * c + k), le32(dump, p + 4 * k));
+        for (0..1024) |k| try state.x_mem.put(gpa, @intCast(map.at("OVL0") + 0x400 * c + k), le32(dump, p + 4 * k));
         p += 4096;
     }
-    try state.x_mem.put(gpa, 0x5130, le32(dump, p));
+    try state.x_mem.put(gpa, map.at("XRNG"), le32(dump, p));
     p += 4;
     for (0..count) |_| {
         const len = le32(dump, p);
@@ -46,14 +47,14 @@ fn check(gpa: std.mem.Allocator, prog: []const u32, dump: []const u8) !void {
         for (0..(len + 1) / 2) |i| {
             const hi: u32 = au[2 * i];
             const lo: u32 = if (2 * i + 1 < len) au[2 * i + 1] else 0;
-            try state.y_mem.put(gpa, 0x4000 + @as(u32, @intCast(i)), hi << 8 | lo);
+            try state.y_mem.put(gpa, map.at("AU") + @as(u32, @intCast(i)), hi << 8 | lo);
         }
         state.cur_lane = 0;
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 30);
         try testing.expect(state.halted);
-        try testing.expectEqual(@as(?u32, 0), state.getY(0x3C01));
+        try testing.expectEqual(@as(?u32, 0), state.getY(map.at("AK_ST")));
         for (0..1024 * nch) |i| {
-            try testing.expectEqual(le32(pcm, 4 * i) & 0xFFFF, state.getY(0x3400 + @as(u32, @intCast(i))) orelse 0xDEAD0000);
+            try testing.expectEqual(le32(pcm, 4 * i) & 0xFFFF, state.getY(map.at("OUTY") + @as(u32, @intCast(i))) orelse 0xDEAD0000);
         }
     }
     try testing.expectEqual(dump.len, p);

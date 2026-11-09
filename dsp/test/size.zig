@@ -19,7 +19,7 @@ test "aac_packet fits program memory" {
         \\.include "lib/imdct.sm"
         \\.include "lib/window.sm"
         \\.include "lib/aac.sm"
-        \\        bits_init(0x4000)
+        \\        bits_init(AU)
         \\        aac_packet()
         \\        x17.halt
         \\
