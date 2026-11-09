@@ -656,6 +656,22 @@ done:
 .const MP_SLP  = MP_Q + 98      ; list pointer
 .const MP_XST  = 0x1B70         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
 .const MP_XDUM = 0x0000         ; X: the taps' unused loads walk from here (any readable X)
+.const MP_HCH  = MP_Q + 100     ; hybrid: the channel
+.const MP_HSH  = MP_Q + 101     ; 1: short block
+.const MP_HNL  = MP_Q + 102     ; long subbands (32, 0, or 2 / 4 when mixed)
+.const MP_HWT  = MP_Q + 103     ; the long subbands' window: X address
+.const MP_HSB  = MP_Q + 104     ; subband
+.const MP_HLP  = MP_Q + 105     ; list pointer (reorder)
+.const MP_HSRC = MP_Q + 106     ; reorder: source line address
+.const MP_HW   = MP_Q + 107     ; short IMDCT: window 0..2
+.const MP_XOV  = 0x0480         ; X: overlap, [ch][sb][18]
+.const MP_XV   = 0x0900         ; X: synthesis history, [ch][1024]
+.const MP_XZ   = 0x1100         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
+                                ; reorder's band triple at +0 (<= 198)
+.const MP_XC36 = 0x11C8         ; X: IMDCT-36 rows (18 x 18, Q23)
+.const MP_XWIN = 0x130C         ; X: windows [normal, start, short, stop, unit][36], Q22
+.const MP_XC12 = 0x1B84         ; X: IMDCT-12 rows (6 x 6, Q23)
+.const MP_XAL  = 0x1BA8         ; X: alias butterflies [8][cs, ca, -ca], Q23
 .const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
 .const MP_YEND = 0x2E80         ; the host writes Y below here
 
@@ -1744,4 +1760,596 @@ done:
 ; A granule's channels are in: joint stereo, then each channel on through the filterbanks.
 .macro mp3_grdone() {
         mp3_stereo()
+        ldi s1, #0
+        mp3_put(MP_HCH, 1)
+gch:    mp3_hybrid()
+        lde e7, #MP_HCH
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_HCH, 1)
+        lde e7, #MH_NCH
+        ldy s12, e7
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, gch
+        nop()
+        nop()
+}
+
+; ---------------------------------------------------------------------------
+; The hybrid filterbank (twin: ref/dsp/mp3/hybrid.zig; ISO/IEC 11172-3 2.4.3.4.10..2.4.3.4.11,
+; Annex C): channel MP_HCH of granule MP_SGR, lines X:MP_XS + 576 ch in, subband samples
+; (sb * 18 + t) out in place, overlap X:MP_XOV + 576 ch. Every sum of products is one x03.tap
+; sum read back rounded once (mp3_rd24); the taps' own loads walk the operands, two bundles a
+; product (fact 795). x02.ainc writes s2 (its multiply slot): nothing lives in s2 across one.
+
+; dst = rshr(acc, 23) = 2 (hi + [lo < 0]) + rshr(lo, 23): a Q22 gain's product. Uses s12, s13.
+.macro mp3_rd23(dst, hi, lo) {
+        mp3_rd24(dst, hi, lo)
+        alu dst, dst, dst, #OP_ADD
+        ldi s12, #23
+        alu s13, s12, lo, #ASRRS
+        alu dst, dst, s13, #OP_ADD
+}
+
+; Short block lines from band-major, window-minor runs to subband order: each band triple of
+; width len at src, [w][i], becomes [i][w] (through X:MP_XZ). Uses s1..s9, s12, s13, e7,
+; A8, A9, A12 and amov's registers.
+.macro mp3_reorder() {
+        lde e7, #MP_SGR
+        ldy s1, e7
+        alu s1, s1, s1, #OP_ADD
+        lde e7, #MP_HCH
+        ldy s2, e7
+        alu s1, s1, s2, #OP_ADD ; k
+        mp3_blist()             ; s2 the list, s6 the kind
+        ; long entries first: none when short, 8 or 6 when mixed; their lines stay
+        ldi s3, #0              ; entries to skip
+        ldi s12, #2
+        alu s12, s6, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, skip0
+        nop()
+        nop()
+        lde e7, #MH_MP1
+        ldy s3, e7
+        alu s3, s3, s3, #OP_ADD
+        ldi s12, #6
+        alu s3, s3, s12, #OP_ADD
+skip0:  lde e7, #MP_HCH
+        ldy s4, e7
+        ldi s12, #576
+        x18.mpy s4, s0, s4, s12
+        ldi s12, #MP_XS
+        alu s4, s4, s12, #OP_ADD ; src
+sk0:    alu s12, s3, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, tri
+        nop()
+        nop()
+        alu s13, s2, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s5, e7
+        alu s4, s4, s5, #OP_ADD
+        alu s2, s2, s14, #OP_ADD
+        alu s3, s3, s14, #OP_SUB
+        jmp #ALWAYS, #0, sk0
+        nop()
+        nop()
+tri:    mp3_put(MP_HLP, 2)
+        mp3_put(MP_HSRC, 4)
+trl:    lde e7, #MP_HLP
+        ldy s2, e7
+        alu s13, s2, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s5, e7              ; len
+        alu s12, s5, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        ldi s12, #3
+        alu s2, s2, s12, #OP_ADD
+        mp3_put(MP_HLP, 2)
+        ; MP_XZ[3 i + w] = src[w len + i]: walk the source in order, the scratch by 3, wrapping
+        lde e7, #MP_HSRC
+        ldy s4, e7
+        amov(A8, s4)
+        ldi s6, #0              ; w
+rw:     ldi s7, #MP_XZ
+        alu s7, s7, s6, #OP_ADD
+        amov(A9, s7)
+        rimm R5, #3
+        alu s8, s5, s0, #OP_ADD ; i left
+ri:     x19.xrd s1, #8
+        x02.ainc #8, #8
+        stx A9, s1
+        x02.aa A9, A9, R5, #2, A0, A0
+        alu s8, s8, s14, #OP_SUB
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ri
+        nop()
+        nop()
+        alu s6, s6, s14, #OP_ADD
+        ldi s12, #3
+        alu s12, s6, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rw
+        nop()
+        nop()
+        ; back: 3 len words to src
+        amov(A8, s4)
+        aimm(A9, MP_XZ)
+        ldi s12, #3
+        x18.mpy s8, s0, s5, s12
+        alu s4, s4, s8, #OP_ADD
+        mp3_put(MP_HSRC, 4)
+rb:     x19.xrd s1, #9
+        x02.ainc #9, #9
+        stx A8, s1
+        x02.ainc #8, #8
+        alu s8, s8, s14, #OP_SUB
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rb
+        nop()
+        nop()
+        jmp #ALWAYS, #0, trl
+        nop()
+        nop()
+done:
+}
+
+; Alias reduction across the first s1 subband boundaries (twin `antialias`): lo = rshr(2 bu cs
+; - 2 bd ca, 24), hi = rshr(2 bd cs + 2 bu ca, 24). Lines at s2. Uses s1..s13, A8..A11, R5.
+.macro mp3_alias() {
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #LE12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        ldi s12, #17
+        alu s2, s2, s12, #OP_ADD ; the first boundary's lo
+        mp3_put(MP_HSB, 1)      ; boundaries left
+        mp3_put(MP_HSRC, 2)
+ab:     lde e7, #MP_HSRC
+        ldy s2, e7
+        amov(A8, s2)
+        alu s2, s2, s14, #OP_ADD
+        amov(A9, s2)
+        ldi s12, #17
+        alu s2, s2, s12, #OP_ADD
+        mp3_put(MP_HSRC, 2)
+        aimm(A10, MP_XAL)
+        ldi s9, #8
+bf:     x19.xrd s1, #8          ; bu
+        x19.xrd s5, #9          ; bd
+        x19.xrd s4, #10         ; cs
+        x02.ainc #10, #10
+        x19.xrd s6, #10         ; ca
+        x02.ainc #10, #10
+        x19.xrd s7, #10         ; -ca
+        x02.ainc #10, #10
+        alu s8, s1, s0, #OP_ADD
+        alu s10, s5, s0, #OP_ADD
+        x03.tap0 s1, #11, s4, s2, s3 ; 2 bu cs
+        x03.tap s5, #11, s7, s2, s3 ; - 2 bd ca
+        x03.tap0 s10, #11, s4, s11, s13 ; 2 bd cs
+        x03.tap s8, #11, s6, s11, s13 ; + 2 bu ca
+        alu s8, s13, s0, #OP_ADD
+        mp3_rd24(s1, s2, s3)
+        mp3_rd24(s5, s11, s8)
+        stx A8, s1
+        stx A9, s5
+        x02.aa A8, A8, R0, #1, A0, A0 ; A8 - 1
+        x02.ainc #9, #9
+        alu s9, s9, s14, #OP_SUB
+        alu s12, s9, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, bf
+        nop()
+        nop()
+        lde e7, #MP_HSB
+        ldy s1, e7
+        alu s1, s1, s14, #OP_SUB
+        mp3_put(MP_HSB, 1)
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ab
+        nop()
+        nop()
+done:
+}
+
+; n-term row sums, n = 18 and 6: acc = sum_k 2 x[k] c[k], x from A9 (stepped n + 1), c from
+; A8 (stepped n), rshr(acc, 24) in s1. Each tap multiplies the value its register held and loads
+; the next; the c loads multiply by s0. Uses s2..s5, s12, s13.
+.macro mp3_row18() {
+        x19.xrd s5, #9
+        x02.ainc #9, #9
+        x19.xrd s4, #8
+        x02.ainc #8, #8
+        x03.tap0 s5, #9, s4, s2, s3 ; 2 x0 c0; x1
+        x03.tap s4, #8, s0, s2, s3 ; c1
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x1 c1; x2
+        x03.tap s4, #8, s0, s2, s3 ; c2
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x2 c2; x3
+        x03.tap s4, #8, s0, s2, s3 ; c3
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x3 c3; x4
+        x03.tap s4, #8, s0, s2, s3 ; c4
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x4 c4; x5
+        x03.tap s4, #8, s0, s2, s3 ; c5
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x5 c5; x6
+        x03.tap s4, #8, s0, s2, s3 ; c6
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x6 c6; x7
+        x03.tap s4, #8, s0, s2, s3 ; c7
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x7 c7; x8
+        x03.tap s4, #8, s0, s2, s3 ; c8
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x8 c8; x9
+        x03.tap s4, #8, s0, s2, s3 ; c9
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x9 c9; x10
+        x03.tap s4, #8, s0, s2, s3 ; c10
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x10 c10; x11
+        x03.tap s4, #8, s0, s2, s3 ; c11
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x11 c11; x12
+        x03.tap s4, #8, s0, s2, s3 ; c12
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x12 c12; x13
+        x03.tap s4, #8, s0, s2, s3 ; c13
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x13 c13; x14
+        x03.tap s4, #8, s0, s2, s3 ; c14
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x14 c14; x15
+        x03.tap s4, #8, s0, s2, s3 ; c15
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x15 c15; x16
+        x03.tap s4, #8, s0, s2, s3 ; c16
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x16 c16; x17
+        x03.tap s4, #8, s0, s2, s3 ; c17
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x17 c17; x18
+        mp3_rd24(s1, s2, s3)
+}
+
+.macro mp3_row6() {
+        x19.xrd s5, #9
+        x02.ainc #9, #9
+        x19.xrd s4, #8
+        x02.ainc #8, #8
+        x03.tap0 s5, #9, s4, s2, s3 ; 2 x0 c0; x1
+        x03.tap s4, #8, s0, s2, s3 ; c1
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x1 c1; x2
+        x03.tap s4, #8, s0, s2, s3 ; c2
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x2 c2; x3
+        x03.tap s4, #8, s0, s2, s3 ; c3
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x3 c3; x4
+        x03.tap s4, #8, s0, s2, s3 ; c4
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x4 c4; x5
+        x03.tap s4, #8, s0, s2, s3 ; c5
+        x03.tap s5, #9, s4, s2, s3 ; + 2 x5 c5; x6
+        mp3_rd24(s1, s2, s3)
+}
+
+; y[36] at X:MP_XZ from the 18 lines at s11 (amov clobbers s7) (twin `imdct36`): rows r < 9 to y[r] and -y[17 - r],
+; rows 9..17 to y[r + 9] and y[44 - r]. Uses s1..s8, s12, s13, A8, A9, A12, A13, R5, R6.
+.macro mp3_imdct36() {
+        aimm(A8, MP_XC36)
+        aimm(A12, MP_XZ)
+        aimm(A13, MP_XZ + 17)
+        rimm R6, #19
+        amov(A9, s11)
+        ldi s6, #9
+ra:     mp3_row18()
+        x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
+        stx A12, s1
+        x02.ainc #12, #12
+        alu s1, s0, s1, #OP_SUB
+        stx A13, s1
+        x02.aa A13, A13, R0, #1, A0, A0 ; A13 - 1
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ra
+        nop()
+        nop()
+        aimm(A12, MP_XZ + 18)
+        aimm(A13, MP_XZ + 35)
+        ldi s6, #9
+rb:     mp3_row18()
+        x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
+        stx A12, s1
+        x02.ainc #12, #12
+        stx A13, s1
+        x02.aa A13, A13, R0, #1, A0, A0 ; A13 - 1
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rb
+        nop()
+        nop()
+}
+
+; y[36] at X:MP_XZ from the short subband at s11 (twin `imdctShort`): zeros, then per window w the
+; 6 lines x[3 k + w] through 6 rows (y12[r], -y12[5 - r]; y12[r + 3], y12[14 - r]) and
+; y[6 + 6 w + i] += rshr(2 y12[i] win[i], 23). Uses s1..s13, A8..A13, R5, R6.
+.macro mp3_imdct12() {
+        aimm(A12, MP_XZ)
+        ldi s1, #0
+        ldi s6, #36
+z36:    stx A12, s1
+        x02.ainc #12, #12
+        ldi s1, #0
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, z36
+        nop()
+        nop()
+        ldi s1, #0
+        mp3_put(MP_HW, 1)
+sw:     lde e7, #MP_HW
+        ldy s1, e7
+        alu s2, s11, s1, #OP_ADD
+        amov(A9, s2)            ; x[w]
+        aimm(A12, MP_XZ + 48)
+        rimm R5, #3
+        ldi s6, #6
+gx:     x19.xrd s1, #9
+        x02.aa A9, A9, R5, #2, A0, A0
+        stx A12, s1
+        x02.ainc #12, #12
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, gx
+        nop()
+        nop()
+        aimm(A8, MP_XC12)
+        aimm(A12, MP_XZ + 36)
+        aimm(A13, MP_XZ + 41)
+        rimm R6, #7
+        aimm(A9, MP_XZ + 48)
+        ldi s6, #3
+sa:     mp3_row6()
+        x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
+        stx A12, s1
+        x02.ainc #12, #12
+        alu s1, s0, s1, #OP_SUB
+        stx A13, s1
+        x02.aa A13, A13, R0, #1, A0, A0 ; A13 - 1
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, sa
+        nop()
+        nop()
+        aimm(A12, MP_XZ + 42)
+        aimm(A13, MP_XZ + 47)
+        ldi s6, #3
+sb:     mp3_row6()
+        x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
+        stx A12, s1
+        x02.ainc #12, #12
+        stx A13, s1
+        x02.aa A13, A13, R0, #1, A0, A0 ; A13 - 1
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, sb
+        nop()
+        nop()
+        ; y[6 + 6 w + i] += win(y12[i], short window[i])
+        lde e7, #MP_HW
+        ldy s1, e7
+        ldi s12, #6
+        x18.mpy s1, s0, s1, s12
+        ldi s12, #MP_XZ + 6
+        alu s1, s1, s12, #OP_ADD
+        amov(A12, s1)
+        aimm(A10, MP_XZ + 36)
+        aimm(A13, MP_XWIN + 72)
+        ldi s6, #12
+wa:     x19.xrd s1, #10         ; y12[i]
+        x02.ainc #10, #10
+        x19.xrd s4, #13         ; win
+        x02.ainc #13, #13
+        x03.tap0 s1, #11, s4, s2, s3
+        mp3_rd23(s5, s2, s3)
+        x19.xrd s1, #12
+        alu s1, s1, s5, #OP_ADD
+        stx A12, s1
+        x02.ainc #12, #12
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, wa
+        nop()
+        nop()
+        lde e7, #MP_HW
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_HW, 1)
+        ldi s12, #3
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, sw
+        nop()
+        nop()
+}
+
+; Subband s11's 18 lines from y[36] at X:MP_XZ: v = win(y[i], W[i]) + overlap[i], odd subbands
+; negate odd i (frequency inversion); overlap[i] = win(y[18 + i], W[18 + i]). The window at
+; s8 (the unit window for short subbands). s9 = the overlap's address, s10 = +-1.
+; Uses s1..s13, A8..A13.
+.macro mp3_olap() {
+        aimm(A10, MP_XZ)
+        amov(A12, s11)          ; lines out
+        amov(A13, s8)           ; W
+        amov(A8, s9)            ; overlap
+        ldi s6, #9
+oa:     x19.xrd s1, #10
+        x02.ainc #10, #10
+        x19.xrd s4, #13
+        x02.ainc #13, #13
+        x03.tap0 s1, #11, s4, s2, s3
+        mp3_rd23(s5, s2, s3)
+        x19.xrd s1, #8
+        alu s5, s5, s1, #OP_ADD ; even i
+        stx A12, s5
+        x02.ainc #12, #12
+        x19.xrd s1, #10
+        x02.ainc #10, #10
+        x19.xrd s4, #13
+        x02.ainc #13, #13
+        x03.tap0 s1, #11, s4, s2, s3
+        mp3_rd23(s5, s2, s3)
+        x02.ainc #8, #8
+        x19.xrd s1, #8
+        alu s5, s5, s1, #OP_ADD ; odd i
+        x18.mpy s5, s0, s5, s10
+        stx A12, s5
+        x02.ainc #12, #12
+        x02.ainc #8, #8
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, oa
+        nop()
+        nop()
+        amov(A8, s9)
+        ldi s6, #18
+ob:     x19.xrd s1, #10
+        x02.ainc #10, #10
+        x19.xrd s4, #13
+        x02.ainc #13, #13
+        x03.tap0 s1, #11, s4, s2, s3
+        mp3_rd23(s5, s2, s3)
+        stx A8, s5
+        x02.ainc #8, #8
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ob
+        nop()
+        nop()
+}
+
+.macro mp3_hybrid() {
+        aimm(A11, MP_XDUM)
+        lde e7, #MP_SGR
+        ldy s1, e7
+        alu s1, s1, s1, #OP_ADD
+        lde e7, #MP_HCH
+        ldy s2, e7
+        alu s1, s1, s2, #OP_ADD ; k
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s1, s12
+        yidx(s4, MP_GR0 + 5, s3) ; block_type
+        yidx(s5, MP_GR0 + 6, s3) ; mixed
+        ; long windows: by block_type, normal under a short block's long subbands
+        ldi s12, #36
+        x18.mpy s6, s0, s4, s12
+        ldi s12, #MP_XWIN
+        alu s6, s6, s12, #OP_ADD
+        ldi s1, #32
+        ldi s12, #2
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, hlong
+        nop()
+        nop()
+        ldi s6, #MP_XWIN        ; short block: its long subbands take the normal window
+        ldi s1, #0
+        alu s12, s5, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, hshort
+        nop()
+        nop()
+        ; mixed: 2 long subbands, 4 at MPEG-2.5 8 kHz (bands.mixedLongSubbands)
+        ldi s1, #2
+        lde e7, #MH_VER
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, hshort
+        nop()
+        nop()
+        lde e7, #MH_SR
+        ldy s12, e7
+        ldi s13, #2
+        alu s12, s12, s13, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, hshort
+        nop()
+        nop()
+        ldi s1, #4
+hshort: mp3_put(MP_HNL, 1)
+        mp3_put(MP_HWT, 6)
+        mp3_reorder()
+        lde e7, #MP_HNL
+        ldy s1, e7
+        jmp #ALWAYS, #0, hal
+        nop()
+        nop()
+hlong:  mp3_put(MP_HNL, 1)
+        mp3_put(MP_HWT, 6)
+hal:    alu s1, s1, s14, #OP_SUB ; boundaries
+        lde e7, #MP_HCH
+        ldy s2, e7
+        ldi s12, #576
+        x18.mpy s2, s0, s2, s12
+        ldi s12, #MP_XS
+        alu s2, s2, s12, #OP_ADD
+        mp3_alias()
+        ldi s1, #0
+        mp3_put(MP_HSB, 1)
+hsb:    lde e7, #MP_HSB
+        ldy s1, e7
+        ldi s12, #18
+        x18.mpy s7, s0, s1, s12
+        lde e7, #MP_HCH
+        ldy s2, e7
+        ldi s12, #576
+        x18.mpy s2, s0, s2, s12
+        alu s11, s7, s2, #OP_ADD
+        ldi s12, #MP_XS
+        alu s11, s11, s12, #OP_ADD ; the subband's lines
+        lde e7, #MP_HNL
+        ldy s12, e7
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; a long subband
+        jmp #IF_NOT, #3, hs12
+        nop()
+        nop()
+        mp3_imdct36()
+        lde e7, #MP_HWT
+        ldy s8, e7
+        jmp #ALWAYS, #0, hol
+        nop()
+        nop()
+hs12:   mp3_imdct12()
+        ldi s8, #MP_XWIN + 144
+hol:    lde e7, #MP_HSB
+        ldy s1, e7
+        ldi s12, #18
+        x18.mpy s7, s0, s1, s12
+        lde e7, #MP_HCH
+        ldy s2, e7
+        ldi s12, #576
+        x18.mpy s2, s0, s2, s12
+        alu s7, s7, s2, #OP_ADD
+        ldi s12, #MP_XOV
+        alu s9, s7, s12, #OP_ADD ; overlap
+        ldi s12, #MP_XS
+        alu s11, s7, s12, #OP_ADD ; lines
+        x18.and s10, s1, s14
+        alu s10, s10, s10, #OP_ADD
+        alu s10, s14, s10, #OP_SUB ; 1 - 2 (sb & 1)
+        mp3_olap()
+        lde e7, #MP_HSB
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_HSB, 1)
+        ldi s12, #32
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, hsb
+        nop()
+        nop()
 }

@@ -71,7 +71,7 @@ test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
     try testing.expect(checked > 500);
 }
 
-test "mp3_granules reads and requantises each granule through the reservoir as ref/mp3's Parser does" {
+test "mp3_granules decodes each granule to subband samples through the reservoir as ref/mp3's Parser does" {
     const gpa = testing.allocator;
     const prog = try h.assemble(gpa,
         \\.include "lib/ybits.sm"
@@ -114,6 +114,7 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
         try tables.put(&state, gpa, map.at);
         try h.stageDequant(&state, gpa);
         var parser: ref.mp3.decoder.Parser = .{};
+        var hyb: [2]ref.dsp.mp3.hybrid.State = .{ .{}, .{} };
         for (fr) |frame| {
             try h.stagePacket(gpa, &state, frame);
             state.halted = false;
@@ -149,6 +150,7 @@ test "mp3_granules reads and requantises each granule through the reservoir as r
                 var want: [2]ref.dsp.mp3.requant.Coefs = undefined;
                 for (0..hd.channels()) |ch| want[ch] = ref.dsp.mp3.requant.requantise(p.side.gr[gr][ch], p.bandsOf(gr, ch), &p.sf[gr][ch], &p.is[gr][ch]);
                 if (hd.channels() == 2) ref.dsp.mp3.stereo.process(hd, p.side.gr[gr][0], p.side.gr[gr][1], &p.sf[gr][1], &want[0], &want[1]);
+                for (0..hd.channels()) |ch| ref.dsp.mp3.hybrid.run(&hyb[ch], p.side.gr[gr][ch], p.bandsOf(gr, ch), ref.mp3.bands.mixedLongSubbands(hd), &want[ch]);
                 // the slots keep the frame's last granule
                 if (gr + 1 < hd.granules()) continue;
                 for (0..hd.channels()) |ch| {
@@ -257,3 +259,73 @@ test "mp3_stereo's intensity matches ref/dsp/mp3/stereo.zig on random granules" 
     }
     std.debug.print("mp3 intensity: {any} cases\n", .{cases});
 }
+
+test "mp3_hybrid matches ref/dsp/mp3/hybrid.zig over random granules" {
+    const gpa = testing.allocator;
+    const prog = try h.assemble(gpa,
+        \\.include "lib/ybits.sm"
+        \\.include "lib/stream.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/huffman.sm"
+        \\.include "lib/sections.sm"
+        \\.include "lib/dequant.sm"
+        \\.include "lib/mp3.sm"
+        \\        ldi s14, #1
+        \\        ldi s15, #16
+        \\        mp3_hybrid()
+        \\        x17.halt
+        \\
+    );
+    defer gpa.free(prog);
+    const H = ref.dsp.mp3.hybrid;
+    var prng = std.Random.DefaultPrng.init(0x4b);
+    const rnd = prng.random();
+    var cases: [4]usize = @splat(0);
+    var worst: usize = 0;
+    for (0..3) |vi| {
+        const vbs = [_]u2{ 3, 2, 0 };
+        const vb = vbs[vi];
+        const ver: ref.mp3.header.Version = switch (vb) {
+            3 => .mpeg1,
+            2 => .mpeg2,
+            else => .mpeg25,
+        };
+        const hd: ref.mp3.header.Header = .{ .version = ver, .crc = false, .bitrate_index = 9, .sr_index = rnd.uintLessThan(u2, 3), .padding = false, .mode = .single_channel, .mode_ext = 0 };
+        var state = h.emu.State{};
+        defer state.deinit(gpa);
+        try tables.put(&state, gpa, map.at);
+        var twin: H.State = .{};
+        try h.putY(&state, gpa, map.at("MH_VER"), vb);
+        try h.putY(&state, gpa, map.at("MH_SR"), hd.sr_index);
+        try h.putY(&state, gpa, map.at("MH_MP1"), @intFromBool(vb == 3));
+        try h.putY(&state, gpa, map.at("MP_SGR"), 0);
+        try h.putY(&state, gpa, map.at("MP_HCH"), 0);
+        for (0..12) |n| {
+            // block types in a legal-ish order: normal, start, short, stop, and mixed
+            const bts = [_]u2{ 0, 1, 2, 3, 0, 1, 2, 2, 3, 1, 2, 3 };
+            const bt = bts[n];
+            const mixed = bt == 2 and n == 7;
+            const g: ref.mp3.sideinfo.Granule = .{ .window_switching = bt != 0, .block_type = bt, .mixed = mixed };
+            var c: H.Coefs = undefined;
+            for (&c) |*x| x.* = rnd.intRangeAtMost(i24, -(1 << 21), 1 << 21);
+            try h.putY(&state, gpa, map.at("MP_GR0") + 5, bt);
+            try h.putY(&state, gpa, map.at("MP_GR0") + 6, @intFromBool(mixed));
+            try h.putAllX(&state, gpa, map.at("MP_XS"), &c);
+            state.halted = false;
+            const nb = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+            worst = @max(worst, nb);
+            try testing.expect(state.halted);
+            H.run(&twin, g, ref.mp3.bands.of(hd, g), ref.mp3.bands.mixedLongSubbands(hd), &c);
+            for (0..576) |i| {
+                const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + @as(u32, @intCast(i))) orelse 0xDEAD))));
+                if (got != c[i]) {
+                    std.debug.print("ver {d} granule {d} bt {d} mixed {any} line {d}: want {d} got {d}\n", .{ vb, n, bt, mixed, i, c[i], got });
+                    return error.TestExpectedEqual;
+                }
+            }
+            cases[if (mixed) 3 else if (bt == 2) 2 else if (bt == 0) 0 else 1] += 1;
+        }
+    }
+    std.debug.print("mp3 hybrid: {any} granules (long, start/stop, short, mixed), worst {d} bundles\n", .{ cases, worst });
+}
+
