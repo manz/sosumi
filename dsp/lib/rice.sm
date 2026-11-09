@@ -1,4 +1,4 @@
-; Audited from x17 b95e52f examples/lib/rice.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 116d9e1 examples/lib/rice.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/alac/rice.zig; Apple ALAC ag_dec.c (Apache 2.0), adaptive Golomb-Rice.
 ; ALAC's adaptive Golomb-Rice codeword: the twin of `get` in
 ; ref/dsp/alac/rice.zig. Needs lib/bits.sm included first.

@@ -1,4 +1,4 @@
-; Audited from x17 b95e52f examples/lib/alac.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 116d9e1 examples/lib/alac.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/alac/decoder.zig; Apple ALAC ALACDecoder.cpp (Apache 2.0), Decode.
 ; One ALAC packet: the twin of `Decoder.decode` in ref/dsp/alac/decoder.zig.
 ; Needs lib/bits.sm, lib/rice.sm, lib/predictor.sm, lib/unmix.sm and lib/ring.sm first;

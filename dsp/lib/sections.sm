@@ -1,4 +1,4 @@
-; Audited from x17 2f5d48b examples/lib/sections.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 1160023 examples/lib/sections.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/aac/sections.zig; ISO/IEC 14496-3 4.6.2.3 (section data, scale factors).
 ; AAC section_data() and scale_factor_data(): the twin of ref/dsp/aac/sections.zig.
 ;

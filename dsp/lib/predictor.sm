@@ -1,4 +1,4 @@
-; Audited from x17 b95e52f examples/lib/predictor.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 116d9e1 examples/lib/predictor.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/alac/predictor.zig; Apple ALAC dp_dec.c (Apache 2.0), unpc_block.
 ; ALAC's adaptive predictor: the twin of `unpredict` in ref/dsp/alac/predictor.zig.
 ; Needs lib/bits.sm (constants, nop, s14 = 1) and lib/rice.sm (floorshr) first.

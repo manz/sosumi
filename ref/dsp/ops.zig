@@ -2,7 +2,7 @@
 //! these and nothing else, so each stage maps onto forms that exist (specs/dsp.md, Phase 1).
 //!
 //! Primitives cite the x17 probe that measured them (x17 `src/isa.toml`, `own-*` programs)
-//! and say how far that probe reaches; every case the models lean on is gated (x17 de022ba).
+//! and say how far that probe reaches; every case the models lean on is gated (x17 e0aa7e7).
 //! Helpers below the primitives are compositions, written only in primitives.
 //!
 //! What is not here because it is not measured: a persistent wide accumulator, a carry flag, a

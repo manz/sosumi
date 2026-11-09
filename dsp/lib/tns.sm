@@ -1,4 +1,4 @@
-; Audited from x17 2f5d48b examples/lib/tns.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 1160023 examples/lib/tns.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/aac/tns.zig; ISO/IEC 14496-3 4.6.9 (tns_data, TNS_MAX_BANDS, TNS_MAX_ORDER).
 ; AAC temporal noise shaping: the twin of ref/dsp/aac/tns.zig.
 ;

@@ -1,4 +1,4 @@
-; Audited from x17 2f5d48b examples/lib/pcm.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 1160023 examples/lib/pcm.sm, 2026-11-08 (docs/x17-import.md).
 ; No ref twin: 16-bit PCM passthrough, byte order per WAV (little-endian) and AIFF (big-endian).
 ; PCM passthrough: one packet of 16-bit samples (WAV little-endian or AIFF big-endian) copied
 ; into the host's output ring (lib/ring.sm). Needs lib/bits.sm, lib/mem.sm and lib/ring.sm

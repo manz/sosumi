@@ -1,4 +1,4 @@
-; Audited from x17 dd66f03 examples/lib/window.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 4619771 examples/lib/window.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/aac/window.zig; ISO/IEC 14496-3 4.6.11.3.3 (windowing, block switching).
 ; AAC window, overlap-add and PCM: the twin of ref/dsp/aac/window.zig.
 ;

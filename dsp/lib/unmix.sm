@@ -1,4 +1,4 @@
-; Audited from x17 b95e52f examples/lib/unmix.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 116d9e1 examples/lib/unmix.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/alac/decoder.zig (the unmix and low-byte loop); Apple ALAC matrix_dec.c (Apache 2.0), unmix16.
 ; ALAC's stereo unmix and shifted low bytes: the twin of the output loop in
 ; ref/dsp/alac/decoder.zig. Needs lib/bits.sm, lib/rice.sm and lib/predictor.sm first.

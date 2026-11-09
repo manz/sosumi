@@ -1,4 +1,4 @@
-; Audited from x17 2f5d48b examples/lib/pns.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 1160023 examples/lib/pns.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/aac/pns.zig; ISO/IEC 14496-3 4.6.13 (the generator is ours, as ISO allows).
 ; AAC perceptual noise substitution: the twin of ref/dsp/aac/pns.zig (`channel` and `right`).
 ;

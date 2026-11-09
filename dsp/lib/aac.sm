@@ -1,4 +1,4 @@
-; Audited from x17 70471ae examples/lib/aac.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 9fa06cb examples/lib/aac.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/aac/decoder.zig; ISO/IEC 14496-3 4.4.2 raw_data_block() and its elements.
 ; One AAC-LC access unit (a raw_data_block): the twin of `Decoder.decode` in
 ; ref/dsp/aac/decoder.zig, its syntax from ref/aac/raw.zig and ref/aac/ics.zig. Needs

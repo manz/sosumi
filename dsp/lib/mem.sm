@@ -1,4 +1,4 @@
-; Audited from x17 c900697 examples/lib/mem.sm, 2026-11-08 (docs/x17-import.md).
+; Audited from x17 8500815 examples/lib/mem.sm, 2026-11-08 (docs/x17-import.md).
 ; No twin: register and Y plumbing only, ISA per the reference.md entries named below.
 ; Y slots and A registers from scalar registers, shared by the codec libraries.
 ;
