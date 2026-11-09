@@ -71,11 +71,13 @@ test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
     try testing.expect(checked > 500);
 }
 
-test "mp3_granules reads scale factors through the reservoir as ref/mp3's Parser does" {
+test "mp3_granules reads scale factors and spectra through the reservoir as ref/mp3's Parser does" {
     const gpa = testing.allocator;
     const prog = try h.assemble(gpa,
         \\.include "lib/ybits.sm"
         \\.include "lib/stream.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/huffman.sm"
         \\.include "lib/mp3.sm"
         \\        stream_on()
         \\        ybits_init()
@@ -98,6 +100,9 @@ test "mp3_granules reads scale factors through the reservoir as ref/mp3's Parser
     var skipped: usize = 0;
     var ill: usize = 0;
     var pre: usize = 0;
+    var nz: usize = 0;
+    var worst: usize = 0;
+    var big: usize = 0;
     for (fixtures) |file| {
         const fr = try tables.frames(gpa, file);
         defer gpa.free(fr);
@@ -108,7 +113,8 @@ test "mp3_granules reads scale factors through the reservoir as ref/mp3's Parser
         for (fr) |frame| {
             try h.stagePacket(gpa, &state, frame);
             state.halted = false;
-            _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+            const nb = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+            worst = @max(worst, nb);
             try testing.expect(state.halted);
             try testing.expect(!state.stream_starved);
             const hd = try ref.mp3.header.parse(frame);
@@ -131,12 +137,21 @@ test "mp3_granules reads scale factors through the reservoir as ref/mp3's Parser
                         return error.TestExpectedEqual;
                     }
                 }
+                for (0..576) |c| {
+                    const got: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(map.at("MP_XS") + 576 * k + @as(u32, @intCast(c))) orelse 0xDEAD))));
+                    nz += @intFromBool(got != 0);
+                    big += @intFromBool(@abs(got) > 15);
+                    if (got != p.is[gr][ch][c]) {
+                        std.debug.print("frame {d} k {d} coef {d}: want {d} got {d}\n", .{ decoded + skipped, k, c, p.is[gr][ch][c], got });
+                        return error.TestExpectedEqual;
+                    }
+                }
                 pre += @intFromBool(s.preflag);
                 try testing.expectEqual(@as(u32, @intFromBool(s.preflag)), y(&state, map.at("MP_PRE") + k));
             };
             decoded += 1;
         }
     }
-    std.debug.print("mp3 sf: {d} frames decoded, {d} skipped, {d} illegal, {d} preflag\n", .{ decoded, skipped, ill, pre });
+    std.debug.print("mp3 sf: {d} frames decoded, {d} skipped, {d} illegal, {d} preflag; {d} non-zero lines, {d} past 15; {d} syllables, worst frame {d} bundles\n", .{ decoded, skipped, ill, pre, nz, big, prog.len, worst });
     try testing.expect(decoded > 500);
 }

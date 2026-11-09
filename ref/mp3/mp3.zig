@@ -13,3 +13,6 @@ pub const decoder = @import("decoder.zig");
 test {
     @import("std").testing.refAllDecls(@This());
 }
+pub const tables = struct {
+    pub const huffman = @import("tables/huffman.zig");
+};

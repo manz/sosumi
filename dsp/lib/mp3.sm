@@ -626,6 +626,27 @@ done:
 ; bytes of main data end at MP_MAIN - 1, so a frame's main data, copied to MP_MAIN, continues
 ; them, and its granules start at bit 8 (MP_MAIN - main_data_begin - MP_PB) from Y:MP_PB.
 
+; Huffman decoding and band tables, staged by dsp/mp3/tables.zig (Y words below 0x8000: ldy
+; sign-extends).
+.const MP_HT   = 0x1D60         ; [table_select 0..31, count1 A, count1 B]: the tree's address, 0 none
+.const MP_HR   = 0x1D82         ; the same: the tree's root width
+.const MP_LIN  = 0x1DA4         ; [table_select]: linbits
+.const MP_BP   = 0x1DC4         ; [(version bits * 3 + sr_index) * 3 + long / short / mixed]: widths
+.const MP_BW   = 0x1DE8         ; the band width lists, each ending in a 0
+.const MP_HUFF = 0x2100         ; the trees (lib/huffman.sm format)
+.const MP_YEND = 0x2E80         ; the host writes Y below here
+
+.const MP_RE   = 0x1D51         ; the three regions' ends, in coefficients (576 the last)
+.const MP_BIG  = 0x1D54         ; 2 big_values
+.const MP_I    = 0x1D55         ; coefficients decoded
+.const MP_LIM  = 0x1D56         ; the granule's last bit + 1, from Y:MP_PB
+.const MP_TB   = 0x1D57         ; the region's tree, 0 none
+.const MP_TR   = 0x1D58         ; its root width
+.const MP_TL   = 0x1D59         ; its linbits
+.const MP_N    = 0x1D5A         ; pairs left in the region
+.const MP_RG   = 0x1D5B         ; the region at hand
+.const MP_XS   = 0x0400         ; X: the spectrum of granule and channel k at MP_XS + 576 k
+
 .const MP_RLEN = 0x1D4E         ; reservoir bytes, 0..512 (0 at the stream's start)
 .const MP_OK   = 0x1D4F         ; 1: main_data_begin within the reservoir, the frame decodes
 .const MP_P    = 0x1D50         ; the granule at hand's first bit, in bits from Y:MP_PB
@@ -709,7 +730,7 @@ done:
 }
 
 ; Each granule and channel in order (k = 2 gr + ch, the absent ones skipped): the reader at
-; its first bit, its scale factors, then MP_P past its part2_3_length bits.
+; its first bit, its scale factors and spectrum, then MP_P past its part2_3_length bits.
 ; Uses s1..s5, s7, s8, e4, e5, e7, e8 and the reader's registers.
 .macro mp3_granules() {
         ldi s1, #0
@@ -734,10 +755,6 @@ gc:     lde e7, #MP_CK
         jmp #IF_NOT, #3, next
         nop()
         nop()
-        lde e7, #MP_P
-        ldy s1, e7
-        mp3_seek()
-        mp3_sf()
         lde e7, #MP_CK
         ldy s1, e7
         ldi s12, #MP_GR
@@ -745,7 +762,13 @@ gc:     lde e7, #MP_CK
         yidx(s2, MP_GR0, s1)    ; part2_3_length
         lde e7, #MP_P
         ldy s1, e7
-        alu s1, s1, s2, #OP_ADD
+        alu s2, s1, s2, #OP_ADD
+        mp3_put(MP_LIM, 2)
+        mp3_seek()
+        mp3_sf()
+        mp3_spec()
+        lde e7, #MP_LIM
+        ldy s1, e7
         mp3_put(MP_P, 1)
 next:   lde e7, #MP_CK
         ldy s1, e7
@@ -757,4 +780,277 @@ next:   lde e7, #MP_CK
         jmp #3, #3, gc
         nop()
         nop()
+}
+
+; ---------------------------------------------------------------------------
+; The spectrum (ref/mp3/spectrum.zig; ISO/IEC 11172-3 2.4.2.7, 2.4.3.4.6): big_values pairs in
+; three regions by table_select, then count1 quadruples while bits of part2_3_length remain,
+; then zeros to 576, as integers to X:MP_XS + 576 k. Pair leaves hold x * 16 + y, quadruple
+; leaves vwxy (dsp/mp3/tables.zig). Tables 0, 4 and 14 read nothing and give zeros (ref fails
+; on 4 and 14: no stream uses them). Needs lib/huffman.sm, lib/mem.sm.
+
+; s<x> += linbits bits when x = 15 (with linbits 0 the read takes nothing). Uses s5, s11, s12.
+.macro mp3_lin(x) {
+        ldi s12, #15
+        alu s12, x, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, done
+        nop()
+        nop()
+        lde e7, #MP_TL
+        ldy s11, e7
+        getbits_s(s5)
+        alu x, x, s5, #OP_ADD
+done:
+}
+
+; One quadruple bit: s2 = bit b of s1, its sign, to X. Uses s2, s4, s8 and the reader's.
+.macro mp3_qbit(b) {
+        ldi s12, #b
+        alu s2, s12, s1, #ASR
+        x18.and s2, s2, s14
+        spec_sign(s2)
+        spec_put(s2)
+}
+
+; s<dst> = the reader's position in bits from Y:MP_PB. Uses s13.
+.macro mp3_pos(dst) {
+        ybits_pos(dst)
+        ldi s13, #MP_PB
+        alu dst, dst, s13, #OP_SUB
+        ldi s13, #MP_PB * 8 - MP_PB
+        alu dst, dst, s13, #OP_SUB
+}
+
+; The granule and channel in MP_CK, the reader after its scale factors, MP_LIM set.
+; Uses s1..s8, s11..s13, e6, e7, A6, A14, R7 and the reader's registers.
+.macro mp3_spec() {
+        lde e7, #MP_CK
+        ldy s1, e7
+        ldi s12, #576
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_XS
+        alu s2, s2, s12, #OP_ADD
+        amov(A6, s2)
+        ; the band list: MP_BP[(version * 3 + sr) * 3 + kind], kind 1 short, 2 mixed
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s1, s12 ; the record's offset
+        yidx(s4, MP_GR0 + 5, s3) ; block_type
+        yidx(s5, MP_GR0 + 6, s3) ; mixed
+        ldi s6, #0
+        ldi s12, #2
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, kind
+        nop()
+        nop()
+        alu s6, s14, s5, #OP_ADD ; short: 1, mixed: 2
+kind:   lde e7, #MH_VER
+        ldy s7, e7
+        ldi s12, #3
+        x18.mpy s7, s0, s7, s12
+        lde e7, #MH_SR
+        ldy s8, e7
+        alu s7, s7, s8, #OP_ADD
+        x18.mpy s7, s0, s7, s12
+        alu s7, s7, s6, #OP_ADD
+        yidx(s2, MP_BP, s7)     ; the list's address
+        ; region ends: the sum of widths through entry region0_count, and through
+        ; region0_count + region1_count + 1; 576 where the list ends first
+        yidx(s4, MP_GR0 + 13, s3) ; region0_count
+        yidx(s5, MP_GR0 + 14, s3) ; region1_count
+        alu s5, s5, s4, #OP_ADD
+        alu s5, s5, s14, #OP_ADD
+        ldi s1, #576
+        mp3_put(MP_RE, 1)
+        mp3_put(MP_RE + 1, 1)
+        mp3_put(MP_RE + 2, 1)
+        ldi s6, #0              ; entry
+        ldi s7, #0              ; sum
+        ldi s13, #-1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e5, s13         ; e5 = the list
+bw:     ldy s8, e5
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; the list's end
+        jmp #3, #3, bdone
+        nop()
+        nop()
+        alu s7, s7, s8, #OP_ADD
+        alu s12, s6, s4, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, b1
+        nop()
+        nop()
+        mp3_put(MP_RE, 7)
+b1:     alu s12, s6, s5, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, b2
+        nop()
+        nop()
+        mp3_put(MP_RE + 1, 7)
+b2:     alu s6, s6, s14, #OP_ADD
+        x17.mve e5, s2          ; e5 = list + entry: e5 = s2 + 1, so step s2
+        alu s2, s2, s14, #OP_ADD
+        jmp #ALWAYS, #0, bw
+        nop()
+        nop()
+bdone:  yidx(s1, MP_GR0 + 1, s3) ; big_values
+        alu s1, s1, s1, #OP_ADD
+        mp3_put(MP_BIG, 1)
+        ldi s1, #0
+        mp3_put(MP_I, 1)
+        mp3_put(MP_RG, 1)
+        ; each region: (min(end, big) - i) / 2 pairs from its table
+reg:    lde e7, #MP_RG
+        ldy s1, e7
+        yidx(s2, MP_RE, s1)
+        lde e7, #MP_BIG
+        ldy s4, e7
+        alu s12, s2, s4, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, rmin
+        nop()
+        nop()
+        alu s2, s4, s0, #OP_ADD ; min(end, big)
+rmin:   lde e7, #MP_I
+        ldy s4, e7
+        alu s12, s2, s4, #OP_SUB
+        ptst p3, s0, #LE12, #PTST ; nothing in this region
+        jmp #3, #3, rnext
+        nop()
+        nop()
+        alu s5, s14, s12, #ASR  ; pairs (fact 774)
+        mp3_put(MP_N, 5)
+        mp3_put(MP_I, 2)        ; i = the region's end
+        lde e7, #MP_CK
+        ldy s3, e7
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s3, s12
+        alu s3, s3, s1, #OP_ADD
+        yidx(s4, MP_GR0 + 7, s3) ; table_select[region]
+        yidx(s5, MP_HT, s4)
+        mp3_put(MP_TB, 5)
+        yidx(s5, MP_HR, s4)
+        mp3_put(MP_TR, 5)
+        yidx(s5, MP_LIN, s4)
+        mp3_put(MP_TL, 5)
+        lde e7, #MP_TB
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST ; no tree: zeros
+        jmp #3, #3, rzero
+        nop()
+        nop()
+pair:   lde e7, #MP_TB
+        ldy s1, e7
+        lde e7, #MP_TR
+        ldy s11, e7
+        huff_decode(s1)
+        field(s2, s3, s1, 4, 0)
+        mp3_lin(s2)
+        spec_sign(s2)
+        mp3_lin(s3)
+        spec_sign(s3)
+        spec_put(s2)
+        spec_put(s3)
+        lde e7, #MP_N
+        ldy s1, e7
+        alu s1, s1, s14, #OP_SUB
+        mp3_put(MP_N, 1)
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, pair
+        nop()
+        nop()
+        jmp #ALWAYS, #0, rnext
+        nop()
+        nop()
+rzero:  lde e7, #MP_N
+        ldy s1, e7
+rz:     spec_put(s0)
+        spec_put(s0)
+        alu s1, s1, s14, #OP_SUB
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rz
+        nop()
+        nop()
+rnext:  lde e7, #MP_RG
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_RG, 1)
+        ldi s12, #3
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, reg
+        nop()
+        nop()
+        ; count1: quadruples while i + 4 <= 576 and bits remain; one ending past them is dropped
+        lde e7, #MP_CK
+        ldy s3, e7
+        ldi s12, #MP_GR
+        x18.mpy s3, s0, s3, s12
+        yidx(s4, MP_GR0 + 17, s3) ; count1table_select
+        ldi s12, #32
+        alu s4, s4, s12, #OP_ADD
+        yidx(s5, MP_HT, s4)
+        mp3_put(MP_TB, 5)
+        yidx(s5, MP_HR, s4)
+        mp3_put(MP_TR, 5)
+quad:   lde e7, #MP_I
+        ldy s1, e7
+        ldi s12, #572
+        alu s12, s12, s1, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; i > 572
+        jmp #3, #3, tail
+        nop()
+        nop()
+        mp3_pos(s2)
+        lde e7, #MP_LIM
+        ldy s4, e7
+        alu s12, s2, s4, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; pos < limit
+        jmp #IF_NOT, #3, tail
+        nop()
+        nop()
+        lde e7, #MP_TB
+        ldy s1, e7
+        lde e7, #MP_TR
+        ldy s11, e7
+        huff_decode(s1)
+        mp3_pos(s2)
+        lde e7, #MP_LIM
+        ldy s4, e7
+        alu s12, s4, s2, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; past the limit: dropped
+        jmp #3, #3, tail
+        nop()
+        nop()
+        mp3_qbit(3)
+        mp3_qbit(2)
+        mp3_qbit(1)
+        mp3_qbit(0)
+        lde e7, #MP_I
+        ldy s1, e7
+        ldi s12, #4
+        alu s1, s1, s12, #OP_ADD
+        mp3_put(MP_I, 1)
+        jmp #ALWAYS, #0, quad
+        nop()
+        nop()
+        ; zeros to 576
+tail:   lde e7, #MP_I
+        ldy s1, e7
+tl:     ldi s12, #576
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, done
+        nop()
+        nop()
+        spec_put(s0)
+        alu s1, s1, s14, #OP_ADD
+        jmp #ALWAYS, #0, tl
+        nop()
+        nop()
+done:
 }
