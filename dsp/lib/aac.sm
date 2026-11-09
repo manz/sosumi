@@ -22,9 +22,10 @@
 ; Y out: AK_ST status (0 ok, 1 CCE or PCE, 2 a syntax error, 3 an escape past 8 ones, 4 stereo
 ;   tools without common_window, 5 more channels than AK_NCH), OUTY the PCM, 1024 frames of
 ;   AK_NCH interleaved 16-bit samples.
+; Y, filled by the host once: KBD_L and KBD_S (window.sm), the KBD rises.
 ; X, filled by the host once: the dequantiser's DQ_D, DQ_IT, DQ_G; PREL, POSTL, TWL and PRES,
-;   POSTS, TWS, the IMDCT tables (long and short); WLONG + 0x400 s, WSHORT + 0x80 s the rising
-;   window halves as w / 4 (s the shape); XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
+;   POSTS, TWS, the IMDCT tables (long and short); SINE and SINE4 (window.sm), the sine rise;
+;   XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
 ; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, the AK_
@@ -111,8 +112,6 @@
 .const OVL0   = 0x3C00
 .const OVL1   = 0x4000
 .const XL     = 0x4400
-.const WLONG  = 0x4800
-.const WSHORT = 0x5000
 .const XSTT   = 0x5100
 .const XPNT   = 0x5104
 .const XSEED  = 0x5108
@@ -973,56 +972,15 @@ top:    alu s3, s5, s0, #OP_ADD
 done:
 }
 
-; The window halves for FIN: the rising side from the previous shape (long for only_long and
-; long_start, else short), the falling side from the current one (long for only_long and
-; long_stop, else short).
+; The window shapes for FIN: WIN_R the previous one (the rising side), WIN_F the current one.
 .macro ak_halves() {
         yld(s3, AK_FSL)
         ldi s13, #AK_SHP - 1
         alu s13, s13, s3, #OP_ADD
         x17.mve e6, s13
-        ldy s8, e6              ; prev_shape
-        yld(s2, FIN + R_WS)
-        ldi s4, #2
-        alu s4, s2, s4, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, rshort
-        ldi s4, #-10            ; (delay slot)
-        alu s5, s4, s8, #ASRRS  ; (delay slot) prev * 0x400
-        ldi s4, #WLONG
-        alu s5, s5, s4, #OP_ADD
-        jmp #ALWAYS, #0, rcopy
-        nop()
-        nop()
-rshort: ldi s4, #-7
-        alu s5, s4, s8, #ASRRS
-        ldi s4, #WSHORT
-        alu s5, s5, s4, #OP_ADD
-rcopy:  alu s3, s5, s0, #OP_ADD
+        ldy s3, e6              ; prev_shape
         yst(WIN_R)
-        yld(s8, FIN + R_SH)
-        yld(s2, FIN + R_WS)
-        alu s4, s2, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST ; only_long
-        jmp #3, #3, flong
-        ldi s4, #3              ; (delay slot)
-        alu s4, s2, s4, #OP_SUB ; (delay slot)
-        ptst p3, s0, #EQ4, #PTST ; long_stop
-        jmp #3, #3, flong
-        nop()
-        nop()
-        ldi s4, #-7
-        alu s5, s4, s8, #ASRRS
-        ldi s4, #WSHORT
-        alu s5, s5, s4, #OP_ADD
-        jmp #ALWAYS, #0, fcopy
-        nop()
-        nop()
-flong:  ldi s4, #-10
-        alu s5, s4, s8, #ASRRS
-        ldi s4, #WLONG
-        alu s5, s5, s4, #OP_ADD
-fcopy:  alu s3, s5, s0, #OP_ADD
+        yld(s3, FIN + R_SH)
         yst(WIN_F)
 }
 

@@ -1,20 +1,17 @@
 //! dsp/lib/window.sm against its twin, ref/dsp/aac/window.zig `block` and `synth`: every window
-//! sequence, every pair of shapes, with the twin's own sine and KBD halves (ISO/IEC 14496-3
+//! sequence, every pair of shapes, from the twin's shared sine table and KBD rises (ISO/IEC 14496-3
 //! 4.6.11.3.3, windowing and block switching).
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
 const map = @import("../map.zig");
+const player = @import("../aac_player.zig");
 
 const W = ref.dsp.aac.window;
 const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
 const t_at = 0x0000;
-const lp_at = 0x0800; // previous shape's long rising half
-const lc_at = 0x0C00; // current shape's
-const sp_at = 0x1000; // previous shape's short rising half
-const sc_at = 0x1080; // current shape's
 const b_at = 0x1100;
 const ovl_at = 0x1900;
 const pcm_at = map.at("OUTY");
@@ -25,16 +22,6 @@ fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
         .long_start => std.fmt.comptimePrint("rimm R6, #2\n        win_start({d}, {d})", .{ t_at, b_at }),
         .long_stop => std.fmt.comptimePrint("rimm R6, #2\n        win_stop({d}, {d})", .{ t_at, b_at }),
         .eight_short => std.fmt.comptimePrint("rimm R6, #2\n        win_short({d}, {d})", .{ t_at, b_at }),
-    };
-}
-
-/// WIN_R and WIN_F: the rising half from the previous shape, the falling from the current.
-fn halves(seq: ref.aac.ics.WindowSequence) [2]u32 {
-    return switch (seq) {
-        .only_long => .{ lp_at, lc_at },
-        .long_start => .{ lp_at, sc_at },
-        .long_stop => .{ sp_at, lc_at },
-        .eight_short => .{ sp_at, sc_at },
     };
 }
 
@@ -64,15 +51,12 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
             var state = h.emu.State{};
             defer state.deinit(gpa);
             try h.putAllX(&state, gpa, t_at, &t);
-            try h.putAllX(&state, gpa, lp_at, &W.long[prev]);
-            try h.putAllX(&state, gpa, lc_at, &W.long[cur]);
-            try h.putAllX(&state, gpa, sp_at, &W.short[prev]);
-            try h.putAllX(&state, gpa, sc_at, &W.short[cur]);
+            try player.stageWindows(&state, gpa);
             try h.putAllX(&state, gpa, ovl_at, &st.overlap);
             try h.putY(&state, gpa, map.at("WIN_OVL"), ovl_at);
             try h.putY(&state, gpa, map.at("WIN_PCM"), pcm_at - 1); // stride 2, every other word
-            try h.putY(&state, gpa, map.at("WIN_R"), @intCast(halves(seq)[0]));
-            try h.putY(&state, gpa, map.at("WIN_F"), @intCast(halves(seq)[1]));
+            try h.putY(&state, gpa, map.at("WIN_R"), @intCast(prev));
+            try h.putY(&state, gpa, map.at("WIN_F"), @intCast(cur));
             // B starts as garbage: every word must be written
             for (0..2048) |k| try h.putX(&state, gpa, b_at + @as(u32, @intCast(k)), 0x5A5A5A);
 

@@ -72,10 +72,7 @@ pub fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, fi: u4) !void {
     }
     try h.stageImdct(st, gpa, 1024, map.at("PREL"), map.at("POSTL"), map.at("TWL"), map.at("REVL"));
     try h.stageImdct(st, gpa, 128, map.at("PRES"), map.at("POSTS"), map.at("TWS"), map.at("REVS"));
-    for (0..2) |s| {
-        try h.putAllX(st, gpa, map.at("WLONG") + 0x400 * @as(u32, @intCast(s)), &A.window.long[s]);
-        try h.putAllX(st, gpa, map.at("WSHORT") + 0x80 * @as(u32, @intCast(s)), &A.window.short[s]);
-    }
+    try stageWindows(st, gpa);
     try h.putAllX(st, gpa, map.at("XSTT"), &A.stereo.quarter);
     try h.putAllX(st, gpa, map.at("XPNT"), &A.pns.quarter);
     try h.putAllX(st, gpa, map.at("XSEED"), &A.pns.seed);
@@ -92,6 +89,14 @@ pub fn stageTables(st: *h.emu.State, gpa: std.mem.Allocator, fi: u4) !void {
     try h.putY(st, gpa, map.at("AK_NSWBS"), @intCast(short.len - 1));
     try h.putY(st, gpa, map.at("AK_TOPL"), ref.aac.tns.max_bands_long[fi]);
     try h.putY(st, gpa, map.at("AK_TOPS"), ref.aac.tns.max_bands_short[fi]);
+}
+
+/// The window tables window.sm reads: the shared sine table in X, the KBD rises in Y.
+pub fn stageWindows(st: *h.emu.State, gpa: std.mem.Allocator) !void {
+    try h.putAllX(st, gpa, map.at("SINE"), &A.sine.odd);
+    try h.putAllX(st, gpa, map.at("SINE4"), &A.sine.four);
+    for (A.window.kbd_long_y, 0..) |v, i| try h.putY(st, gpa, map.at("KBD_L") + @as(u32, @intCast(i)), v);
+    for (A.window.kbd_short_y, 0..) |v, i| try h.putY(st, gpa, map.at("KBD_S") + @as(u32, @intCast(i)), v);
 }
 
 pub const Player = struct {
