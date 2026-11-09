@@ -70,3 +70,73 @@ test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
     }
     try testing.expect(checked > 500);
 }
+
+test "mp3_granules reads scale factors through the reservoir as ref/mp3's Parser does" {
+    const gpa = testing.allocator;
+    const prog = try h.assemble(gpa,
+        \\.include "lib/ybits.sm"
+        \\.include "lib/stream.sm"
+        \\.include "lib/mp3.sm"
+        \\        stream_on()
+        \\        ybits_init()
+        \\        mp3_header()
+        \\        mp3_sideinfo()
+        \\        mp3_main()
+        \\        lde e7, #MP_OK
+        \\        ldy s12, e7
+        \\        ptst p3, s0, #EQ12, #PTST
+        \\        jmp #3, #3, keep
+        \\        nop()
+        \\        nop()
+        \\        mp3_granules()
+        \\keep:   mp3_keep()
+        \\        x17.halt
+        \\
+    );
+    defer gpa.free(prog);
+    var decoded: usize = 0;
+    var skipped: usize = 0;
+    var ill: usize = 0;
+    var pre: usize = 0;
+    for (fixtures) |file| {
+        const fr = try tables.frames(gpa, file);
+        defer gpa.free(fr);
+        var state = h.emu.State{};
+        defer state.deinit(gpa);
+        try tables.put(&state, gpa, map.at);
+        var parser: ref.mp3.decoder.Parser = .{};
+        for (fr) |frame| {
+            try h.stagePacket(gpa, &state, frame);
+            state.halted = false;
+            _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+            try testing.expect(state.halted);
+            try testing.expect(!state.stream_starved);
+            const hd = try ref.mp3.header.parse(frame);
+            const p = try parser.parse(frame, hd) orelse {
+                try testing.expectEqual(@as(u32, 0), y(&state, map.at("MP_OK")));
+                skipped += 1;
+                continue;
+            };
+            try testing.expectEqual(@as(u32, 1), y(&state, map.at("MP_OK")));
+            try testing.expectEqual(@as(u32, @intCast(parser.res_len)), y(&state, map.at("MP_RLEN")));
+            for (0..hd.granules()) |gr| for (0..hd.channels()) |ch| {
+                const k: u32 = @intCast(2 * gr + ch);
+                const s = p.sf[gr][ch];
+                for (0..40) |e| {
+                    const want: u32 = @as(u32, s.sf[e]) + (if (s.illegal[e]) @as(u32, 0x100) else 0);
+                    ill += @intFromBool(s.illegal[e]);
+                    const got = y(&state, map.at("MP_SF") + 40 * k + @as(u32, @intCast(e)));
+                    if (want != got) {
+                        std.debug.print("frame {d} k {d} e {d}: want {d} got {d}; sfc {d} bt {d} mixed {d} ver {d}\n", .{ decoded + skipped, k, e, want, got, y(&state, map.at("MP_GR0") + 18 * k + 2), y(&state, map.at("MP_GR0") + 18 * k + 4), y(&state, map.at("MP_GR0") + 18 * k + 5), y(&state, map.at("MH_VER")) });
+                        return error.TestExpectedEqual;
+                    }
+                }
+                pre += @intFromBool(s.preflag);
+                try testing.expectEqual(@as(u32, @intFromBool(s.preflag)), y(&state, map.at("MP_PRE") + k));
+            };
+            decoded += 1;
+        }
+    }
+    std.debug.print("mp3 sf: {d} frames decoded, {d} skipped, {d} illegal, {d} preflag\n", .{ decoded, skipped, ill, pre });
+    try testing.expect(decoded > 500);
+}

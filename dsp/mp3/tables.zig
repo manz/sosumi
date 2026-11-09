@@ -39,3 +39,38 @@ pub fn frames(gpa: std.mem.Allocator, file: []const u8) ![][]const u8 {
     }
     return out.toOwnedSlice(gpa);
 }
+
+const sfs = ref.mp3.scalefactors;
+
+/// MP_SLEN: slen1[16] then slen2[16], by scalefac_compress.
+pub const slen: [32]u16 = blk: {
+    var t: [32]u16 = undefined;
+    for (0..2) |r| for (0..16) |c| {
+        t[r * 16 + c] = sfs.slen[r][c];
+    };
+    break :blk t;
+};
+
+/// MP_PART: entries per partition, [long, mixed, short][28].
+pub const part: [84]u16 = blk: {
+    var t: [84]u16 = undefined;
+    for (0..3) |r| for (0..28) |c| {
+        t[r * 28 + c] = sfs.partitions[r][c];
+    };
+    break :blk t;
+};
+
+/// MP_GMOD: the MPEG-2 partition radices.
+pub const gmod: [24]u16 = blk: {
+    var t: [24]u16 = undefined;
+    for (&t, sfs.g_mod) |*d, v| d.* = v;
+    break :blk t;
+};
+
+/// Every table at its Y address (`at` maps a .const name to its address).
+pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []const u8) u32) !void {
+    for (flen, 0..) |v, i| try st.y_mem.put(gpa, at("MP_FLEN") + @as(u32, @intCast(i)), v);
+    for (slen, 0..) |v, i| try st.y_mem.put(gpa, at("MP_SLEN") + @as(u32, @intCast(i)), v);
+    for (part, 0..) |v, i| try st.y_mem.put(gpa, at("MP_PART") + @as(u32, @intCast(i)), v);
+    for (gmod, 0..) |v, i| try st.y_mem.put(gpa, at("MP_GMOD") + @as(u32, @intCast(i)), v);
+}

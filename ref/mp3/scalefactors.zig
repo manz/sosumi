@@ -18,20 +18,20 @@ pub const Scalefactors = struct {
     preflag: bool = false,
 };
 
-const slen = [2][16]u3{
+pub const slen = [2][16]u3{
     .{ 0, 0, 0, 0, 3, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4 },
     .{ 0, 1, 2, 3, 0, 1, 2, 3, 1, 2, 3, 1, 2, 3, 2, 3 },
 };
 
 /// Entries per partition: row 0 long, 1 mixed, 2 short; group 0 is MPEG-1, groups 1..3 MPEG-2,
 /// groups 4..6 MPEG-2 intensity right channel.
-const partitions = [3][28]u8{
+pub const partitions = [3][28]u8{
     .{ 6, 5, 5, 5, 6, 5, 5, 5, 6, 5, 7, 3, 11, 10, 0, 0, 7, 7, 7, 0, 6, 6, 6, 3, 8, 8, 5, 0 },
     .{ 8, 9, 6, 12, 6, 9, 9, 9, 6, 9, 12, 6, 15, 18, 0, 0, 6, 15, 12, 0, 6, 12, 9, 6, 6, 18, 9, 0 },
     .{ 9, 9, 6, 12, 9, 9, 9, 9, 9, 9, 12, 6, 18, 18, 0, 0, 12, 12, 12, 0, 12, 9, 9, 6, 15, 12, 9, 0 },
 };
 
-const g_mod = [24]u8{ 5, 5, 4, 4, 5, 5, 4, 1, 4, 3, 1, 1, 5, 6, 6, 1, 4, 4, 4, 1, 4, 3, 1, 1 };
+pub const g_mod = [24]u8{ 5, 5, 4, 4, 5, 5, 4, 1, 4, 3, 1, 1, 5, 6, 6, 1, 4, 4, 4, 1, 4, 3, 1, 1 };
 
 /// Reads one channel's scale factors. `prev` holds the channel's previous granule values (scfsi
 /// source) and receives this granule's. `use_scfsi` is the channel's scfsi in MPEG-1 granule 1.

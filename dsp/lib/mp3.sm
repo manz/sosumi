@@ -311,3 +311,450 @@ scs:    gfield(1)               ; scalefac_scale
         nop()
 done:
 }
+
+; ---------------------------------------------------------------------------
+; Scale factors (ref/mp3/scalefactors.zig; ISO/IEC 11172-3 2.4.2.7, 13818-3 2.4.3.2): one per
+; band entry, 40 per granule and channel at MP_SF, the rest of the 40 zeroed. MPEG-2 marks an
+; intensity position at its slen's largest value (no intensity) with MP_ILL added.
+
+.const MP_SLEN = 0x1C00         ; slen1[16], then slen2[16]
+.const MP_PART = 0x1C20         ; partition entry counts [long, mixed, short][28]
+.const MP_GMOD = 0x1C80         ; MPEG-2 partition radices [24]
+.const MP_SF   = 0x1CA0         ; [2 gr + ch][40]
+.const MP_PRE  = 0x1D40         ; MPEG-2's derived preflag, [2 gr + ch]
+.const MP_CK   = 0x1D44         ; the granule and channel at hand: 2 gr + ch
+.const MP_CCH  = 0x1D45         ; its channel
+.const MP_CSZ  = 0x1D46         ; its four partition slens
+.const MP_CCNT = 0x1D4A         ; the address of its four partition counts
+.const MP_ILL  = 0x100
+
+; s<dst> = Y[addr + r] (r a register, not s13). Uses e7.
+.macro yidx(dst, addr, r) {
+        ldi s13, #addr - 1
+        alu s13, s13, r, #OP_ADD
+        x17.mve e7, s13
+        ldy dst, e7
+}
+
+; q, x <- floor(x / d), x mod d, d >= 2 in a register (repeated subtraction: MPEG-2 only).
+; Uses s12.
+.macro divmod(q, x, d) {
+        ldi q, #0
+more:   alu s12, x, d, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        alu x, s12, s0, #OP_ADD
+        alu q, q, s14, #OP_ADD
+        jmp #ALWAYS, #0, more
+        nop()
+        nop()
+done:
+}
+
+; The granule and channel in MP_CK, MP_CCH: their scale factors from the reader's position.
+; Uses s1..s5, s7, s8, e4, e5, e7 and the reader's registers.
+.macro mp3_sf() {
+        lde e7, #MP_CK
+        ldy s1, e7              ; k = 2 gr + ch
+        ldi s12, #MP_GR
+        x18.mpy s2, s0, s1, s12
+        ldi s12, #MP_GR0 + 2
+        alu s13, s2, s12, #OP_ADD
+        x17.mve e7, s13         ; the record's scalefac_compress
+        ldy s3, e7
+        ldi s12, #MP_GR0 + 4
+        alu s13, s2, s12, #OP_ADD
+        x17.mve e7, s13
+        ldy s4, e7              ; block_type (0 without window switching)
+        ldi s12, #MP_GR0 + 5
+        alu s13, s2, s12, #OP_ADD
+        x17.mve e7, s13
+        ldy s5, e7              ; mixed
+        ; row: 0 long, 1 mixed, 2 short (short = block_type 2)
+        ldi s7, #0
+        ldi s12, #2
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rowd
+        nop()
+        nop()
+        ldi s7, #2
+        alu s7, s7, s5, #OP_SUB
+rowd:   ldi s12, #28
+        x18.mpy s7, s0, s7, s12
+        ldi s12, #MP_PART
+        alu s7, s7, s12, #OP_ADD ; the row's counts
+        lde e7, #MH_MP1
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, lsf
+        nop()
+        nop()
+        ; MPEG-1: slen1 twice, slen2 twice; scfsi in granule 1 of a block that is not short
+        yidx(s5, MP_SLEN, s3)
+        lde e7, #MP_CSZ
+        x17.styi e7, #5, #0, e7
+        x17.styi e7, #5, #0, e7
+        yidx(s5, MP_SLEN + 16, s3)
+        lde e7, #MP_CSZ + 2
+        x17.styi e7, #5, #0, e7
+        x17.styi e7, #5, #0, e7
+        mp3_put(MP_CCNT, 7)
+        ldi s5, #0              ; scfsi
+        ldi s12, #2
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; granule 0
+        jmp #3, #3, m1pre
+        nop()
+        nop()
+        ldi s12, #2
+        alu s12, s4, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; short
+        jmp #3, #3, m1pre
+        nop()
+        nop()
+        lde e7, #MP_CCH
+        ldy s12, e7
+        yidx(s5, MP_SI + 1, s12)
+m1pre:  ldi s7, #0              ; not MPEG-2
+        ldi s8, #0              ; preflag
+        jmp #ALWAYS, #0, store
+        nop()
+        nop()
+        ; MPEG-2: intensity's right channel halves scalefac_compress and uses radices 12..23
+lsf:    ldi s4, #0              ; radix base
+        ldi s8, #1              ; preflag possible
+        lde e7, #MH_MODE
+        ldy s12, e7
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; joint stereo
+        jmp #IF_NOT, #3, noist
+        nop()
+        nop()
+        lde e7, #MH_EXT
+        ldy s12, e7
+        x18.and s12, s12, s14
+        ptst p3, s0, #EQ12, #PTST ; no intensity
+        jmp #3, #3, noist
+        nop()
+        nop()
+        lde e7, #MP_CCH
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST ; left channel
+        jmp #3, #3, noist
+        nop()
+        nop()
+        alu s3, s14, s3, #ASR   ; scalefac_compress >> 1 (fact 774)
+        ldi s4, #12
+        ldi s8, #0
+        ; the group: subtract each group's radix product while scalefac_compress reaches it
+noist:  ldi s5, #0              ; group
+grp:    yidx(s1, MP_GMOD, s4)
+        yidx(s2, MP_GMOD + 1, s4)
+        x18.mpy s1, s0, s1, s2
+        yidx(s2, MP_GMOD + 2, s4)
+        x18.mpy s1, s0, s1, s2
+        yidx(s2, MP_GMOD + 3, s4)
+        x18.mpy s1, s0, s1, s2 ; the group's product
+        alu s12, s3, s1, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, ingrp
+        nop()
+        nop()
+        alu s3, s12, s0, #OP_ADD
+        ldi s12, #4
+        alu s4, s4, s12, #OP_ADD
+        alu s5, s5, s14, #OP_ADD
+        jmp #ALWAYS, #0, grp
+        nop()
+        nop()
+        ; the slens: scalefac_compress's mixed-radix digits, the last radix least significant
+ingrp:  ldi s2, #3
+dig:    alu s12, s4, s2, #OP_ADD
+        yidx(s1, MP_GMOD, s12)  ; the radix
+        alu s12, s1, s14, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; radix 1: digit 0
+        jmp #IF_NOT, #3, div
+        ldi s12, #0             ; (delay slot)
+        nop()
+        jmp #ALWAYS, #0, put
+        nop()
+        nop()
+div:    divmod(s13, s3, s1)
+        alu s1, s3, s0, #OP_ADD ; the digit
+        alu s3, s13, s0, #OP_ADD ; the rest
+        alu s12, s1, s0, #OP_ADD
+put:    ldi s13, #MP_CSZ - 1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e7, s13
+        x17.sty e7, #4, #1      ; s12
+        alu s2, s2, s14, #OP_SUB
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, dig
+        nop()
+        nop()
+        ; counts one group past the radices (ref: partitions[row][k + 4]); preflag for group 2
+        alu s7, s7, s4, #OP_ADD
+        ldi s12, #4
+        alu s7, s7, s12, #OP_ADD
+        mp3_put(MP_CCNT, 7)
+        ldi s12, #2
+        alu s12, s5, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, g2
+        nop()
+        nop()
+        ldi s8, #0
+g2:     ldi s5, #0              ; no scfsi
+        ldi s7, #1              ; MPEG-2
+        ; s5 scfsi, s7 MPEG-2, s8 preflag
+store:  lde e7, #MP_CK
+        ldy s1, e7
+        ldi s13, #MP_PRE - 1
+        alu s13, s13, s1, #OP_ADD
+        x17.mve e7, s13
+        alu s13, s8, s0, #OP_ADD
+        x17.sty e7, #5, #1      ; MP_PRE[k] = preflag (via s13: x17.sty takes no s8)
+        alu s8, s7, s0, #OP_ADD ; s8 = MPEG-2 from here; s7 carries the values
+        ; out: MP_SF + 40 k; scfsi's source: granule 0's, MP_SF + 40 ch
+        ldi s12, #40
+        x18.mpy s2, s0, s1, s12
+        ldi s13, #MP_SF - 1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e5, s13
+        lde e7, #MP_CCH
+        ldy s1, e7
+        x18.mpy s2, s0, s1, s12
+        ldi s13, #MP_SF - 1
+        alu s13, s13, s2, #OP_ADD
+        x17.mve e4, s13
+        ldi s1, #0              ; partition
+        ldi s4, #40             ; entries left to write
+part:   ldi s12, #4
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, zero
+        nop()
+        nop()
+        lde e7, #MP_CCNT
+        ldy s12, e7
+        alu s13, s12, s1, #OP_ADD
+        alu s13, s13, s14, #OP_SUB
+        x17.mve e7, s13
+        ldy s2, e7              ; this partition's entries
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, zero
+        nop()
+        nop()
+        yidx(s3, MP_CSZ, s1)    ; its slen
+        ; reuse: scfsi bit 8 >> partition
+        ldi s12, #3
+        alu s12, s12, s1, #OP_SUB
+        alu s12, s12, s5, #ASR  ; scfsi >> (3 - part) (fact 774)
+        x18.and s12, s12, s14
+        alu s4, s4, s2, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; read, not reused
+        jmp #3, #3, ent
+        nop()
+        nop()
+        ; reused: copy granule 0's
+rcopy:  x19.ld s7, #2, e4, #2
+        x17.styi e5, #7, #0, e5
+        alu s2, s2, s14, #OP_SUB
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, rcopy
+        nop()
+        nop()
+        jmp #ALWAYS, #0, pnext
+        nop()
+        nop()
+ent:    alu s12, s3, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; slen 0: zeros
+        ldi s7, #0
+        jmp #3, #3, put0
+        nop()
+        nop()
+        alu s11, s3, s0, #OP_ADD
+        getbits_s(s7)
+        alu s12, s8, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; MPEG-1: no intensity mark
+        jmp #3, #3, put0
+        nop()
+        nop()
+        x19.alu s13, s14, s3, #SHIFT ; 2^slen
+        alu s13, s13, s14, #OP_SUB
+        alu s12, s7, s13, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; the largest value
+        jmp #IF_NOT, #3, put0
+        nop()
+        nop()
+        ldi s13, #MP_ILL
+        alu s7, s7, s13, #OP_ADD
+put0:   x17.styi e5, #7, #0, e5
+        x19.ld s12, #2, e4, #2  ; keep e4 in step with e5
+        alu s2, s2, s14, #OP_SUB
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, ent
+        nop()
+        nop()
+pnext:  alu s1, s1, s14, #OP_ADD
+        jmp #ALWAYS, #0, part
+        nop()
+        nop()
+zero:   ldi s7, #0
+zl:     alu s12, s4, s0, #OP_ADD
+        ptst p3, s0, #LE12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        x17.styi e5, #7, #0, e5
+        alu s4, s4, s14, #OP_SUB
+        jmp #ALWAYS, #0, zl
+        nop()
+        nop()
+done:
+}
+
+; ---------------------------------------------------------------------------
+; The bit reservoir (ref/mp3/decoder.zig Parser; ISO/IEC 11172-3 2.4.3.4.4): the last 512
+; bytes of main data end at MP_MAIN - 1, so a frame's main data, copied to MP_MAIN, continues
+; them, and its granules start at bit 8 (MP_MAIN - main_data_begin - MP_PB) from Y:MP_PB.
+
+.const MP_RLEN = 0x1D4E         ; reservoir bytes, 0..512 (0 at the stream's start)
+.const MP_OK   = 0x1D4F         ; 1: main_data_begin within the reservoir, the frame decodes
+.const MP_P    = 0x1D50         ; the granule at hand's first bit, in bits from Y:MP_PB
+.const MP_PB   = 0x1000         ; MP_P's origin: Y words load sign-extended from 16 bits, so a
+                                ; bit address from Y:0 would turn negative past Y:0x1000
+
+; MP_OK and MP_P for this frame. Uses s1, s2, s12, e7.
+.macro mp3_main() {
+        lde e7, #MP_SI
+        ldy s1, e7              ; main_data_begin
+        lde e7, #MP_RLEN
+        ldy s2, e7
+        alu s12, s2, s1, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; reaches past the reservoir
+        ldi s2, #0
+        jmp #3, #3, ok
+        nop()
+        nop()
+        ldi s2, #1
+ok:     mp3_put(MP_OK, 2)
+        ldi s12, #MP_MAIN - MP_PB
+        alu s1, s12, s1, #OP_SUB
+        ldi s12, #-3
+        alu s1, s12, s1, #ASR   ; * 8 (fact 774)
+        mp3_put(MP_P, 1)
+}
+
+; The reader at bit s1 from Y:MP_PB (s1 not s13). Uses s1, s2, the reader's registers.
+.macro mp3_seek() {
+        ldi s12, #3
+        alu s2, s12, s1, #ASR   ; the byte from MP_PB
+        ldi s12, #-3
+        alu s12, s12, s2, #ASR
+        alu s1, s1, s12, #OP_SUB ; the bits into it
+        ldi s12, #MP_PB
+        alu s2, s2, s12, #OP_ADD
+        ybits_at(s2)
+        alu s11, s1, s0, #OP_ADD
+        getbits_s(s1)
+}
+
+; The reservoir after the frame: its last min(512, MP_RLEN + MH_MAIN) bytes moved to end at
+; MP_MAIN - 1. Uses s1..s3, s12, s13, e7, e8.
+.macro mp3_keep() {
+        lde e7, #MP_RLEN
+        ldy s1, e7
+        lde e7, #MH_MAIN
+        ldy s2, e7
+        alu s1, s1, s2, #OP_ADD
+        ldi s12, #512
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; under 512
+        jmp #3, #3, fits
+        nop()
+        nop()
+        ldi s1, #512
+fits:   mp3_put(MP_RLEN, 1)
+        ldi s12, #MP_MAIN - 1
+        alu s13, s12, s2, #OP_ADD
+        alu s13, s13, s1, #OP_SUB ; source - 1: MP_MAIN + main - n - 1
+        x17.mve e8, s13
+        alu s13, s12, s1, #OP_SUB ; destination - 1: MP_MAIN - n - 1
+        x17.mve e7, s13
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; no new bytes: nothing moves
+        jmp #3, #3, done
+        nop()
+        nop()
+mv:     alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #LE12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        x19.ld s3, #4, e8, #2
+        x17.styi e7, #3, #0, e7
+        alu s1, s1, s14, #OP_SUB
+        jmp #ALWAYS, #0, mv
+        nop()
+        nop()
+done:
+}
+
+; Each granule and channel in order (k = 2 gr + ch, the absent ones skipped): the reader at
+; its first bit, its scale factors, then MP_P past its part2_3_length bits.
+; Uses s1..s5, s7, s8, e4, e5, e7, e8 and the reader's registers.
+.macro mp3_granules() {
+        ldi s1, #0
+        mp3_put(MP_CK, 1)
+gc:     lde e7, #MP_CK
+        ldy s1, e7
+        x18.and s2, s1, s14     ; ch
+        alu s3, s14, s1, #ASR   ; gr (fact 774)
+        mp3_put(MP_CCH, 2)
+        lde e7, #MH_NCH
+        ldy s12, e7
+        alu s12, s2, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; ch < nch
+        jmp #IF_NOT, #3, next
+        nop()
+        nop()
+        lde e7, #MH_MP1
+        ldy s12, e7
+        alu s12, s3, s12, #OP_SUB
+        alu s12, s12, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; gr < granules
+        jmp #IF_NOT, #3, next
+        nop()
+        nop()
+        lde e7, #MP_P
+        ldy s1, e7
+        mp3_seek()
+        mp3_sf()
+        lde e7, #MP_CK
+        ldy s1, e7
+        ldi s12, #MP_GR
+        x18.mpy s1, s0, s1, s12
+        yidx(s2, MP_GR0, s1)    ; part2_3_length
+        lde e7, #MP_P
+        ldy s1, e7
+        alu s1, s1, s2, #OP_ADD
+        mp3_put(MP_P, 1)
+next:   lde e7, #MP_CK
+        ldy s1, e7
+        alu s1, s1, s14, #OP_ADD
+        mp3_put(MP_CK, 1)
+        ldi s12, #4
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, gc
+        nop()
+        nop()
+}
