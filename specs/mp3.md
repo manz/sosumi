@@ -1,6 +1,6 @@
 # MP3 decoder
 
-Status: working draft. The reader side is known as host interface facts. The reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; its numeric half has an sm1-shaped twin (`ref/dsp/mp3/`); the sm1 program (`dsp/lib/mp3.sm`) runs from intake through joint stereo, exact against the twin.
+Status: working draft. The reader side is known as host interface facts. The reference model (`ref/mp3/`) decodes MPEG-1, 2 and 2.5 Layer III; its numeric half has an sm1-shaped twin (`ref/dsp/mp3/`); the sm1 program (`dsp/lib/mp3.sm`) runs from intake through the hybrid filterbank, exact against the twin.
 
 ## Goal and boundary
 
@@ -141,9 +141,9 @@ subband, 32 rows of V per slot), the synthesis window exact in Q17. Against `too
 | ffmpeg binary | max diff 1 LSB, except sweep.m2 (2 LSB in 0.017% of samples) |
 
 Words wrap at 24 bits as sm1's do; only requantisation saturates. A stream louder than 4 at a
-filterbank stage would wrap (OPEN: whether the program saturates there instead). M/S lines whose
-sum passes a word already differ: the twin wraps, x17's emulator reads the x03.tap sum back as
--2^23 (**MEASURED** in the emulator; OPEN on silicon).
+filterbank stage would wrap (OPEN: whether the program saturates there instead). x03.tap's 48-bit
+sum saturates in x17's emulator and the twin follows it (`ops.mac`); on silicon OPEN. No
+fixture comes near it.
 
 ## Host facts
 

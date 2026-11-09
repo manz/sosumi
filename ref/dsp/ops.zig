@@ -72,11 +72,13 @@ pub fn isNeg(a: Word) bool {
 }
 
 /// x03.tap's running sum (x17 reference.md x03.tap; facts 672, 701, 702; exact on silicon over a
-/// counted two-pointer chain, 792): {hi:lo} += 2ab, 24 x 24 into 48 bits, no rounding.
+/// counted two-pointer chain, 792): {hi:lo} += 2ab, 24 x 24 into 48 bits, no rounding. Each step
+/// saturates at 48 bits as x17's emulator does (mac48; OPEN on silicon).
 pub const Acc = i48;
 
 pub fn mac(acc: Acc, a: Word, b: Word) Acc {
-    return acc +% 2 * @as(Acc, a) * b;
+    const s: i64 = @as(i64, acc) + 2 * @as(i64, a) * b;
+    return @intCast(std.math.clamp(s, std.math.minInt(Acc), std.math.maxInt(Acc)));
 }
 
 /// The sum read back as one word, (acc + 2^(s-1)) / 2^s floored, wrapped to 24 bits, s in 1..24:
@@ -212,7 +214,7 @@ test "accRshr is the rounded shift of the 48-bit sum, wrapped" {
         var acc: Acc = 0;
         for (0..rnd.intRangeAtMost(usize, 1, 36)) |_| acc = mac(acc, rnd.int(Word), rnd.intRangeAtMost(Word, -(1 << 21), 1 << 21));
         const s: u5 = rnd.intRangeAtMost(u5, 1, 24);
-        const want: Word = @truncate((acc + (@as(Acc, 1) << (s - 1))) >> s);
+        const want: Word = @truncate((@as(i64, acc) + (@as(i64, 1) << (s - 1))) >> s);
         try testing.expectEqual(want, accRshr(acc, s));
     }
 }
