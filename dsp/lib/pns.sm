@@ -25,7 +25,7 @@
 .const PN_T     = 0x1F00
 .const PN_SEED  = 0x1F04
 .const PN_RNG   = 0x1F10
-.const PN_Y     = 0x2600
+.const PN_Y     = 0x2794
 .const PN_NB    = PN_Y + 0
 .const PN_GRP   = PN_Y + 1
 .const PN_MAX   = PN_Y + 2

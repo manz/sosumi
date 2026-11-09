@@ -99,7 +99,7 @@ test "dq_channel dequantises as the twin does: words and exponent" {
         try testing.expect(state.halted);
 
         // the twin reports e = 0 for an all-zero channel, as dq_channel does
-        try testing.expectEqual(@as(u32, @as(u16, @truncate(@as(u24, @bitCast(want.e))))), state.getY(0x215B) orelse 0xDEAD);
+        try testing.expectEqual(@as(u32, @as(u16, @truncate(@as(u24, @bitCast(want.e))))), state.getY(map.at("DQ_E")) orelse 0xDEAD);
         for (want.w, 0..) |w, k| {
             if (w != 0) nonzero += 1;
             try testing.expectEqual(@as(u32, @as(u24, @bitCast(w))), state.readX(0x400 + @as(u32, @intCast(k))) orelse 0xDEAD);

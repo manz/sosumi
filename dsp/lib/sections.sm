@@ -6,9 +6,9 @@
 ; AAC_BOOK, ended by -1, and the scale factors at AAC_SF. Every test is a sign or zero test of
 ; s4 or s8. Needs lib/bits.sm and lib/huffman.sm.
 
-.const AAC_BOOK = 0x2000        ; 120 bands at most, then -1
-.const AAC_SF   = 0x2080
-.const AAC_ACC  = 0x2100        ; +0 scale factor, +1 noise energy, +2 intensity, +3 PCM pending
+.const AAC_BOOK = 0x23E0        ; 120 bands at most, then -1
+.const AAC_SF   = 0x2460
+.const AAC_ACC  = 0x24E0        ; +0 scale factor, +1 noise energy, +2 intensity, +3 PCM pending
 
 ; aac_sections(sb, esc, fail): s1 = window groups (1..8), s2 = max_sfb; sb = sect_bits (5 long,
 ; 3 short), esc = 2^sb - 1. Book 12 or a section running past max_sfb jumps to fail. Uses e7,

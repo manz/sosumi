@@ -13,9 +13,9 @@
 ; long_stop, else short; eight_short's later windows rise on it too). So one copy of the code
 ; serves every channel and shape.
 
-.const WIN_OVL = 0x2388
-.const WIN_R   = 0x2389
-.const WIN_F   = 0x238A
+.const WIN_OVL = 0x2550
+.const WIN_R   = 0x2551
+.const WIN_F   = 0x2552
 
 ; A6 = Y:[SLOT] (x03.acp, fact 193). x03.acp also loads s7 with that word (facts 190, 748). Uses e6, s7.
 .macro win_a6(SLOT) {

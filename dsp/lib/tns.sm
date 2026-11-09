@@ -24,7 +24,7 @@
 .const TN_K    = 0x1F00
 .const TN_KC   = 0x1F20         ; K', 12 words
 .const TN_B    = 0x1F30         ; B', 12 words
-.const TN_Y    = 0x2600
+.const TN_Y    = 0x2794
 .const TN_E    = TN_Y + 0
 .const TN_NWIN = TN_Y + 1
 .const TN_WLEN = TN_Y + 2

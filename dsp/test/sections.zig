@@ -4,6 +4,7 @@
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
+const map = @import("../map.zig");
 
 const S = ref.dsp.aac.sections;
 const H = ref.dsp.aac.huffman;
@@ -153,10 +154,10 @@ test "aac_sections and aac_scalefactors decode as the twin does" {
         if (short and s.groups > 1) grouped += 1;
         for (b.book[0..b.n], b.sf[0..b.n], 0..) |cb, sf, i| {
             const at: u32 = @intCast(i);
-            try testing.expectEqual(y16(cb), state.getY(0x2000 + at) orelse 0xDEAD);
-            try testing.expectEqual(y16(sf), state.getY(0x2080 + at) orelse 0xDEAD);
+            try testing.expectEqual(y16(cb), state.getY(map.at("AAC_BOOK") + at) orelse 0xDEAD);
+            try testing.expectEqual(y16(sf), state.getY(map.at("AAC_SF") + at) orelse 0xDEAD);
         }
-        try testing.expectEqual(@as(u32, 0xFFFF), state.getY(0x2000 + @as(u32, @intCast(b.n))) orelse 0xDEAD);
+        try testing.expectEqual(@as(u32, 0xFFFF), state.getY(map.at("AAC_BOOK") + @as(u32, @intCast(b.n))) orelse 0xDEAD);
         try testing.expectEqual(@as(u32, @intCast(try r.read(8))), state.s[8]);
     }
     try testing.expect(ok > 90);

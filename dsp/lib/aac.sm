@@ -30,10 +30,10 @@
 ; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, PCMY, the AK_
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
-.const HUFF0    = 0x4800        ; scale factor code
-.const HUFF_END = 0x5C00        ; past the Huffman codes
-.const AU       = 0x4000        ; the access unit, staged by the host
-.const AK       = 0x3C00
+.const HUFF0    = 0x0B80        ; scale factor code
+.const HUFF_END = 0x1D40        ; past the Huffman codes
+.const AU       = 0x0880        ; the access unit, staged by the host
+.const AK       = 0x2C94
 .const AK_NCH   = AK + 0
 .const AK_ST    = AK + 1
 .const AK_SLOT  = AK + 2
@@ -67,14 +67,14 @@
 .const AK_PNR   = AK + 31       ; the shared PNS core's way back (ak_pnc)
 .const AK_TNB   = AK + 32       ; tns_data's n_filt, length and order widths, 3 words
 .const AK_BOOKS = AK + 0x40     ; 12 words
-.const SWB_L    = 0x3D00
-.const SWB_S    = 0x3D40
-.const PAIR_MSU = 0x3D80        ; 128 words
-.const ESLOT    = 0x2390
-.const REVL     = 0x2400
-.const REVS     = 0x2D00
+.const SWB_L    = 0x2CE0
+.const SWB_S    = 0x2D20
+.const PAIR_MSU = 0x2D60        ; 128 words
+.const ESLOT    = 0x2553
+.const REVL     = 0x2554
+.const REVS     = 0x2754
 .const PCMY     = 0x3000
-.const OUTY     = 0x3400
+.const OUTY     = 0x0080
 
 ; a channel record
 .const R_GG   = 0
@@ -96,10 +96,10 @@
 .const R_SF   = 0x180           ; 128 words
 .const R_SIZE = 0x200
 .const R_HEAD = 0xA0            ; the part the channel tail reads
-.const CUR    = 0x5C00
-.const STL    = 0x6000
-.const STR    = 0x6200
-.const FIN    = 0x6400
+.const CUR    = 0x1D40
+.const STL    = 0x1F40
+.const STR    = 0x2140
+.const FIN    = 0x2340
 
 .const PREL   = 0x1000
 .const POSTL  = 0x1400

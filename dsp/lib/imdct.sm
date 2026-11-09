@@ -30,7 +30,7 @@
 ; and s14 (s15 is left 16 for bits.sm), e6..e8, R1..R7, A2..A6, A8..A10, A12, A14 and Y
 ; IM_Y .. IM_Y + 7.
 
-.const IM_Y    = 0x2380
+.const IM_Y    = 0x2548
 .const IM_EX   = IM_Y + 0       ; E of the normalised words
 .const IM_SC   = IM_Y + 1       ; FFT scaling so far
 .const IM_HALF = IM_Y + 2       ; the radix-4 stage's block size l

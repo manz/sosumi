@@ -21,7 +21,7 @@
 .const ST_L    = 0x0400
 .const ST_R    = 0x0800
 .const ST_T    = 0x1F00
-.const ST_Y    = 0x2600
+.const ST_Y    = 0x2794
 .const ST_NB   = ST_Y + 0
 .const ST_GRP  = ST_Y + 1
 .const ST_MAX  = ST_Y + 2
