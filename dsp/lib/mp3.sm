@@ -2009,22 +2009,23 @@ done:
         mp3_rd24(s1, s2, s3)
 }
 
-.macro mp3_row6() {
+; A 6-term row sum (as mp3_row18) with x in steps of R5 (x03.tapa).
+.macro mp3_row6s() {
         x19.xrd s5, #9
-        x02.ainc #9, #9
+        x02.aa A9, A9, R5, #2, A0, A0
         x19.xrd s4, #8
         x02.ainc #8, #8
-        x03.tap0 s5, #9, s4, s2, s3 ; 2 x0 c0; x1
+        x03.tap0a s5, #9, s4, s2, s3, #2, R5 ; 2 x0 c0; x1
         x03.tap s4, #8, s0, s2, s3 ; c1
-        x03.tap s5, #9, s4, s2, s3 ; + 2 x1 c1; x2
+        x03.tapa s5, #9, s4, s2, s3, #2, R5 ; + 2 x1 c1; x2
         x03.tap s4, #8, s0, s2, s3 ; c2
-        x03.tap s5, #9, s4, s2, s3 ; + 2 x2 c2; x3
+        x03.tapa s5, #9, s4, s2, s3, #2, R5 ; + 2 x2 c2; x3
         x03.tap s4, #8, s0, s2, s3 ; c3
-        x03.tap s5, #9, s4, s2, s3 ; + 2 x3 c3; x4
+        x03.tapa s5, #9, s4, s2, s3, #2, R5 ; + 2 x3 c3; x4
         x03.tap s4, #8, s0, s2, s3 ; c4
-        x03.tap s5, #9, s4, s2, s3 ; + 2 x4 c4; x5
+        x03.tapa s5, #9, s4, s2, s3, #2, R5 ; + 2 x4 c4; x5
         x03.tap s4, #8, s0, s2, s3 ; c5
-        x03.tap s5, #9, s4, s2, s3 ; + 2 x5 c5; x6
+        x03.tapa s5, #9, s4, s2, s3, #2, R5 ; + 2 x5 c5; x6
         mp3_rd24(s1, s2, s3)
 }
 
@@ -2068,47 +2069,60 @@ rb:     mp3_row18()
 }
 
 ; y[36] at X:MP_XZ from the short subband at s11 (twin `imdctShort`): zeros, then per window w the
-; 6 lines x[3 k + w] through 6 rows (y12[r], -y12[5 - r]; y12[r + 3], y12[14 - r]) and
+; 6 lines x[3 k + w] (read in steps of 3) through 6 rows (y12[r], -y12[5 - r]; y12[r + 3], y12[14 - r]) and
 ; y[6 + 6 w + i] += rshr(2 y12[i] win[i], 23). Uses s1..s13, A8..A13, R5, R6.
 .macro mp3_imdct12() {
-        aimm(A12, MP_XZ)
-        ldi s1, #0
-        ldi s6, #36
-z36:    stx A12, s1
-        x02.ainc #12, #12
-        ldi s1, #0
-        alu s6, s6, s14, #OP_SUB
-        alu s12, s6, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, z36
-        nop()
-        nop()
+        aimm_e(6, MP_XZ)        ; A12
+        ldi s3, #0
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
+        pks(3, A12, 0, s0, s0, 0)
         ldi s1, #0
         mp3_put(MP_HW, 1)
 sw:     lde e7, #MP_HW
         ldy s1, e7
         alu s2, s11, s1, #OP_ADD
-        amov(A9, s2)            ; x[w]
-        aimm(A12, MP_XZ + 48)
+        amov(A9, s2)            ; x[w], read in steps of 3 (R5)
         rimm R5, #3
-        ldi s6, #6
-gx:     x19.xrd s1, #9
-        x02.aa A9, A9, R5, #2, A0, A0
-        stx A12, s1
-        x02.ainc #12, #12
-        alu s6, s6, s14, #OP_SUB
-        alu s12, s6, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, gx
-        nop()
-        nop()
         aimm(A8, MP_XC12)
         aimm(A12, MP_XZ + 36)
         aimm(A13, MP_XZ + 41)
-        rimm R6, #7
-        aimm(A9, MP_XZ + 48)
+        rimm R6, #21
         ldi s6, #3
-sa:     mp3_row6()
+sa:     mp3_row6s()
         x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
         stx A12, s1
         x02.ainc #12, #12
@@ -2124,7 +2138,7 @@ sa:     mp3_row6()
         aimm(A12, MP_XZ + 42)
         aimm(A13, MP_XZ + 47)
         ldi s6, #3
-sb:     mp3_row6()
+sb:     mp3_row6s()
         x02.aa A9, A9, R6, #3, A0, A0 ; A9 - R6
         stx A12, s1
         x02.ainc #12, #12
