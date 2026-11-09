@@ -19,9 +19,9 @@
 ; DQ_GLEN group lengths. Spectrum q in X at DQ_SPEC (sign-extended words), words out at DQ_OUT,
 ; E out at Y DQ_E. Uses every s register but s14, s15; e6..e11; A2, A3, A8, A9 and mem.sm's.
 
-.const DQ_D    = 0x1800
-.const DQ_IT   = 0x1910
-.const DQ_G    = 0x1960
+.const DQ_D    = 0x1A02
+.const DQ_IT   = DQ_D + 0x110
+.const DQ_G    = DQ_D + 0x160
 .const DQ_SPEC = 0x0000
 .const DQ_OUT  = 0x0400
 .const DQ_IE   = 0x24E4

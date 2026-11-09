@@ -102,14 +102,14 @@
 .const FIN    = 0x2340
 
 .const WORK   = 0x0000          ; the IMDCT and window in place (docs/aac-mode0.md)
-.const OVL0   = 0x3C00
-.const OVL1   = 0x4000
-.const XSTT   = 0x5100
-.const XPNT   = 0x5104
-.const XSEED  = 0x5108
-.const XTNK   = 0x5110
-.const XRNG   = 0x5130
-.const XSAVE  = 0x5131
+.const OVL0   = 0x0C00
+.const OVL1   = 0x1000
+.const XSTT   = 0x1BAA          ; X 0x1BAA .. 0x1BDE: the constants and save slots
+.const XPNT   = XSTT + 4
+.const XSEED  = XSTT + 8
+.const XTNK   = XSTT + 0x10
+.const XRNG   = XSTT + 0x30
+.const XSAVE  = XSTT + 0x31
 .const IMS_IN  = 0x0100         ; the short IMDCT's 128 words in (Z and its 256 out at WORK)
 
 ; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ldn loads and steps e8 (x17

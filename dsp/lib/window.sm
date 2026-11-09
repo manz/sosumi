@@ -25,7 +25,7 @@
 .const WIN_T   = 0x2DE2          ; eight_short: that window's IMDCT words
 .const WIN_W   = 0x2DE3          ; eight_short: windows left
 .const WIN_OUT = 0x2DE4          ; eight_short: where its words add in B
-.const SINE    = 0x5200          ; X: sin(k pi / 4096), k = 1, 3 .. 2047 (1024 words)
+.const SINE    = 0x1400          ; X: sin(k pi / 4096), k = 1, 3 .. 2047 (1024 words)
 .const SINE4   = SINE + 1024     ; X: k = 0, 4 .. 2048 (513 words)
 .const KBD_L   = 0x3000          ; Y: the long KBD rise, w / 4 / 2^6
 .const KBD_S   = KBD_L + 1024    ; Y: the short one

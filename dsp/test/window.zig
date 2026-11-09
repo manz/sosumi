@@ -12,8 +12,8 @@ const Word = ref.dsp.ops.Word;
 const testing = std.testing;
 
 const t_at = 0x0000;
-const b_at = 0x1100;
-const ovl_at = 0x1900;
+const b_at = 0x0800;
+const ovl_at = 0x1000;
 const pcm_at = map.at("OUTY");
 
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {

@@ -127,7 +127,7 @@ test "pns_channel fills noise bands as the twin does, both modes" {
         try testing.expect(state.halted);
 
         try testing.expectEqual(@as(i32, blk.e), h.sx16(state.getY(Y + 6)));
-        try testing.expectEqual(@as(u32, @as(u24, @bitCast(rng.x))), state.readX(0x1F10) orelse 0xDEAD);
+        try testing.expectEqual(@as(u32, @as(u24, @bitCast(rng.x))), state.readX(map.at("PN_RNG")) orelse 0xDEAD);
         for (blk.w, 0..) |w, k| {
             try testing.expectEqual(@as(u32, @as(u24, @bitCast(w))), state.readX(0x400 + @as(u32, @intCast(k))) orelse 0xDEAD);
         }
