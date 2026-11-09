@@ -40,14 +40,39 @@ pub const ToolStats = struct {
     scalefac_scale: bool = false,
 };
 
-pub const Decoder = struct {
-    last: ToolStats = .{},
+/// One frame's integers: everything the numeric stages read.
+pub const Parsed = struct {
+    header: header.Header,
+    side: sideinfo.SideInfo,
+    sf: [2][2]scalefactors.Scalefactors,
+    is: [2][2]spectrum.Spectrum,
+
+    pub fn bandsOf(p: *const Parsed, gr: usize, ch: usize) bands.Bands {
+        return bands.of(p.header, p.side.gr[gr][ch]);
+    }
+
+    pub fn tools(p: *const Parsed) ToolStats {
+        const h = p.header;
+        var t: ToolStats = .{ .ms = h.msStereo(), .intensity = h.intensityStereo() };
+        for (0..h.granules()) |gr| for (0..h.channels()) |ch| {
+            const g = p.side.gr[gr][ch];
+            t.short = t.short or g.isShort();
+            t.mixed = t.mixed or (g.isShort() and g.mixed);
+            t.preflag = t.preflag or g.preflag;
+            t.scalefac_scale = t.scalefac_scale or g.scalefac_scale;
+            t.scfsi = t.scfsi or (gr == 1 and p.side.scfsi[ch] != 0);
+        };
+        return t;
+    }
+};
+
+/// The bitstream half: header, side information, the bit reservoir, scale factors and
+/// spectrum. Integers only, shared by every decoder of the numeric half.
+pub const Parser = struct {
     reservoir: [reservoir_cap]u8 = undefined,
     res_len: usize = 0,
-    hybrid: [2]hybrid.State = .{ .{}, .{} },
-    synth: [2]synth.State = .{ .{}, .{} },
 
-    fn keep(self: *Decoder, main: []const u8) void {
+    fn keep(self: *Parser, main: []const u8) void {
         if (main.len >= reservoir_cap) {
             @memcpy(&self.reservoir, main[main.len - reservoir_cap ..]);
             self.res_len = reservoir_cap;
@@ -63,12 +88,9 @@ pub const Decoder = struct {
         self.res_len += main.len;
     }
 
-    /// Decodes one frame into interleaved PCM: samples() values.
-    pub fn decode(self: *Decoder, frame: []const u8, out: []i16) Error!Frame {
-        const h = try header.parse(frame);
-        const nch = h.channels();
-        const n = @as(usize, h.samples()) * nch;
-        if (out.len < n) return error.OutputTooSmall;
+    /// One frame's integers, or null when main_data_begin reached past the reservoir (stream
+    /// start, after a seek): that frame is silence.
+    pub fn parse(self: *Parser, frame: []const u8, h: header.Header) Error!?Parsed {
         const off = h.mainDataOffset();
         if (frame.len < off) return error.Truncated;
         var r = bits.BitReader.init(frame[4 + @as(usize, if (h.crc) 2 else 0) .. off]);
@@ -77,40 +99,51 @@ pub const Decoder = struct {
         const mdb: usize = si.main_data_begin;
         if (mdb > self.res_len) {
             self.keep(main);
-            @memset(out[0..n], 0);
-            return .{ .header = h, .decoded = false };
+            return null;
         }
         var buf: [reservoir_cap + max_frame]u8 = undefined;
         @memcpy(buf[0..mdb], self.reservoir[self.res_len - mdb .. self.res_len]);
         @memcpy(buf[mdb .. mdb + main.len], main);
         self.keep(main);
 
-        self.last = .{ .ms = h.msStereo(), .intensity = h.intensityStereo() };
-        for (0..h.granules()) |gr| for (0..nch) |ch| {
-            const g = si.gr[gr][ch];
-            self.last.short = self.last.short or g.isShort();
-            self.last.mixed = self.last.mixed or (g.isShort() and g.mixed);
-            self.last.preflag = self.last.preflag or g.preflag;
-            self.last.scalefac_scale = self.last.scalefac_scale or g.scalefac_scale;
-            self.last.scfsi = self.last.scfsi or (gr == 1 and si.scfsi[ch] != 0);
-        };
+        var p: Parsed = .{ .header = h, .side = si, .sf = undefined, .is = undefined };
         var md = bits.BitReader.init(buf[0 .. mdb + main.len]);
         var prev: [2][scalefactors.max_entries]u8 = @splat(@splat(0));
+        for (0..h.granules()) |gr| for (0..h.channels()) |ch| {
+            const g = si.gr[gr][ch];
+            const limit = md.pos + g.part2_3_length;
+            const use_scfsi: u4 = if (gr == 1) si.scfsi[ch] else 0;
+            p.sf[gr][ch] = try scalefactors.read(&md, h, g, ch, use_scfsi, &prev[ch]);
+            p.is[gr][ch] = try spectrum.read(&md, g, bands.of(h, g), limit);
+        };
+        return p;
+    }
+};
+
+pub const Decoder = struct {
+    last: ToolStats = .{},
+    parser: Parser = .{},
+    hybrid: [2]hybrid.State = .{ .{}, .{} },
+    synth: [2]synth.State = .{ .{}, .{} },
+
+    /// Decodes one frame into interleaved PCM: samples() values.
+    pub fn decode(self: *Decoder, frame: []const u8, out: []i16) Error!Frame {
+        const h = try header.parse(frame);
+        const nch = h.channels();
+        const n = @as(usize, h.samples()) * nch;
+        if (out.len < n) return error.OutputTooSmall;
+        const p = (try self.parser.parse(frame, h)) orelse {
+            @memset(out[0..n], 0);
+            return .{ .header = h, .decoded = false };
+        };
+        self.last = p.tools();
         for (0..h.granules()) |gr| {
             var coefs: [2]requant.Coefs = undefined;
-            var sfs: [2]scalefactors.Scalefactors = undefined;
+            for (0..nch) |ch| coefs[ch] = requant.requantise(p.side.gr[gr][ch], p.bandsOf(gr, ch), &p.sf[gr][ch], &p.is[gr][ch]);
+            if (nch == 2) stereo.process(h, p.side.gr[gr][0], p.side.gr[gr][1], &p.sf[gr][1], &coefs[0], &coefs[1]);
             for (0..nch) |ch| {
-                const g = si.gr[gr][ch];
-                const limit = md.pos + g.part2_3_length;
-                const use_scfsi: u4 = if (gr == 1) si.scfsi[ch] else 0;
-                sfs[ch] = try scalefactors.read(&md, h, g, ch, use_scfsi, &prev[ch]);
-                const is = try spectrum.read(&md, g, bands.of(h, g), limit);
-                coefs[ch] = requant.requantise(g, bands.of(h, g), &sfs[ch], &is);
-            }
-            if (nch == 2) stereo.process(h, si.gr[gr][0], si.gr[gr][1], &sfs[1], &coefs[0], &coefs[1]);
-            for (0..nch) |ch| {
-                const g = si.gr[gr][ch];
-                hybrid.run(&self.hybrid[ch], g, bands.of(h, g), bands.mixedLongSubbands(h), &coefs[ch]);
+                const g = p.side.gr[gr][ch];
+                hybrid.run(&self.hybrid[ch], g, p.bandsOf(gr, ch), bands.mixedLongSubbands(h), &coefs[ch]);
                 for (0..18) |t| {
                     var s: [32]@TypeOf(coefs[0][0]) = undefined;
                     for (0..32) |sb| s[sb] = coefs[ch][sb * 18 + t];
@@ -138,7 +171,7 @@ test "a frame whose main data reaches into an empty reservoir decodes to silence
     const f = try d.decode(&frame, &out);
     try testing.expect(!f.decoded);
     try testing.expectEqual(@as(i16, 0), out[1000]);
-    try testing.expectEqual(@as(usize, 417 - 36), d.res_len);
+    try testing.expectEqual(@as(usize, 417 - 36), d.parser.res_len);
 }
 
 test "an all-zero frame decodes to silence" {
