@@ -114,19 +114,19 @@
 .const XSAVE  = XSTT + 0x31
 .const IMS_IN  = 0x0100         ; the short IMDCT's 128 words in (Z and its 256 out at WORK)
 
-; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ldn loads and steps e8 (x17
-; reference.md x19.ldn, 705), x17.styi stores and steps e7 (658), both in the back edge's slots.
+; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ld loads and steps e8 (x17
+; reference.md x19.ld, fact 793: not x19.ldn), x17.styi stores and steps e7 (658), both in the back edge's slots.
 ; Uses s3, s4, e7, e8.
 .macro ak_ycopy(DST, SRC, N) {
         lde e8, #SRC
         lde e7, #DST
         ldi s4, #N - 1
-        x19.ldn s3, #4, e8, #2
+        x19.ld s3, #4, e8, #2
         x17.styi e7, #3, #0, e7
 cp:     alu s4, s4, s14, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, cp
-        x19.ldn s3, #4, e8, #2  ; (delay slot) the next word
+        x19.ld s3, #4, e8, #2  ; (delay slot) the next word
         x17.styi e7, #3, #0, e7 ; (delay slot)
 }
 
