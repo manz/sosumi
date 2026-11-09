@@ -4,7 +4,7 @@ const std = @import("std");
 const asm_mod = @import("asm");
 pub const emu = @import("emu");
 
-const libs = [_]struct { path: []const u8, text: []const u8 }{
+pub const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/bits.sm", .text = @embedFile("lib/bits.sm") },
     .{ .path = "lib/mem.sm", .text = @embedFile("lib/mem.sm") },
     .{ .path = "lib/pcm.sm", .text = @embedFile("lib/pcm.sm") },
