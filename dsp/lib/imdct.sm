@@ -466,7 +466,7 @@ fx:     pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
 }
 
 ; After a negated run: s9 = 1 (the first, falling, run done) sets up the rising run of -u[0 ..]
-; and jumps to AGAIN; s9 = 0 falls through. Uses s4, p3.
+; into OUT[3 n2 / 2 ..] and jumps to AGAIN; s9 = 0 falls through. Uses s4, p3.
 .macro im_fnext(N2, IN, OUT, AGAIN) {
         alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
@@ -474,6 +474,7 @@ fx:     pkf(s1, A8, s0, s0, s0, 5, s0, s1, XOP, 0, FN, R5)
         ldi s9, #0              ; (delay slot)
         rimm R5, #1             ; (delay slot)
         aimm_e(4, IN)
+        aimm_o(4, OUT + 3 * N2 / 2)
         rimm R4, #OUT + 2 * N2 - 1
         jmp #ALWAYS, #0, AGAIN
         nop()
@@ -483,7 +484,9 @@ fin:
 
 ; OUT[n] = shiftSat(fold(u)[n], scaled + E' - log2 n2 + 7): OUT[0 .. n2/2) = u[n2/2 ..], then
 ; -u falling from u[n2 - 1], then -u[0 .. n2/2). A right shift of 0..23 runs packed (im_frun); a
-; left shift, which saturates, or one of 24 and more, takes im_frunx.
+; left shift, which saturates, or one of 24 and more, takes im_frunx. In place when u sits at
+; OUT + n2 (docs/aac-mode0.md): OUT[0 .. n2) first (u's upper half), then OUT[3 n2 / 2 ..] from
+; u's lower half over the upper, then OUT[n2 .. 3 n2 / 2) as that run reversed.
 .macro im_fold(N2, LOGN2, IN, OUT) {
         yld(s6, IM_SC)
         yld(s3, IM_EX)
@@ -508,7 +511,7 @@ fin:
         amov_e(4, s12)
         alu s12, s0, s6, #OP_SUB
         rimm R5, #-1
-        rimm R4, #OUT + 3 * N2 / 2 - 1
+        rimm R4, #OUT + N2 - 1
 fneg:   im_frun(2, #OP_SUB, 5)
         im_fnext(N2, IN, OUT, fneg)
         jmp #ALWAYS, #0, done
@@ -518,10 +521,15 @@ slow:   im_frunx(0, 0)
         ldi s12, #IN + N2 - 1
         amov_e(4, s12)
         rimm R5, #-1
-        rimm R4, #OUT + 3 * N2 / 2 - 1
+        rimm R4, #OUT + N2 - 1
 sneg:   im_frunx(2, 5)
         im_fnext(N2, IN, OUT, sneg)
-done:
+done:   ldi s12, #0             ; OUT[n2 ..] = OUT[2 n2 - 1] falling, unshifted
+        aimm_e(4, OUT + 2 * N2 - 1)
+        aimm_o(4, OUT + N2)
+        rimm R5, #-1
+        rimm R4, #OUT + 3 * N2 / 2 - 1
+        im_frun(2, #OP_ADD, 0)
 }
 
 .macro imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PC, PS, PSTEP, F, REV, ESLOT) {

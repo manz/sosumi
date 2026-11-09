@@ -102,9 +102,14 @@ imdct.sm today needs IN (n2), Z (n2) and OUT (2 n2): 4096 words for a long block
 - Long: the spectrum at WORK + 1024, Z at WORK + 0. The post-twiddle writes u back over the
   spectrum. The fold then writes out[0 .. 1023] over Z (reading u), then out[1536 ..] = -u[0 ..
   511] over u's upper half, then out[1024 .. 1535] as that copy reversed.
-- Short: the spectrum at WORK + 1024. Window w's 256 outputs land at 448 + 128 w, which never
-  reaches an input not yet read (1024 + 128 w' for w' > w). Its IN, Z and OUT scratch (512) fits
-  WORK + 0 .. 447 with the normalised input in its own slot; that span is zeroed at the end.
+- Short: the spectrum at WORK + 1024. Each window's 128 words are copied to WORK + 256, its Z
+  and its 256 outputs share WORK + 0 .. 255, and the window then multiplies them in place and
+  adds the first half at WORK + 448 + 128 w, storing the second half after it. That never
+  reaches an input not yet read (1024 + 128 w' for w' > w); WORK + 0 .. 447 and 1600 .. are
+  zeroed after the eighth.
+- A pair's left keeps its words at WORK + 2048 (ST_L, PN_L) while the right is parsed; its PNS
+  runs first, while the words are still at WORK + 1024, so stereo and the right's PNS find both
+  channels in place with no copies. PNS and TNS scratch moves to WORK + 0.
 - The window runs in place on WORK. So every stage finds a channel's spectrum at WORK + 1024
   with WORK + 0 .. 1023 free as scratch.
 

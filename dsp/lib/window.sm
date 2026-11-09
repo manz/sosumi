@@ -221,7 +221,7 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 }
 
 ; long_start: the previous long shape rising, the current short one falling.
-.macro win_start(T, B) {
+.macro win_start(T) {
         win_mul(T, 1024, WIN_R, 1, 0)
         win_quarter(448, T + 1024, T + 1024)
         win_mul(T + 1472, 128, WIN_F, 0, 1)
@@ -230,7 +230,7 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 }
 
 ; long_stop: the previous short shape rising, the current long one falling.
-.macro win_stop(T, B) {
+.macro win_stop(T) {
         win_zero(448, T)
         win_mul(T + 448, 128, WIN_R, 0, 0)
         win_quarter(448, T + 576, T + 576)
@@ -238,36 +238,33 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         win_out(T)
 }
 
-; eight_short: T the eight IMDCTs' 256 words each, contiguous. Window w is windowed in place
-; (rising on the previous shape for w = 0, else the current one; falling on the current), then
-; added at B + 448 + 128 w over B zeroed. Uses win_mul's registers and s6, s7, A10.
-.macro win_short(T, B) {
-        win_zero(2048, B)
+; eight_short, one window at a time (docs/aac-mode0.md "IMDCT in place"): win_sinit, then
+; win_sone for each window's 256 IMDCT words at T, then win_send. Window w is windowed in place
+; (rising on the previous shape for w = 0, else the current one; falling on the current), its
+; first half added at B + 448 + 128 w, its second half stored after it; so B + 448 + 128 w ..
+; is written only after window w's words are read, wherever they sit below it.
+.macro win_sinit(B) {
+        win_zero(128, B + 448)
         yld(s3, WIN_R)
         yst(WIN_S)
-        ldi s3, #T
-        yst(WIN_T)
         ldi s3, #B + 448
         yst(WIN_OUT)
-        ldi s3, #8
-        yst(WIN_W)
-sw:     yld(s9, WIN_T)
+}
+
+; One window: T in place, then B[o .. o + 128) += T[0 .. 128), B[o + 128 .. o + 256) =
+; T[128 .. 256), o = Y:[WIN_OUT] (then + 128). Uses win_mul's registers and s6, s7, A10.
+.macro win_sone(T) {
+        ldi s9, #T
         win_mulr(128, WIN_S, 0, 0)
-        yld(s9, WIN_T)
-        ldi s3, #128
-        alu s9, s9, s3, #OP_ADD
+        ldi s9, #T + 128
         win_mulr(128, WIN_F, 0, 1)
         yld(s3, WIN_F)
         yst(WIN_S)
-        ; B[o .. o + 256) += the window's 256 words
-        yld(s9, WIN_T)
-        amov_e(2, s9)
+        aimm_e(2, T)
         yld(s7, WIN_OUT)
         amov_e(4, s7)
         amov_e(5, s7)
-        ldi s3, #257            ; A4 runs one ahead
-        alu s12, s9, s3, #OP_ADD
-        win_rset(s12, R4)
+        rimm R4, #T + 129       ; A4 runs one ahead
         pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
 sa:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         pk(s1, A4, s0, s0, s0, 7, s1, s6, 0, 0) ; the next t; t + b
@@ -284,21 +281,20 @@ sa:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         jmp #3, #3, sa
         pks(7, A10, 0, s0, s0, 0) ; (delay slot)
         nop()                   ; (delay slot)
-        yld(s3, WIN_T)
-        ldi s4, #256
-        alu s3, s3, s4, #OP_ADD
-        yst(WIN_T)
-        yld(s3, WIN_OUT)
-        ldi s4, #128
-        alu s3, s3, s4, #OP_ADD
+        yld(s7, WIN_OUT)
+        ldi s3, #128
+        alu s7, s7, s3, #OP_ADD
+        alu s3, s7, s0, #OP_ADD
         yst(WIN_OUT)
-        yld(s3, WIN_W)
-        alu s3, s3, s14, #OP_SUB
-        yst(WIN_W)
-        alu s4, s3, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, sw
-        nop()
-        nop()
+        amov_e(4, s7)
+        aimm_e(2, T + 128)
+        ldi s6, #128
+        win_xrep()
+}
+
+; After the eighth window: B's untouched ends to 0, then the overlap and PCM.
+.macro win_send(B) {
+        win_zero(448, B)
+        win_zero(448, B + 1600)
         win_out(B)
 }

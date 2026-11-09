@@ -114,8 +114,8 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
         };
         for (St.quarter, 0..) |t, b| try h.putX(&state, gpa, map.at("ST_T") + @as(u32, @intCast(b)), t);
         for (l.w, r.w, 0..) |a, b, k| {
-            try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), a);
-            try h.putX(&state, gpa, 0x800 + @as(u32, @intCast(k)), b);
+            try h.putX(&state, gpa, map.at("ST_L") + @as(u32, @intCast(k)), a);
+            try h.putX(&state, gpa, map.at("ST_R") + @as(u32, @intCast(k)), b);
         }
         St.applyPair(&pair, &l, &r, offsets, offsets);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 24);
@@ -124,8 +124,8 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
         try testing.expectEqual(@as(i32, l.e), h.sx16(state.getY(Y + 5)));
         try testing.expectEqual(@as(i32, r.e), h.sx16(state.getY(Y + 6)));
         for (l.w, r.w, 0..) |a, b, k| {
-            try testing.expectEqual(@as(u32, @as(u24, @bitCast(a))), state.readX(0x400 + @as(u32, @intCast(k))) orelse 0xDEAD);
-            try testing.expectEqual(@as(u32, @as(u24, @bitCast(b))), state.readX(0x800 + @as(u32, @intCast(k))) orelse 0xDEAD);
+            try testing.expectEqual(@as(u32, @as(u24, @bitCast(a))), state.readX(map.at("ST_L") + @as(u32, @intCast(k))) orelse 0xDEAD);
+            try testing.expectEqual(@as(u32, @as(u24, @bitCast(b))), state.readX(map.at("ST_R") + @as(u32, @intCast(k))) orelse 0xDEAD);
         }
     }
     try testing.expect(seen_ms > 100);

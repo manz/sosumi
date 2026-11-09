@@ -28,7 +28,7 @@
 ;   XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
-; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, the AK_
+; Scratch: X 0x0000 .. 0x0BFF (WORK, ST_L), XSAVE; Y CUR, STL, STR, FIN, the AK_
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
 .const HUFF0    = 0x0B80        ; scale factor code
@@ -63,7 +63,7 @@
 .const AK_WW    = AK + 26
 .const AK_WN    = AK + 27
 .const AK_IMI   = AK + 28       ; short IMDCT: the next window's words
-.const AK_IMO   = AK + 29       ; its samples' place in IMT
+.const AK_IMO   = AK + 29       ; (free)
 .const AK_IMW   = AK + 30       ; windows left
 .const AK_PNR   = AK + 31       ; the shared PNS core's way back (ak_pnc)
 .const AK_TNB   = AK + 32       ; tns_data's n_filt, length and order widths, 3 words
@@ -101,19 +101,16 @@
 .const STR    = 0x2140
 .const FIN    = 0x2340
 
-.const IMT    = 0x2000          ; the IMDCT's output, the window's T
-.const WB     = 0x2800          ; the window's block
+.const WORK   = 0x0000          ; the IMDCT and window in place (docs/aac-mode0.md)
 .const OVL0   = 0x3C00
 .const OVL1   = 0x4000
-.const XL     = 0x4400
 .const XSTT   = 0x5100
 .const XPNT   = 0x5104
 .const XSEED  = 0x5108
 .const XTNK   = 0x5110
 .const XRNG   = 0x5130
 .const XSAVE  = 0x5131
-.const IMS_IN  = 0x0200         ; the short IMDCT's 128 words in (Z uses 0 .. 127)
-.const IMS_OUT = 0x0280         ; its 256 samples out
+.const IMS_IN  = 0x0100         ; the short IMDCT's 128 words in (Z and its 256 out at WORK)
 
 ; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ldn loads and steps e8 (x17
 ; reference.md x19.ldn, 705), x17.styi stores and steps e7 (658), both in the back edge's slots.
@@ -978,8 +975,9 @@ done:
         yst(WIN_F)
 }
 
-; The window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence, into the
-; ring slot at Y:[WIN_PCM] + 1, stride R6.
+; The long window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence (not
+; eight_short, which ak_finish windows as it goes), into the ring slot at Y:[WIN_PCM] + 1,
+; stride R6.
 .macro ak_window() {
         yld(s2, FIN + R_WS)
         alu s4, s2, s0, #OP_ADD
@@ -991,72 +989,20 @@ done:
         jmp #3, #3, wst
         nop()
         nop()
-        ptst p3, s0, #EQ4, #PTST
-        jmp #3, #3, wsh
-        nop()
-        nop()
-        win_stop(IMT, WB)
+        win_stop(WORK)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wl:     win_long(IMT)
+wl:     win_long(WORK)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wst:    win_start(IMT, WB)
-        jmp #ALWAYS, #0, done
-        nop()
-        nop()
-wsh:    win_short(IMT, WB)
+wst:    win_start(WORK)
 done:
 }
 
-; FIN's channel from its words at X 0x0400 to PCM in slot AK_FSL of OUTY.
-.macro ak_finish() {
-        ak_tns()
-        yld(s3, FIN + R_E)
-        yst(ESLOT)
-        ak_isshort(FIN)
-        jmp #3, #3, ishort
-        nop()
-        nop()
-        imdct(1024, 512, 10, 9, DQ_OUT, DQ_SPEC, IMT, SINE + 1023, SINE, 2, SINE4, REVL, ESLOT)
-        jmp #ALWAYS, #0, halves
-        nop()
-        nop()
-        ; eight short windows through one short IMDCT on fixed slots: window w's 128 words in,
-        ; its 256 samples out to IMT + 256 w (one exponent for all eight, ESLOT)
-ishort: ldi s3, #DQ_OUT
-        yst(AK_IMI)
-        ldi s3, #IMT
-        yst(AK_IMO)
-        ldi s3, #8
-        yst(AK_IMW)
-sloop:  yld(s5, AK_IMI)
-        ldi s6, #128
-        ak_xcopyd(IMS_IN)
-        imdct_even(128, 64, 7, 6, IMS_IN, DQ_SPEC, IMS_OUT, SINE4 + 510, SINE4 + 2, 8, SINE4, REVS, ESLOT)
-        ldi s5, #IMS_OUT
-        ldi s6, #256
-        yld(s4, AK_IMO)
-        ak_xcopyr()
-        yld(s3, AK_IMI)
-        ldi s4, #128
-        alu s3, s3, s4, #OP_ADD
-        yst(AK_IMI)
-        yld(s3, AK_IMO)
-        ldi s4, #256
-        alu s3, s3, s4, #OP_ADD
-        yst(AK_IMO)
-        yld(s3, AK_IMW)
-        alu s3, s3, s14, #OP_SUB
-        yst(AK_IMW)
-        alu s4, s3, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, sloop
-        nop()
-        nop()
-halves: ak_halves()
+; The overlap and ring slot for FIN: WIN_OVL, WIN_PCM, R6 the ring's stride.
+.macro ak_slot() {
         yld(s4, AK_FSL)         ; the slot's overlap, OVL0 or OVL1 = OVL0 + 0x400
         ldi s3, #-10
         alu s3, s3, s4, #ASRRS
@@ -1069,8 +1015,52 @@ halves: ak_halves()
         yst(WIN_PCM)
         yld(s5, AK_NCH)
         x17.styr R6, s5, #0, e6, #0
+}
+
+; FIN's channel from its words at X 0x0400 (WORK + 1024) to PCM in slot AK_FSL of OUTY, the
+; IMDCT and window in place on WORK.
+.macro ak_finish() {
+        ak_tns()
+        yld(s3, FIN + R_E)
+        yst(ESLOT)
+        ak_halves()
+        ak_isshort(FIN)
+        jmp #3, #3, ishort
+        nop()
+        nop()
+        imdct(1024, 512, 10, 9, DQ_OUT, WORK, WORK, SINE + 1023, SINE, 2, SINE4, REVL, ESLOT)
+        ak_slot()
         ak_window()
-        yld(s3, AK_FSL)
+        jmp #ALWAYS, #0, shape
+        nop()
+        nop()
+        ; eight short windows through one short IMDCT on fixed slots: window w's 128 words in,
+        ; its 256 samples out at WORK, windowed into WORK + 448 + 128 w (one exponent, ESLOT)
+ishort: win_sinit(WORK)
+        ldi s3, #DQ_OUT
+        yst(AK_IMI)
+        ldi s3, #8
+        yst(AK_IMW)
+sloop:  yld(s5, AK_IMI)
+        ldi s6, #128
+        ak_xcopyd(IMS_IN)
+        imdct_even(128, 64, 7, 6, IMS_IN, WORK, WORK, SINE4 + 510, SINE4 + 2, 8, SINE4, REVS, ESLOT)
+        win_sone(WORK)
+        yld(s3, AK_IMI)
+        ldi s4, #128
+        alu s3, s3, s4, #OP_ADD
+        yst(AK_IMI)
+        yld(s3, AK_IMW)
+        alu s3, s3, s14, #OP_SUB
+        yst(AK_IMW)
+        alu s4, s3, s0, #OP_ADD
+        ptst p3, s0, #EQ4, #PTST
+        jmp #IF_NOT, #3, sloop
+        nop()
+        nop()
+        ak_slot()
+        win_send(WORK)
+shape:  yld(s3, AK_FSL)
         ldi s13, #AK_SHP - 1
         alu s13, s13, s3, #OP_ADD
         x17.mve e8, s13
@@ -1241,11 +1231,6 @@ ak_parse:
 
         ; a pair's right: both channels' tools, then the right's tail, then the left's
         ak_ycopy(STR, CUR, R_SIZE)
-        ak_xcopyf(ST_R, DQ_OUT, 1024)
-        ak_xcopyf(ST_L, XL, 1024)
-        ak_pns(STL, 0, 0, ak_pd0, ak_pnc)
-ak_pr0: ak_pnsret(STL)
-ak_pd0:
         yld(s4, AK_CW)
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, ak_st
@@ -1261,10 +1246,7 @@ ak_pd0:
         nop()
         nop()
 ak_st:  ak_stereo()
-ak_nost:
-        ak_xcopyf(XL, ST_L, 1024) ; right to PN_W, left to PN_L
-        ak_xcopyf(PN_W, ST_R, 1024)
-        ak_xcopyf(PN_L, XL, 1024)
+ak_nost:                        ; the right at PN_W = ST_R, the left at PN_L = ST_L
         yld(s4, AK_CW)
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, ak_pnr0
@@ -1284,9 +1266,11 @@ ak_pnr: ak_ycopy(FIN, STR, R_HEAD)
         nop()
         nop()
 
-ak_left:                        ; a pair's left: keep its words, parse the right
+ak_left:                        ; a pair's left: its PNS, its words to ST_L, parse the right
         ak_ycopy(STL, CUR, R_SIZE)
-        ak_xcopyf(XL, DQ_OUT, 1024)
+        ak_pns(STL, 0, 0, ak_pd0, ak_pnc)
+ak_pr0: ak_pnsret(STL)
+ak_pd0: ak_xcopyf(ST_L, DQ_OUT, 1024)
         ak_rload()
         ldi s3, #2
         yst(AK_PH)

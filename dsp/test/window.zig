@@ -19,9 +19,13 @@ const pcm_at = map.at("OUTY");
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
     return switch (seq) {
         .only_long => std.fmt.comptimePrint("rimm R6, #2\n        win_long({d})", .{t_at}),
-        .long_start => std.fmt.comptimePrint("rimm R6, #2\n        win_start({d}, {d})", .{ t_at, b_at }),
-        .long_stop => std.fmt.comptimePrint("rimm R6, #2\n        win_stop({d}, {d})", .{ t_at, b_at }),
-        .eight_short => std.fmt.comptimePrint("rimm R6, #2\n        win_short({d}, {d})", .{ t_at, b_at }),
+        .long_start => std.fmt.comptimePrint("rimm R6, #2\n        win_start({d})", .{t_at}),
+        .long_stop => std.fmt.comptimePrint("rimm R6, #2\n        win_stop({d})", .{t_at}),
+        .eight_short => comptime blk: {
+            var c: []const u8 = std.fmt.comptimePrint("rimm R6, #2\n        win_sinit({d})\n", .{b_at});
+            for (0..8) |w| c = c ++ std.fmt.comptimePrint("        win_sone({d})\n", .{t_at + 256 * w});
+            break :blk c ++ std.fmt.comptimePrint("        win_send({d})", .{b_at});
+        },
     };
 }
 
