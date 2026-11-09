@@ -183,25 +183,27 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
     }
     const Y = ref.dsp.mp3.synth;
     var xn = at("MP_XN");
-    for (synth_rows) |r| {
-        const nt: usize = if (Y.rowN(r) & 1 == 1) 16 else 8;
-        for (Y.n_rows[r][0..nt]) |v| {
-            try st.x_mem.put(gpa, xn, @as(u24, @bitCast(v)));
+    var b: usize = 0;
+    while (b < synth_rows.len) : (b += 4) {
+        // a block of 4 rows over the same split words, column by column (mp3_mgrp)
+        const blk = synth_rows[b..][0..4];
+        const nt: usize = if (Y.rowN(blk[0]) & 1 == 1) 16 else 8;
+        for (0..nt) |k| for (blk) |r| {
+            try st.x_mem.put(gpa, xn, @as(u24, @bitCast(Y.n_rows[r][k])));
             xn += 1;
-        }
+        };
     }
     std.debug.assert(xn == at("MP_XN") + 384);
     for (0..1024) |i| try st.x_mem.put(gpa, at("MP_XD") + @as(u32, @intCast(i)), @as(u24, @bitCast(Y.d[i % 512])));
 }
 
-/// The synthesis rows (ref/dsp/mp3/synth.zig n_rows) in mp3_synth's group order.
+/// The synthesis rows (ref/dsp/mp3/synth.zig n_rows) in mp3_synth's blocks of 4 (mp3_mgrp).
 pub const synth_rows = [_]usize{
     1, 3, 5, 7, 9, 11, 13, 15, // h1
-    2, 6, 10, 14, // h2
-    4, 8, 12, // g2
-    0,
     16, 18, 20, 22, 24, 26, 28, 30, // h1
+    2, 6, 10, 14, // h2
     17, 21, 25, 29, // h2
+    0, 4, 8, 12, // g2
     19, 23, 27, 31, // g2
 };
 
