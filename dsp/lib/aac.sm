@@ -34,7 +34,7 @@
 .const HUFF0    = 0x0B80        ; scale factor code
 .const HUFF_END = 0x1D40        ; past the Huffman codes
 .const AU       = 0x0880        ; the access unit, staged by the host
-.const AK       = 0x2C94
+.const AK       = 0x2D74
 .const AK_NCH   = AK + 0
 .const AK_ST    = AK + 1
 .const AK_SLOT  = AK + 2
@@ -68,12 +68,12 @@
 .const AK_PNR   = AK + 31       ; the shared PNS core's way back (ak_pnc)
 .const AK_TNB   = AK + 32       ; tns_data's n_filt, length and order widths, 3 words
 .const AK_BOOKS = AK + 0x40     ; 12 words
-.const SWB_L    = 0x2CE0
-.const SWB_S    = 0x2D20
-.const PAIR_MSU = 0x2D60        ; 128 words
-.const ESLOT    = 0x2553
-.const REVL     = 0x2554
-.const REVS     = 0x2754
+.const SWB_L    = 0x2DC0
+.const SWB_S    = 0x2E00
+.const PAIR_MSU = 0x2E80        ; 128 words, DSP-only Y (16 bits, specs/questions.md 15)
+.const ESLOT    = 0x2353
+.const REVL     = 0x2354
+.const REVS     = 0x2554
 .const OUTY     = 0x0080
 
 ; a channel record
@@ -96,10 +96,10 @@
 .const R_SF   = 0x180           ; 128 words
 .const R_SIZE = 0x200
 .const R_HEAD = 0xA0            ; the part the channel tail reads
-.const CUR    = 0x1D40
-.const STL    = 0x1F40
-.const STR    = 0x2140
-.const FIN    = 0x2340
+.const CUR    = 0x1F40          ; the record being parsed: a pair's right in place (STR)
+.const STL    = 0x1D40
+.const STR    = CUR
+.const FIN    = 0x2140
 
 .const WORK   = 0x0000          ; the IMDCT and window in place (docs/aac-mode0.md)
 .const OVL0   = 0x0C00
@@ -839,9 +839,6 @@ gain:   getbits(s3, 1)          ; gain_control_data_present
         nop()
         yld(s3, AK_MSP)
         yst(PN_MSP)
-        ak_ycopy(PN_LBOOK, STL + R_BOOK, 128)
-        ak_ycopy(PN_LSF, STL + R_SF, 128)
-        ak_ycopy(PN_MSU, PAIR_MSU, 128)
 tabs:   ldi s3, #ID
         jmp #ALWAYS, #0, CORE
         yat(AK_PNR)             ; (delay slot)
@@ -904,10 +901,6 @@ go:     yld(s3, STL + R_NB)
         yst(ST_ER)
         ak_ycopy(ST_GLEN, STL + R_GLEN, 8)
         ak_offs(ST_OFF, STL)
-        ak_ycopy(ST_LB, STL + R_BOOK, 128)
-        ak_ycopy(ST_RB, STR + R_BOOK, 128)
-        ak_ycopy(ST_RS, STR + R_SF, 128)
-        ak_ycopy(ST_MSU, PAIR_MSU, 128)
         ak_xcopy(ST_T, XSTT, 4)
         stereo_pair()
         yld(s3, ST_EL)
@@ -1230,8 +1223,7 @@ ak_parse:
         nop()
 
         ; a pair's right: both channels' tools, then the right's tail, then the left's
-        ak_ycopy(STR, CUR, R_SIZE)
-        yld(s4, AK_CW)
+        yld(s4, AK_CW)          ; the right's record is CUR = STR
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, ak_st
         nop()

@@ -55,14 +55,22 @@ Y (16-bit):
 
 | Y | Words | Contents |
 |---|---|---|
-| 0x0000 | 128 | output ring table (host contract), small slots |
-| 0x0080 | 2048 | PCM ring buffer: 1024 frames x 2 channels, written in place, no PCMY copy |
-| 0x0880 | 768 | the packet, staged by the host (6144 bits per channel, two channels) |
+| 0x0080 | 2048 | PCM ring buffer: 1024 frames x 2 channels, written in place |
+| 0x0880 | 768 | the packet, staged by the host |
 | 0x0B80 | 4544 | Huffman tables |
-| ... | ~1650 | channel records, packed from 0x200 each |
-| ... | 512 | bit reversal (long; short reads every eighth: rev6(i) = rev9(8i)) |
-| ... | 1152 | KBD halves |
-| ... | ~400 | swb_offset, the AK slots, stage slots |
+| 0x1D40 | 512 | STL, a pair's left (or a lone channel's) record |
+| 0x1F40 | 512 | CUR, the record being parsed; a pair's right stays in it (STR) |
+| 0x2140 | 160 | FIN, the head of the record being finished |
+| 0x21E0 | 372 | section and dequantiser slots, IM_Y, the window's slots, ESLOT |
+| 0x2354 | 576 | bit reversal, long then short |
+| 0x2594 | 864 | the stage block, shared by stereo, PNS and TNS (PNS's ends at PN_PE + 128) |
+| 0x28F4 | 1152 | KBD halves, long then short |
+| 0x2D74 | 204 | the AK slots, swb_offset long and short |
+| 0x2E40 | 3 | WIN_PCM, WIN_S, WIN_OUT |
+| 0x2E80 | 128 | PAIR_MSU, DSP-only (written by the program, never by the host) |
+
+The stages read a record's books, scale factors and ms_used where they are (STL + R_BOOK, STR +
+R_SF, PAIR_MSU) instead of copying them into the stage block.
 
 Stereo T, PNS T and seeds, the TNS reflection table and the PNS generator need 24 bits, so they stay in X
 (Y:0x2E80..0x2EFF keeps only 16 bits, specs/questions.md 15).

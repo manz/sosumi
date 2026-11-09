@@ -109,11 +109,11 @@ test "pns_channel fills noise bands as the twin does, both modes" {
         for (offsets, 0..) |o, k| try h.putY(&state, gpa, Y + 0x20 + @as(u32, @intCast(k)), o);
         for (0..info.num_window_groups) |g| for (0..info.max_sfb) |sfb| {
             const i: u32 = @intCast(g * info.max_sfb + sfb);
-            try h.putY(&state, gpa, Y + 0x60 + i, ch.sections.sfb_cb[g][sfb]);
-            try h.putY(&state, gpa, Y + 0xE0 + i, ch.scalefactors[g][sfb]);
-            try h.putY(&state, gpa, Y + 0x160 + i, pair.left.sections.sfb_cb[g][sfb]);
-            try h.putY(&state, gpa, Y + 0x1E0 + i, pair.left.scalefactors[g][sfb]);
-            try h.putY(&state, gpa, Y + 0x260 + i, @intFromBool(pair.ms.?.used[g][sfb]));
+            try h.putY(&state, gpa, map.at("PN_BOOK") + i, ch.sections.sfb_cb[g][sfb]);
+            try h.putY(&state, gpa, map.at("PN_SF") + i, ch.scalefactors[g][sfb]);
+            try h.putY(&state, gpa, map.at("PN_LBOOK") + i, pair.left.sections.sfb_cb[g][sfb]);
+            try h.putY(&state, gpa, map.at("PN_LSF") + i, pair.left.scalefactors[g][sfb]);
+            try h.putY(&state, gpa, map.at("PN_MSU") + i, @intFromBool(pair.ms.?.used[g][sfb]));
         };
         for (P.quarter, 0..) |t, b| try h.putX(&state, gpa, map.at("PN_T") + @as(u32, @intCast(b)), t);
         for (P.seed, 0..) |s, i| try h.putX(&state, gpa, map.at("PN_SEED") + @as(u32, @intCast(i)), s);

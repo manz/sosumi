@@ -103,10 +103,10 @@ test "stereo_pair applies M/S and intensity as the twin's applyPair" {
         for (0..info.num_window_groups) |g| for (0..info.max_sfb) |sfb| {
             const i: u32 = @intCast(g * info.max_sfb + sfb);
             const rb = pair.right.sections.sfb_cb[g][sfb];
-            try h.putY(&state, gpa, Y + 0x60 + i, pair.left.sections.sfb_cb[g][sfb]);
-            try h.putY(&state, gpa, Y + 0xE0 + i, rb);
-            try h.putY(&state, gpa, Y + 0x160 + i, pair.right.scalefactors[g][sfb]);
-            try h.putY(&state, gpa, Y + 0x1E0 + i, @intFromBool(pair.ms.?.used[g][sfb]));
+            try h.putY(&state, gpa, map.at("ST_LB") + i, pair.left.sections.sfb_cb[g][sfb]);
+            try h.putY(&state, gpa, map.at("ST_RB") + i, rb);
+            try h.putY(&state, gpa, map.at("ST_RS") + i, pair.right.scalefactors[g][sfb]);
+            try h.putY(&state, gpa, map.at("ST_MSU") + i, @intFromBool(pair.ms.?.used[g][sfb]));
             if (rb >= ics.intensity_hcb2) {
                 seen_is += 1;
                 if (rb == ics.intensity_hcb2 and pair.ms.?.present == 1) seen_is_neg += 1;

@@ -24,10 +24,10 @@
 .const DQ_G    = DQ_D + 0x160
 .const DQ_SPEC = 0x0000
 .const DQ_OUT  = 0x0400
-.const DQ_IE   = 0x24E4
-.const DQ_IR   = 0x24EC
-.const DQ_OFF  = 0x2508
-.const DQ_Y    = 0x24F4
+.const DQ_IE   = 0x22E4
+.const DQ_IR   = 0x22EC
+.const DQ_OFF  = 0x2308
+.const DQ_Y    = 0x22F4
 .const DQ_GRP  = DQ_Y + 0
 .const DQ_MAX  = DQ_Y + 1
 .const DQ_WIN  = DQ_Y + 2

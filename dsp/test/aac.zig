@@ -58,6 +58,11 @@ fn check(gpa: std.mem.Allocator, prog: []const u32, dump: []const u8) !void {
         }
     }
     try testing.expectEqual(dump.len, p);
+    // mode 0 (docs/aac-mode0.md): X below 0x1C00, Y below 0x2F00, the host's below 0x2E80
+    var xi = state.x_mem.keyIterator();
+    while (xi.next()) |k| try testing.expect(k.* < 0x1C00);
+    var yi = state.y_mem.keyIterator();
+    while (yi.next()) |k| try testing.expect(k.* < 0x2F00);
 }
 
 test "aac_packet decodes the dumped access units as the twin's Decoder" {
@@ -67,4 +72,19 @@ test "aac_packet decodes the dumped access units as the twin's Decoder" {
     inline for (.{ "tone.aac_at", "sweep.ff_tns", "pink.ff_pns", "pink.ff_is", "clicks.aac_at" }) |name| {
         try check(gpa, prog, @embedFile(name ++ ".pkts"));
     }
+}
+
+test "the stages read the records' fields in place" {
+    try testing.expectEqual(map.at("STL") + map.at("R_BOOK"), map.at("PN_LBOOK"));
+    try testing.expectEqual(map.at("STL") + map.at("R_SF"), map.at("PN_LSF"));
+    try testing.expectEqual(map.at("STL") + map.at("R_BOOK"), map.at("ST_LB"));
+    try testing.expectEqual(map.at("STR") + map.at("R_BOOK"), map.at("ST_RB"));
+    try testing.expectEqual(map.at("STR") + map.at("R_SF"), map.at("ST_RS"));
+    try testing.expectEqual(map.at("PAIR_MSU"), map.at("PN_MSU"));
+    try testing.expectEqual(map.at("PAIR_MSU"), map.at("ST_MSU"));
+    // the stage blocks end below the KBD tables
+    try testing.expect(map.at("PN_RUNS") + 384 <= map.at("KBD_L"));
+    try testing.expect(map.at("ST_RUNS") + 384 <= map.at("KBD_L"));
+    try testing.expect(map.at("PN_PE") + 128 <= map.at("KBD_L"));
+    try testing.expect(map.at("PN_RUNS") + 384 <= map.at("PN_PE"));
 }

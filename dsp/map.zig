@@ -77,5 +77,5 @@ pub fn at(comptime name: []const u8) u32 {
 test "reads plain, hex and derived constants" {
     try std.testing.expectEqual(14, get("OP_ADD"));
     try std.testing.expectEqual(get("AK") + 1, get("AK_ST"));
-    try std.testing.expectEqual(get("ST_Y") + 0x2E0, get("ST_RUNS"));
+    try std.testing.expectEqual(get("ST_Y") + 0xE0, get("ST_RUNS"));
 }

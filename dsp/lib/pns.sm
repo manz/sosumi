@@ -25,7 +25,7 @@
 .const PN_T     = 0x1B6E        ; stage scratch (stereo.sm ST_T)
 .const PN_SEED  = PN_T + 4
 .const PN_RNG   = PN_T + 0x10
-.const PN_Y     = 0x2794
+.const PN_Y     = 0x2594
 .const PN_NB    = PN_Y + 0
 .const PN_GRP   = PN_Y + 1
 .const PN_MAX   = PN_Y + 2
@@ -45,11 +45,11 @@
 .const PN_OFF   = PN_Y + 0x20
 .const PN_BOOK  = PN_Y + 0x60
 .const PN_SF    = PN_Y + 0xE0
-.const PN_LBOOK = PN_Y + 0x160
-.const PN_LSF   = PN_Y + 0x1E0
-.const PN_MSU   = PN_Y + 0x260
-.const PN_RUNS  = PN_Y + 0x2E0  ; (start, len, band) triples, len 0 last
-.const PN_PE    = PN_Y + 0x470  ; each run's exponent, PN_NONE when it brings nothing
+.const PN_RUNS  = PN_Y + 0x160
+.const PN_LBOOK = 0x1E40        ; aac.sm STL + R_BOOK, read in place
+.const PN_LSF   = 0x1EC0        ; STL + R_SF
+.const PN_MSU   = 0x2E80        ; PAIR_MSU  ; (start, len, band) triples, len 0 last
+.const PN_PE    = PN_Y + 0x2E0  ; each run's exponent, PN_NONE when it brings nothing
 .const PN_NONE  = -32767
 
 ; Y:[addr] = s<lo + 8 hi>.

@@ -24,7 +24,7 @@
 .const TN_K    = 0x1B6E         ; stage scratch (stereo.sm ST_T)
 .const TN_KC   = TN_K + 0x20         ; K', 12 words
 .const TN_B    = TN_K + 0x30         ; B', 12 words
-.const TN_Y    = 0x2794
+.const TN_Y    = 0x2594
 .const TN_E    = TN_Y + 0
 .const TN_NWIN = TN_Y + 1
 .const TN_WLEN = TN_Y + 2

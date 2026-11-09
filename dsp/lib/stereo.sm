@@ -21,7 +21,7 @@
 .const ST_L    = 0x0800
 .const ST_R    = 0x0400
 .const ST_T    = 0x1B6E         ; X 0x1B6E .. 0x1BA9: stage scratch, shared
-.const ST_Y    = 0x2794
+.const ST_Y    = 0x2594
 .const ST_NB   = ST_Y + 0
 .const ST_GRP  = ST_Y + 1
 .const ST_MAX  = ST_Y + 2
@@ -36,12 +36,12 @@
 .const ST_TO   = ST_Y + 11      ; the exponent being found
 .const ST_GLEN = ST_Y + 0x10    ; 8 words
 .const ST_OFF  = ST_Y + 0x20    ; 64 words
-.const ST_LB   = ST_Y + 0x60    ; 128 words each
-.const ST_RB   = ST_Y + 0xE0
-.const ST_RS   = ST_Y + 0x160
-.const ST_MSU  = ST_Y + 0x1E0
-.const ST_KIND = ST_Y + 0x260   ; 0 none, 1 M/S, 2 intensity, 3 intensity negated
-.const ST_RUNS = ST_Y + 0x2E0   ; (start, len, band) triples, len 0 last
+.const ST_LB   = 0x1E40        ; aac.sm STL + R_BOOK, read in place
+.const ST_RB   = 0x2040        ; STR + R_BOOK
+.const ST_RS   = 0x20C0        ; STR + R_SF
+.const ST_MSU  = 0x2E80        ; PAIR_MSU
+.const ST_KIND = ST_Y + 0x60   ; 0 none, 1 M/S, 2 intensity, 3 intensity negated
+.const ST_RUNS = ST_Y + 0xE0   ; (start, len, band) triples, len 0 last
 .const ST_NONE = -32767
 
 ; p3 = s<v> in 1..11. Uses s4.
