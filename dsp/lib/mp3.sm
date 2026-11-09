@@ -675,7 +675,7 @@ done:
 .const MP_XOV  = 0x0480         ; X: overlap, [ch][sb][18]
 .const MP_XV   = 0x0900         ; X: synthesis history, [ch][1024]
 .const MP_XN   = 0x13C0         ; X: synthesis rows (mp3_synth's groups), Q23, 384 words
-.const MP_XD   = 0x1540         ; X: the synthesis window twice over, Q17, 1024 words
+.const MP_XD   = 0x1540         ; X: the synthesis window paired per age (mp3_wpair), twice over, Q17, 1024 words
 .const MP_XZ   = 0x1100         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
                                 ; reorder's band triple at +0 (<= 198)
 .const MP_XC36 = 0x11C8         ; X: IMDCT-36 rows (18 x 18, Q23)
@@ -2958,6 +2958,114 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         alu s1, s2, s13, #OP_SUB
 }
 
+; Sample 0 (mp3_win16; pair 1's D follows its column, step 1).
+.macro mp3_win0() {
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V0
+        x03.tap0a s5, #10, s4, s2, s3, #2, R4 ; 2 V0 D0; V1
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D1
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V1 D1; V2
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D2
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V2 D2; V3
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D3
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V3 D3; V4
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D4
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V4 D4; V5
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D5
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V5 D5; V6
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D6
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V6 D6; V7
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D7
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V7 D7; V8
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D8
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V8 D8; V9
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D9
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V9 D9; V10
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D10
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V10 D10; V11
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D11
+        x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V11 D11; V12
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D12
+        x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V12 D12; V13
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D13
+        x03.tapa s5, #9, s4, s2, s3, #3, R2 ; + 2 V13 D13; V14
+        x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D14
+        x03.tapa s5, #10, s4, s2, s3, #3, R2 ; + 2 V14 D14; V15
+        x03.tapa s4, #8, s0, s2, s3, #3, R1 ; D15
+        x03.tap s4, #8, s5, s2, s3 ; + 2 D15 V15; pair 1's first D
+        alu s13, s7, s3, #ASR   ; -1 when lo < 0 (mp3_rd24)
+        alu s1, s2, s13, #OP_SUB
+}
+
+; Samples j and 32 - j, j = 1..15 (twin `slot`'s window): each V word read once into s5 (A9 / A10
+; as mp3_win16), two taps by D's paired table (X:MP_XD, dsp/mp3/tables.zig: per age,
+; d[j], then -+d[32 - j], the sign of V[32 - j] against V[j] folded in), the D stream
+; stepping 31 then 1 (R5; the last block steps back by R1 = 479). Samples to Y at e7 (+ nch,
+; R7) and e6 (- nch, R6), saturated by s8 / s9. s4 holds the first D on entry and sample
+; 16's on exit (one column short: A8 + 31). Uses s1..s13, p3.
+.macro mp3_wpair() {
+        ldi s12, #15
+yp:     pkf(s5, A9, s0, s0, s0, 12, s12, s14, 5, 0, 2, R4) ; V0; one pair less
+        x03.tap0a s4, #8, s5, s2, s3, #2, R5 ; j: 2 V0 D; D'
+        x03.tap0 s4, #8, s5, s10, s11 ; 32 - j: 2 V0 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V1
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V1 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V1 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V2
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V2 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V2 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V3
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V3 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V3 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V4
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V4 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V4 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V5
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V5 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V5 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V6
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V6 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V6 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V7
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V7 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V7 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V8
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V8 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V8 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V9
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V9 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V9 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V10
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V10 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V10 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V11
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V11 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V11 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V12
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V12 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V12 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V13
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V13 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V13 D'; the next D
+        pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 3, R2) ; V14
+        x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V14 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V14 D'; the next D
+        pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 3, R2) ; V15
+        x03.tapa s4, #8, s5, s2, s3, #3, R1 ; j: + 2 V15 D; D'
+        x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V15 D'; the next D
+        pk(s0, A0, s0, s0, s0, 6, s7, s3, 0, 6) ; rshr(acc, 24) = hi + [lo < 0] (mp3_rd24)
+        pk(s0, A0, s0, s0, s0, 1, s2, s6, 5, 0)
+        pk(s0, A0, s0, s0, s0, 13, s7, s11, 0, 6)
+        pk(s0, A0, s0, s0, s0, 6, s10, s13, 5, 0)
+        x18.max s1, s1, s8
+        x18.min s1, s1, s9
+        x18.max s6, s6, s8
+        ptst p3, s0, #EQ12, #PTST
+        x18.min s6, s6, s9
+        jmp #IF_NOT, #3, yp
+        x17.stys e7, #1, #0, e7, R7 ; (delay slot) sample j, then + nch
+        x17.stys e6, #6, #0, e6, R6 ; (delay slot) sample 32 - j, then - nch
+}
+
 ; Synthesis of channel MP_HCH's granule MP_SGR (see above). Uses s1..s13, A8..A14, R1..R7, e6, e7.
 .macro mp3_synth() {
         lde e7, #MH_NCH
@@ -3163,15 +3271,27 @@ yslot:  lde e7, #MP_HCH
         lde e7, #MP_YO
         ldy s10, e7
         x17.mve e7, s10         ; the first sample's address
+        rimm R5, #31
+        x18.una s0, s0, #1, R6, s11 ; R6 = -nch (x17 own-x18alu011)
+        ldi s12, #31
+        x18.mpy s13, s0, s11, s12
+        alu s13, s13, s10, #OP_ADD
+        x17.mve e6, s13         ; sample 31's address
         pkf(s4, A8, s0, s0, s0, 0, s0, s0, 0, 0, 2, R3) ; D0 of sample 0
-        ldi s12, #32
-yj:     mp3_win16()
-        alu s12, s12, s14, #OP_SUB
-        ptst p3, s0, #EQ12, #PTST
+        mp3_win0()
         x18.max s1, s1, s8
-        jmp #IF_NOT, #3, yj
-        x18.min s3, s1, s9      ; (delay slot)
-        x17.stys e7, #3, #0, e7, R7 ; (delay slot) the sample, then + nch
+        x18.min s3, s1, s9
+        x17.stys e7, #3, #0, e7, R7 ; sample 0, then + nch
+        mp3_wpair()
+        x02.aa A8, A8, R5, #2, A0, A0 ; sample 16's second D
+        mp3_win16()
+        x18.max s1, s1, s8
+        x18.min s3, s1, s9
+        x17.stys e7, #3, #0, e7, R7 ; sample 16
+        lde e7, #MH_NCH
+        ldy s11, e7
+        lde e7, #MP_YO
+        ldy s10, e7
         ldi s12, #32
         x18.mpy s12, s0, s11, s12
         alu s10, s10, s12, #OP_ADD
