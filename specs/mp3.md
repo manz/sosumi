@@ -83,6 +83,11 @@ fault; LAME writes it with empty main data.
   the reservoir and filterbank state carry across the discontinuity, and a frame whose
   main_data_begin reaches before the seek must decode without fault.
 - Entry point, reservoir storage and synthesis history are ours to lay out.
+- The synthesis matrix (`mp3_mgrp`) rotates four x03.tap sums, {sHi:sLo} changing every
+  bundle while sL and sB are shared. The exact tap chains on record (facts 791, 792, 794) all
+  keep one pair, so this pattern is exact in x17's emulator only (**OPEN**, measurement asked
+  of the dirty side by x17, 2026-11-10). If it fails, one sum per row at 2 bundles a product
+  costs about 40K bundles a frame back.
 
 ## Decoding stages
 
