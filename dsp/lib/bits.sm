@@ -14,13 +14,14 @@
 ; negative word gets 2^16 back), e5 + 1, avail + 16. Uses s12 and p3.
 ;
 ; getbits(dst, k), k in 0..8 (getbits_s takes k in s11; k = 0 reads 0): refill 16 bits when avail < k (avail <= 7 then, so the cache
-; stays below 2^23), then dst = floor(cache / 2^sh), sh = avail - k. The floor comes from the
-; rounded right shift (reference.md `x19`, op 23, negative count): floor(c / 2^sh) = rshr(c - h, sh) with
-; h = rshr(2^sh - 1, 1), which is 0 at sh = 0. Every form used is gated on silicon.
+; stays below 2^23), then dst = floor(cache / 2^sh), sh = avail - k, by the alu head's
+; arithmetic shift (fact 774). Every form used is gated on silicon.
 
 .const OP_ADD  = 14
 .const OP_SUB  = 0x10
 .const SHIFT   = 23
+.const ASR     = 6               ; alu head: b >> a, a negative a shifts left (fact 774)
+.const ASRRS   = 7               ; the same, rounding right, saturating left
 .const AGU_INC = 2
 .const PTST    = 0x0B
 ; ptst conditions (reference.md `ptst`, own-ptst-c1-*; c1 = a <= -s4 on silicon, 7 of 7): the b-only rows,
@@ -54,14 +55,16 @@
 }
 
 .macro refill() {
-        x19.alu s9, s9, s15, #SHIFT ; cache << 16
+        alu s12, s0, s15, #OP_SUB ; -16
+        alu s9, s12, s9, #ASR   ; cache << 16 (alu asr, a negative count shifts left: fact 774)
         alu s9, s9, s13, #OP_ADD ; + the word as ldy gave it
         alu s12, s13, s0, #OP_ADD
         ptst p3, s0, #LT12, #PTST ; ldy sign-extended it
         jmp #IF_NOT, #3, done
         x18.eagu e5, e5, #AGU_INC ; (delay slot) next word
         alu s10, s10, s15, #OP_ADD ; (delay slot) avail += 16
-        x19.alu s12, s14, s15, #SHIFT ; 2^16
+        alu s12, s0, s15, #OP_SUB
+        alu s12, s12, s14, #ASR ; 2^16
         alu s9, s9, s12, #OP_ADD ; its 16 bits, unsigned
 done:
 }
@@ -71,23 +74,21 @@ done:
         getbits_s(dst)
 }
 
+; dst = floor(c / 2^sh) by alu's asr (fact 774), then the cache keeps c - dst * 2^sh. dst is
+; not s6, s9, s10 or s12.
 .macro getbits_s(dst) {
-        alu s12, s10, s11, #OP_SUB ; avail - k
+        alu s12, s10, s11, #OP_SUB ; sh = avail - k
         ptst p3, s0, #LT12, #PTST ; p3 = avail < k
         jmp #IF_NOT, #3, have
-        ldy s13, e5             ; delay slot: next word, harmless if unused
-        alu s6, s0, s14, #OP_SUB ; delay slot: s6 = -1
+        ldy s13, e5             ; (delay slot) the next word, harmless if unused
+        nop()                   ; (delay slot)
         refill()
-have:   alu s12, s10, s11, #OP_SUB ; sh = avail - k
-        x19.alu s13, s14, s12, #SHIFT ; 2^sh
-        alu s13, s13, s14, #OP_SUB ; 2^sh - 1
-        x19.alu s13, s13, s6, #SHIFT ; h = rshr(2^sh - 1, 1)
-        alu s13, s9, s13, #OP_SUB ; c - h
+        alu s12, s10, s11, #OP_SUB ; sh, avail grown
+have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
         alu s6, s0, s12, #OP_SUB ; -sh
-        x19.alu dst, s13, s6, #SHIFT ; dst = rshr(c - h, sh) = floor(c / 2^sh)
-        x19.alu s13, dst, s12, #SHIFT ; dst << sh
-        alu s9, s9, s13, #OP_SUB ; cache keeps the low sh bits
-        alu s10, s10, s11, #OP_SUB ; avail -= k
+        alu s6, s6, dst, #ASR   ; dst << sh
+        alu s9, s9, s6, #OP_SUB ; the cache keeps the low sh bits
+        alu s10, s12, s0, #OP_ADD ; avail = sh
 }
 
 ; readn(dst), n in s7 (0..24, consumed): dst = the next n bits, read 8 at a time. Uses s5.
@@ -107,7 +108,8 @@ more:   alu s12, s7, s14, #OP_SUB ; n - 1
         alu s12, s0, s0, #OP_ADD ;        none left
 full:   alu s7, s12, s0, #OP_ADD
         getbits_s(s5)
-        x19.alu dst, dst, s11, #SHIFT ; dst << taken
+        alu s6, s0, s11, #OP_SUB
+        alu dst, s6, dst, #ASR  ; dst << taken
         alu dst, dst, s5, #OP_ADD
         jmp #ALWAYS, #0, more
         nop()
