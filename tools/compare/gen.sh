@@ -13,6 +13,8 @@ $F -f lavfi -i "anoisesrc=color=pink:amplitude=0.3:sample_rate=44100:d=6" -ac 2 
 # decaying clicks every 0.37 s over a quiet chord: forces short windows
 $F -f lavfi -i "aevalsrc='0.1*(sin(2*PI*220*t)+sin(2*PI*277*t)+sin(2*PI*330*t))+0.8*exp(-60*mod(t,0.37))*sin(2*PI*1800*t)|0.1*(sin(2*PI*220*t)+sin(2*PI*330*t))+0.8*exp(-60*mod(t+0.1,0.37))*sin(2*PI*2400*t)':s=44100:d=6" $T/clicks.wav
 $F -f lavfi -i "sine=f=440:sample_rate=44100:d=6,volume=0.5" -ac 1 $T/mono.wav
+# the sm1 MP3 budget's worst case: 48 kHz at 320 kbps, loud clicks over white noise
+$F -f lavfi -i "aevalsrc='0.9*exp(-80*mod(t,0.11))*sin(2*PI*3100*t)+0.3*(random(0)-0.5)|0.9*exp(-80*mod(t+0.05,0.13))*sin(2*PI*5300*t)+0.3*(random(1)-0.5)':s=48000:d=3" $T/heavy.wav
 
 for s in tone sweep pink clicks mono; do
   for enc in aac aac_at; do
@@ -54,3 +56,4 @@ mp3 sweep.m2 sweep "-ar 22050 -b:a 64k"
 mp3 clicks.m2 clicks "-ar 24000 -b:a 64k"
 mp3 sweep.m25 sweep "-ar 11025 -b:a 32k"
 mp3 clicks.m25_8k clicks "-ar 8000 -b:a 24k"
+mp3 heavy.cbr heavy "-b:a 320k"

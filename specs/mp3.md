@@ -137,10 +137,10 @@ subband, 32 rows of V per slot, folded by N's symmetries to 384 products over bu
 subband sums), the synthesis window exact in Q17. The hybrid's windows are Q23 (1.0 held as
 2^23 - 1), each product one x02 rounded multiply. Against `tools/compare`:
 
-| Reference | Result over the ten LAME fixtures |
+| Reference | Result over the eleven LAME fixtures |
 |---|---|
 | afconvert (Apple) | max diff 1 LSB on all |
-| ffmpeg binary | max diff 1 LSB, except sweep.m2 (2 LSB in 0.017% of samples) |
+| ffmpeg binary | max diff 1 LSB, except sweep.m2 (2 LSB in 0.017% of samples) and heavy.cbr (2 LSB, under 0.001%) |
 
 Words wrap at 24 bits as sm1's do; only requantisation saturates. A stream louder than 4 at a
 filterbank stage would wrap (OPEN: whether the program saturates there instead). x03.tap's 48-bit

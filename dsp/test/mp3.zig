@@ -12,6 +12,7 @@ const fixtures = [_][]const u8{
     @embedFile("mono.cbr.mp3"),
     @embedFile("clicks.m2.mp3"),
     @embedFile("clicks.m25_8k.mp3"),
+    @embedFile("heavy.cbr.mp3"),
 };
 
 fn y(st: *h.emu.State, addr: u32) u32 {
