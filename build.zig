@@ -26,6 +26,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "asm", .module = x17.module("asm") },
             .{ .name = "emu", .module = x17.module("emu") },
             .{ .name = "host", .module = x17.module("host") },
+            .{ .name = "image", .module = x17.module("image") },
         },
     }) });
     // the access units aacdec dumped, for aac_packet's test
@@ -65,6 +66,28 @@ pub fn build(b: *std.Build) void {
         }),
     });
     b.installArtifact(dspplay);
+
+    // aac_packet as an x17 image: tools/aacimage writes the source, x17 image assembles it
+    const aacimage = b.addExecutable(.{
+        .name = "aacimage",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/aacimage/main.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "dsp", .module = dspplay.root_module.import_table.get("dsp").? }},
+        }),
+    });
+    const gen = b.addRunArtifact(aacimage);
+    gen.addDirectoryArg(b.path("dsp/lib"));
+    const img = b.addRunArtifact(x17.artifact("x17"));
+    img.addArgs(&.{ "image", "-o" });
+    const x17i = img.addOutputFileArg("aac.x17i");
+    img.addArg("-g");
+    const dbg = img.addOutputFileArg("aac.json");
+    img.addFileArg(gen.captureStdOut(.{ .basename = "aac.sm" }));
+    const sm1 = b.step("sm1", "Build zig-out/sm1/aac.x17i, aac_packet's x17 image");
+    sm1.dependOn(&b.addInstallFileWithDir(x17i, .{ .custom = "sm1" }, "aac.x17i").step);
+    sm1.dependOn(&b.addInstallFileWithDir(dbg, .{ .custom = "sm1" }, "aac.json").step);
 
     const compare = b.addExecutable(.{
         .name = "compare",

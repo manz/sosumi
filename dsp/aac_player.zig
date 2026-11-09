@@ -7,6 +7,9 @@ const ref = @import("ref");
 const h = @import("harness.zig");
 const map = @import("map.zig");
 
+/// aac.sm's constants (the libraries' `.const` values).
+pub const at = map.at;
+
 const A = ref.dsp.aac;
 
 pub const Error = error{ Unsupported, Status, NotHalted } || h.emu.RunError || std.mem.Allocator.Error;
@@ -148,3 +151,49 @@ pub const Player = struct {
         return self.pcm;
     }
 };
+
+/// One space's words as image directives (x17 ASSEMBLY.md "Placement and layout"), up to 16 a
+/// line, a line per run of consecutive addresses.
+fn emitData(w: *std.Io.Writer, gpa: std.mem.Allocator, dir: []const u8, mem: *const std.AutoHashMapUnmanaged(u32, u32), mask: u32) !void {
+    var keys: std.ArrayList(u32) = .empty;
+    defer keys.deinit(gpa);
+    var it = mem.keyIterator();
+    while (it.next()) |k| try keys.append(gpa, k.*);
+    std.mem.sort(u32, keys.items, {}, std.sort.asc(u32));
+    var i: usize = 0;
+    while (i < keys.items.len) {
+        var j = i;
+        while (j + 1 < keys.items.len and keys.items[j + 1] == keys.items[j] + 1 and j + 1 - i < 16) j += 1;
+        try w.print("{s} 0x{X:0>4}", .{ dir, keys.items[i] });
+        for (keys.items[i .. j + 1]) |k| try w.print(", 0x{X}", .{mem.get(k).? & mask});
+        try w.writeAll("\n");
+        i = j + 1;
+    }
+}
+
+/// aac_packet's x17 image source: one init pass carrying, as .xdata and .ydata, every word the
+/// host sets before the first access unit (`Player.init`: the tables for `fi`, AK_NCH) and the
+/// stream state the emulator reads as zero (the overlaps, the PNS generator, prev_shape), then
+/// a halt; then the decoder pass, its libraries included from `lib` (dsp/lib).
+pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, fi: u4, nch: u32) !void {
+    var st: h.emu.State = .{};
+    defer st.deinit(gpa);
+    try stageTables(&st, gpa, fi);
+    try st.y_mem.put(gpa, ak_nch, nch);
+    for (0..2048) |k| try st.x_mem.put(gpa, map.at("OVL0") + @as(u32, @intCast(k)), 0);
+    try st.x_mem.put(gpa, map.at("XRNG"), 0);
+    for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);
+    try w.print("; aac_packet's image (dsp/aac_player.zig imageSource: freq_index {d}, {d} channels)\n", .{ fi, nch });
+    try w.writeAll(".pass init\n");
+    try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
+    try emitData(w, gpa, ".ydata", &st.y_mem, 0xFFFF);
+    try w.writeAll("        x17.halt\n\n.pass decoder\n");
+    for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "aac" }) |f|
+        try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
+    try w.writeAll(
+        \\        bits_init(AU)
+        \\        aac_packet()
+        \\        x17.halt
+        \\
+    );
+}

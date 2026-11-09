@@ -36,6 +36,18 @@ pub fn assemble(gpa: std.mem.Allocator, src: []const u8) ![]u32 {
 
 pub const Site = asm_mod.Site;
 
+/// An image source (`.pass` blocks and their data, x17 ASSEMBLY.md), its includes from the libs
+/// above (caller deinits).
+pub fn assembleImage(gpa: std.mem.Allocator, src: []const u8) !asm_mod.Program {
+    return switch (try asm_mod.assembleProgram(gpa, src, .{ .path = "t.sm", .loader = .{ .load = load } })) {
+        .ok => |p| p,
+        .err => |fe| {
+            std.debug.print("line {d}: {s}\n", .{ fe.line, fe.lineText() });
+            return error.Assemble;
+        },
+    };
+}
+
 /// `assemble`, also listing where each bundle came from when `sites` is set.
 pub fn assembleSites(gpa: std.mem.Allocator, src: []const u8, sites: ?*std.ArrayList(Site)) ![]u32 {
     return switch (try asm_mod.assembleFileWith(gpa, src, .{ .path = "t.sm", .loader = .{ .load = load }, .sites = sites })) {
