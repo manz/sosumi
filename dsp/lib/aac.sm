@@ -27,7 +27,7 @@
 ;   window halves as w / 4 (s the shape); XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
-; Scratch: X 0x0000 .. 0x2FFF, WRISE, WFALL, XL, XSAVE; Y CUR, STL, STR, FIN, PCMY, the AK_
+; Scratch: X 0x0000 .. 0x2FFF, XL, XSAVE; Y CUR, STL, STR, FIN, PCMY, the AK_
 ; slots and every stage's block. The reader's e5, s9, s10 are saved around the stages.
 
 .const HUFF0    = 0x4800        ; scale factor code
@@ -107,8 +107,6 @@
 .const IMT    = 0x2000          ; the IMDCT's output, the window's T
 .const WB     = 0x2800          ; the window's block
 .const TWL    = 0x3000
-.const WRISE  = 0x3400
-.const WFALL  = 0x3800
 .const OVL0   = 0x3C00
 .const OVL1   = 0x4000
 .const XL     = 0x4400
@@ -991,7 +989,6 @@ done:
         x19.alu s5, s8, s4, #SHIFT ; (delay slot) prev * 0x400
         ldi s4, #WLONG
         alu s5, s5, s4, #OP_ADD
-        ldi s6, #1024
         jmp #ALWAYS, #0, rcopy
         nop()
         nop()
@@ -999,8 +996,8 @@ rshort: ldi s4, #7
         x19.alu s5, s8, s4, #SHIFT
         ldi s4, #WSHORT
         alu s5, s5, s4, #OP_ADD
-        ldi s6, #128
-rcopy:  ak_xcopyd(WRISE)
+rcopy:  alu s3, s5, s0, #OP_ADD
+        yst(WIN_R)
         yld(s8, FIN + R_SH)
         yld(s2, FIN + R_WS)
         alu s4, s2, s0, #OP_ADD
@@ -1016,7 +1013,6 @@ rcopy:  ak_xcopyd(WRISE)
         x19.alu s5, s8, s4, #SHIFT
         ldi s4, #WSHORT
         alu s5, s5, s4, #OP_ADD
-        ldi s6, #128
         jmp #ALWAYS, #0, fcopy
         nop()
         nop()
@@ -1024,8 +1020,8 @@ flong:  ldi s4, #10
         x19.alu s5, s8, s4, #SHIFT
         ldi s4, #WLONG
         alu s5, s5, s4, #OP_ADD
-        ldi s6, #1024
-fcopy:  ak_xcopyd(WFALL)
+fcopy:  alu s3, s5, s0, #OP_ADD
+        yst(WIN_F)
 }
 
 ; The window for one channel's overlap at Y:[WIN_OVL], by FIN's window_sequence, into Y PCMY.
@@ -1044,19 +1040,19 @@ fcopy:  ak_xcopyd(WFALL)
         jmp #3, #3, wsh
         nop()
         nop()
-        win_stop(IMT, WRISE, WFALL, WB, PCMY)
+        win_stop(IMT, WB, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wl:     win_long(IMT, WRISE, WFALL, PCMY)
+wl:     win_long(IMT, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wst:    win_start(IMT, WRISE, WFALL, WB, PCMY)
+wst:    win_start(IMT, WB, PCMY)
         jmp #ALWAYS, #0, done
         nop()
         nop()
-wsh:    win_short(IMT, WRISE, WFALL, WB, PCMY)
+wsh:    win_short(IMT, WB, PCMY)
 done:
 }
 

@@ -20,10 +20,20 @@ const pcm_at = 0x2400; // clear of WIN_OVL
 
 fn call(seq: ref.aac.ics.WindowSequence) []const u8 {
     return switch (seq) {
-        .only_long => std.fmt.comptimePrint("win_long({d}, {d}, {d}, {d})", .{ t_at, lp_at, lc_at, pcm_at }),
-        .long_start => std.fmt.comptimePrint("win_start({d}, {d}, {d}, {d}, {d})", .{ t_at, lp_at, sc_at, b_at, pcm_at }),
-        .long_stop => std.fmt.comptimePrint("win_stop({d}, {d}, {d}, {d}, {d})", .{ t_at, sp_at, lc_at, b_at, pcm_at }),
-        .eight_short => std.fmt.comptimePrint("win_short({d}, {d}, {d}, {d}, {d})", .{ t_at, sp_at, sc_at, b_at, pcm_at }),
+        .only_long => std.fmt.comptimePrint("win_long({d}, {d})", .{ t_at, pcm_at }),
+        .long_start => std.fmt.comptimePrint("win_start({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
+        .long_stop => std.fmt.comptimePrint("win_stop({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
+        .eight_short => std.fmt.comptimePrint("win_short({d}, {d}, {d})", .{ t_at, b_at, pcm_at }),
+    };
+}
+
+/// WIN_R and WIN_F: the rising half from the previous shape, the falling from the current.
+fn halves(seq: ref.aac.ics.WindowSequence) [2]u32 {
+    return switch (seq) {
+        .only_long => .{ lp_at, lc_at },
+        .long_start => .{ lp_at, sc_at },
+        .long_stop => .{ sp_at, lc_at },
+        .eight_short => .{ sp_at, sc_at },
     };
 }
 
@@ -59,6 +69,8 @@ test "the window macros window, overlap and clamp as the twin's block and synth"
             try h.putAllX(&state, gpa, sc_at, &W.short[cur]);
             try h.putAllX(&state, gpa, ovl_at, &st.overlap);
             try h.putY(&state, gpa, 0x2388, ovl_at); // WIN_OVL
+            try h.putY(&state, gpa, 0x2389, @intCast(halves(seq)[0])); // WIN_R
+            try h.putY(&state, gpa, 0x238A, @intCast(halves(seq)[1])); // WIN_F
             // B starts as garbage: every word must be written
             for (0..2048) |k| try h.putX(&state, gpa, b_at + @as(u32, @intCast(k)), 0x5A5A5A);
 
