@@ -20,27 +20,7 @@
 ; time while avail < k (the cache stays below 2^23), then dst = floor(cache / 2^sh),
 ; sh = avail - k, by the alu head's arithmetic shift (fact 774). Every form used is gated on silicon.
 
-.const OP_ADD  = 14
-.const OP_SUB  = 0x10
-.const SHIFT   = 23
-.const ASR     = 6               ; alu head: b >> a, a negative a shifts left (fact 774)
-.const ASRRS   = 7               ; the same, rounding right, saturating left
-.const AGU_INC = 2
-.const PTST    = 0x0B
-; ptst conditions (reference.md `ptst`, own-ptst-c1-*; c1 = a <= -s4 on silicon, 7 of 7): the b-only rows,
-; b = s<4 * c[1:0]>, a ignored, each gated on silicon (own-ptst-c10..c31). Each test puts its value in s4, s8 or
-; s12 (s0 as a register is OPEN).
-.const LT4    = 13              ; s4 < 0
-.const LT8    = 14              ; s8 < 0
-.const LT12   = 15              ; s12 < 0
-.const LE4    = 9               ; s4 <= 0
-.const LE8    = 10              ; s8 <= 0
-.const LE12   = 11              ; s12 <= 0
-.const EQ4    = 29              ; s4 == 0
-.const EQ8    = 30              ; s8 == 0
-.const EQ12   = 31              ; s12 == 0
-.const IF_NOT = 2               ; jmp mode: taken when the predicate is clear
-.const ALWAYS = 1               ; jmp mode: always taken (reference.md `jmp`, own-jmp)
+.include "bitcore.sm"
 
 .const BITS_ON = 0x2EFE         ; DSP-only Y: the stream is enabled; 0 until the first packet
 
@@ -66,10 +46,6 @@ on:     ldi s9, #0
         ptst p2, s0, #LT12, #PTST ; p2 = 0: the always-false predicate
 }
 
-.macro nop() {
-        alu s0, s0, s0, #0
-}
-
 .macro refill() {
         x16.getb #7, #7         ; A15 <- the next 8 stream bits (783)
         ldi s13, #-8
@@ -79,11 +55,6 @@ on:     ldi s9, #0
         alu s9, s9, s13, #OP_ADD
         ldi s13, #8
         alu s10, s10, s13, #OP_ADD ; avail += 8
-}
-
-.macro getbits(dst, k) {
-        ldi s11, #k
-        getbits_s(dst)
 }
 
 ; dst = floor(c / 2^sh) by alu's asr (fact 774), then the cache keeps c - dst * 2^sh. dst is
@@ -107,30 +78,4 @@ have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
         alu s6, s6, dst, #ASR   ; dst << sh
         alu s9, s9, s6, #OP_SUB ; the cache keeps the low sh bits
         alu s10, s12, s0, #OP_ADD ; avail = sh
-}
-
-; readn(dst), n in s7 (0..24, consumed): dst = the next n bits, read 8 at a time. Uses s5.
-.macro readn(dst) {
-        alu dst, s0, s0, #OP_ADD
-more:   alu s12, s7, s14, #OP_SUB ; n - 1
-        ptst p3, s0, #LT12, #PTST ; p3 = n == 0
-        jmp #3, #3, done
-        nop()
-        ldi s11, #8             ; (second delay slot, harmless)
-        alu s12, s7, s11, #OP_SUB ; n - 8
-        ptst p3, s0, #LT12, #PTST
-        jmp #IF_NOT, #3, full   ; n >= 8: take 8, n - 8 left
-        nop()
-        nop()
-        alu s11, s7, s0, #OP_ADD ; n < 8: take n
-        alu s12, s0, s0, #OP_ADD ;        none left
-full:   alu s7, s12, s0, #OP_ADD
-        getbits_s(s5)
-        alu s6, s0, s11, #OP_SUB
-        alu dst, s6, dst, #ASR  ; dst << taken
-        alu dst, dst, s5, #OP_ADD
-        jmp #ALWAYS, #0, more
-        nop()
-        nop()
-done:
 }

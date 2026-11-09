@@ -5,7 +5,9 @@ const asm_mod = @import("asm");
 pub const emu = @import("emu");
 
 pub const libs = [_]struct { path: []const u8, text: []const u8 }{
+    .{ .path = "lib/bitcore.sm", .text = @embedFile("lib/bitcore.sm") },
     .{ .path = "lib/bits.sm", .text = @embedFile("lib/bits.sm") },
+    .{ .path = "lib/ybits.sm", .text = @embedFile("lib/ybits.sm") },
     .{ .path = "lib/mem.sm", .text = @embedFile("lib/mem.sm") },
     .{ .path = "lib/ring.sm", .text = @embedFile("lib/ring.sm") },
     .{ .path = "lib/pcm.sm", .text = @embedFile("lib/pcm.sm") },

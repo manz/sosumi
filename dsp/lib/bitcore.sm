@@ -1,0 +1,66 @@
+; The bit readers' common part (lib/bits.sm over the input stream, lib/ybits.sm over Y): the
+; ISA constants, nop, getbits and readn. Each reader defines refill() and getbits_s(dst) on
+; the same registers:
+;
+;   s9   cache: the `avail` unread bits, right-aligned (below 2^23)
+;   s10  avail
+;   s14  1, s15 16 (constants); unconditional jumps use mode 1 (`jmp #ALWAYS, #0`):
+;        an x19alu sets p2 on silicon, so no predicate is assumed clear
+;   s6, s11, s12, s13 scratch; s0 stays 0
+
+.const OP_ADD  = 14
+.const OP_SUB  = 0x10
+.const SHIFT   = 23
+.const ASR     = 6               ; alu head: b >> a, a negative a shifts left (fact 774)
+.const ASRRS   = 7               ; the same, rounding right, saturating left
+.const AGU_INC = 2
+.const PTST    = 0x0B
+; ptst conditions (reference.md `ptst`, own-ptst-c1-*; c1 = a <= -s4 on silicon, 7 of 7): the b-only rows,
+; b = s<4 * c[1:0]>, a ignored, each gated on silicon (own-ptst-c10..c31). Each test puts its value in s4, s8 or
+; s12 (s0 as a register is OPEN).
+.const LT4    = 13              ; s4 < 0
+.const LT8    = 14              ; s8 < 0
+.const LT12   = 15              ; s12 < 0
+.const LE4    = 9               ; s4 <= 0
+.const LE8    = 10              ; s8 <= 0
+.const LE12   = 11              ; s12 <= 0
+.const EQ4    = 29              ; s4 == 0
+.const EQ8    = 30              ; s8 == 0
+.const EQ12   = 31              ; s12 == 0
+.const IF_NOT = 2               ; jmp mode: taken when the predicate is clear
+.const ALWAYS = 1               ; jmp mode: always taken (reference.md `jmp`, own-jmp)
+
+.macro nop() {
+        alu s0, s0, s0, #0
+}
+
+.macro getbits(dst, k) {
+        ldi s11, #k
+        getbits_s(dst)
+}
+
+; readn(dst), n in s7 (0..24, consumed): dst = the next n bits, read 8 at a time. Uses s5.
+.macro readn(dst) {
+        alu dst, s0, s0, #OP_ADD
+more:   alu s12, s7, s14, #OP_SUB ; n - 1
+        ptst p3, s0, #LT12, #PTST ; p3 = n == 0
+        jmp #3, #3, done
+        nop()
+        ldi s11, #8             ; (second delay slot, harmless)
+        alu s12, s7, s11, #OP_SUB ; n - 8
+        ptst p3, s0, #LT12, #PTST
+        jmp #IF_NOT, #3, full   ; n >= 8: take 8, n - 8 left
+        nop()
+        nop()
+        alu s11, s7, s0, #OP_ADD ; n < 8: take n
+        alu s12, s0, s0, #OP_ADD ;        none left
+full:   alu s7, s12, s0, #OP_ADD
+        getbits_s(s5)
+        alu s6, s0, s11, #OP_SUB
+        alu dst, s6, dst, #ASR  ; dst << taken
+        alu dst, dst, s5, #OP_ADD
+        jmp #ALWAYS, #0, more
+        nop()
+        nop()
+done:
+}

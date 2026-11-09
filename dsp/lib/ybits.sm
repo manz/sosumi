@@ -1,0 +1,71 @@
+; Twin: ref/dsp/bits.zig; ISO/IEC 11172-3 bit order (bslbf, MSB first).
+; MSB-first bit reader over bytes held one per Y word (0..255): the MP3 program's frame and bit
+; reservoir, copied there from the input stream. Same registers and macros as lib/bits.sm
+; (lib/bitcore.sm); the byte pointer lives in a Y slot so the bit position can be read back.
+;
+;   e11  -> YB_PTR, holding q = the next byte's address - 1 (x17.mve e, s sets e = s + 1)
+;   e10  the byte being read (scratch)
+;
+; ybits_init(): e11 and the constants, empty cache. ybits_at(r): continue at the byte whose
+; address is in r (not s13), empty cache. ybits_pos(dst): the bit position, 8 * (next byte) -
+; avail, in bits from Y:0 (dst not s13). refill(): one byte from Y, the pointer stepped.
+
+.include "bitcore.sm"
+
+.const YB_PTR = 0x2EFD           ; DSP-only Y
+
+.macro ybits_init() {
+        lde e11, #YB_PTR
+        ldi s9, #0
+        ldi s10, #0
+        ldi s14, #1
+        ldi s15, #16
+        ldi s12, #0
+        ptst p2, s0, #LT12, #PTST ; p2 = 0: the always-false predicate
+}
+
+.macro ybits_at(r) {
+        alu s13, r, s14, #OP_SUB
+        x17.sty e11, #5, #1     ; q = r - 1 (s13)
+        ldi s9, #0
+        ldi s10, #0
+}
+
+.macro ybits_pos(dst) {
+        ldy dst, e11
+        alu dst, dst, s14, #OP_ADD ; next byte
+        ldi s13, #-3
+        alu dst, s13, dst, #ASR ; * 8 (fact 774)
+        alu dst, dst, s10, #OP_SUB
+}
+
+.macro refill() {
+        ldi s13, #-8
+        alu s9, s13, s9, #ASR   ; cache << 8 (fact 774)
+        ldy s13, e11
+        x17.mve e10, s13        ; e10 = q + 1, the byte's address
+        alu s13, s13, s14, #OP_ADD
+        x17.sty e11, #5, #1     ; q + 1 (s13)
+        ldy s13, e10            ; the byte, 0..255
+        alu s9, s9, s13, #OP_ADD
+        ldi s13, #8
+        alu s10, s10, s13, #OP_ADD ; avail += 8
+}
+
+; dst = floor(c / 2^sh), sh = avail - k, as lib/bits.sm. dst is not s6, s9, s10 or s12.
+.macro getbits_s(dst) {
+need:   alu s12, s10, s11, #OP_SUB ; sh = avail - k
+        ptst p3, s0, #LT12, #PTST ; p3 = avail < k
+        jmp #IF_NOT, #3, have
+        nop()
+        nop()
+        refill()
+        jmp #ALWAYS, #0, need
+        nop()
+        nop()
+have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
+        alu s6, s0, s12, #OP_SUB ; -sh
+        alu s6, s6, dst, #ASR   ; dst << sh
+        alu s9, s9, s6, #OP_SUB ; the cache keeps the low sh bits
+        alu s10, s12, s0, #OP_ADD ; avail = sh
+}
