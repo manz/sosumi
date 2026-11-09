@@ -16,27 +16,6 @@
 
 .const MAX_PREFIX = 9
 
-; dst = the next n bits, n in s7 (1..16), read as at most two getbits_s. Uses s5, s11.
-.macro readk(dst) {
-        ldi s11, #8
-        alu s12, s7, s11, #OP_SUB ; n - 8
-        ptst p3, s0, #LT12, #PTST ; n < 8
-        jmp #3, #3, short
-        alu s5, s12, s0, #OP_ADD ; (delay slot)
-        nop()
-        getbits_s(dst)          ; the top 8
-        alu s11, s5, s0, #OP_ADD
-        getbits_s(s5)           ; the other n - 8
-        x19.alu dst, dst, s11, #SHIFT
-        alu dst, dst, s5, #OP_ADD
-        jmp #ALWAYS, #0, done
-        nop()
-        nop()
-short:  alu s11, s7, s0, #OP_ADD
-        getbits_s(dst)
-done:
-}
-
 .macro rice_get(dst) {
         alu s8, s0, s14, #OP_SUB ; pre = -1: the delay slot counts each bit
 pfx:    alu s12, s10, s14, #OP_SUB ; sh = avail - 1
@@ -69,8 +48,8 @@ gotpre: ldi s5, #8
         ldi s7, #15
         x19.alu s7, s8, s7, #SHIFT ; pre << 15
         x02.mpy s8, s5, s7      ; base = pre * m
-        alu s7, s2, s0, #OP_ADD
-        readk(dst)              ; v
+        alu s11, s2, s0, #OP_ADD
+        getbits_s(dst)          ; v, k <= 15 bits in one read
         alu s12, dst, s14, #OP_SUB
         alu s12, s12, s14, #OP_SUB
         ptst p3, s0, #LT12, #PTST ; v < 2: hi == 0
