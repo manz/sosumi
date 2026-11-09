@@ -54,9 +54,19 @@ a file in any of them reaches sm1.
 - Codec mode 1 is MP3 (**MEASURED**: playing the MP3 podcast selects mode 1 and no
   other). The mode byte is ctx+0x58.
 - The output ring contract is AAC's (`specs/aac.md`, the same host output path,
-  **FIRMWARE**); the per-frame unit count for 1152 samples is **OPEN**.
-- Entry point, reservoir storage and synthesis history are ours to lay out; the open interface
-  questions are the ones listed in `specs/aac.md`.
+  **FIRMWARE**). MP3's init pass writes the header Y:0..4 = 0, 2, 0x900, 0, 0x10: two slots of
+  0x900 words, 1152 stereo frames (**MEASURED**, fact 788). The length word of a slot: **OPEN**.
+- The host contract is AAC's (**MEASURED**, every packet of one track): the same handshake and
+  arm, +0x98C on every packet including the first, no +0x420 block; only the per-mode patch
+  words at +0x940, +0x960 and +0x964 differ, written by the driver from its table. No
+  parameters beyond FD80 |= 1.
+- Input: each descriptor carries exactly one whole MPEG frame, its 4-byte header included
+  (all 1470 packets of a 192 kbps track start on sync, 626 or 627 bytes with padding). The
+  program reads the header itself from the stream (`specs/aac.md` input contract).
+- The bit reservoir is the program's: main_data_begin reaches back into earlier frames'
+  bytes, which the stream has already delivered, so the program keeps them in its own
+  buffer (**INFERRED** from the input contract).
+- Entry point, reservoir storage and synthesis history are ours to lay out.
 
 ## Decoding stages
 
