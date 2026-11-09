@@ -23,8 +23,8 @@
 ;   tools without common_window, 5 more channels than AK_NCH), OUTY the PCM, 1024 frames of
 ;   AK_NCH interleaved 16-bit samples.
 ; Y, filled by the host once: KBD_L and KBD_S (window.sm), the KBD rises.
-; X, filled by the host once: the dequantiser's DQ_D, DQ_IT, DQ_G; PREL, POSTL, TWL and PRES,
-;   POSTS, TWS, the IMDCT tables (long and short); SINE and SINE4 (window.sm), the sine rise;
+; X, filled by the host once: the dequantiser's DQ_D, DQ_IT, DQ_G; SINE and SINE4 (window.sm),
+;   the sine table every IMDCT twiddle and the sine window read;
 ;   XSTT stereo T, XPNT and XSEED PNS T and seeds, XTNK
 ;   the TNS reflection table. Kept between access units: OVL0, OVL1 the overlaps, XRNG the
 ;   PNS generator (shared by the channels).
@@ -101,14 +101,8 @@
 .const STR    = 0x2140
 .const FIN    = 0x2340
 
-.const PREL   = 0x1000
-.const POSTL  = 0x1400
-.const PRES   = 0x1A00
-.const POSTS  = 0x1A80
-.const TWS    = 0x1B00
 .const IMT    = 0x2000          ; the IMDCT's output, the window's T
 .const WB     = 0x2800          ; the window's block
-.const TWL    = 0x3000
 .const OVL0   = 0x3C00
 .const OVL1   = 0x4000
 .const XL     = 0x4400
@@ -1026,7 +1020,7 @@ done:
         jmp #3, #3, ishort
         nop()
         nop()
-        imdct(1024, 512, 10, 9, DQ_OUT, DQ_SPEC, IMT, PREL, POSTL, TWL, REVL, ESLOT)
+        imdct(1024, 512, 10, 9, DQ_OUT, DQ_SPEC, IMT, SINE + 1023, SINE, 2, SINE4, REVL, ESLOT)
         jmp #ALWAYS, #0, halves
         nop()
         nop()
@@ -1041,7 +1035,7 @@ ishort: ldi s3, #DQ_OUT
 sloop:  yld(s5, AK_IMI)
         ldi s6, #128
         ak_xcopyd(IMS_IN)
-        imdct_even(128, 64, 7, 6, IMS_IN, DQ_SPEC, IMS_OUT, PRES, POSTS, TWS, REVS, ESLOT)
+        imdct_even(128, 64, 7, 6, IMS_IN, DQ_SPEC, IMS_OUT, SINE4 + 510, SINE4 + 2, 8, SINE4, REVS, ESLOT)
         ldi s5, #IMS_OUT
         ldi s6, #256
         yld(s4, AK_IMO)

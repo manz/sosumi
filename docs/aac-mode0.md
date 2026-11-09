@@ -70,22 +70,24 @@ Stereo T, PNS T and seeds, the TNS reflection table and the PNS generator need 2
 Y is within a few hundred words of full, so each stage's slots get placed against this table
 before code moves.
 
-## Twiddles from SINE, no twin change
+## Twiddles from SINE
 
-The twin already reads every twiddle and the sine window from `sine.zig`, so the program can
-too and stay bit-exact; only where it finds the values changes.
+The twin reads every twiddle and the sine window from `sine.zig`, and the program reads the same
+words. The pre- and post-twiddles are taken as conjugates (`cmulc`: re = rnd(x.re c) +
+rnd(x.im s), im = rnd(x.im c) - rnd(x.re s)), so both parts are table words as stored, with no
+negated copy; that moved rounding ties only (tools/compare --dsp: the 25 fixtures unchanged but
+one, 1.900% to 1.901% of samples past one LSB).
 
-- Pre-twiddle exp(-j pi (4n + 1) / 4096) (long; times 8 short): sin from the odd entries at
+- Pre-twiddle (cos, sin) of pi (4n + 1) / 4096 (long; times 8 short): sin from the odd entries at
   index 2n ascending, cos = sin(2048 - k) from index 1023 - 2n descending, two pointers stepping
   by 2 (short: the multiples-of-4 entries, by 8).
-- Post-twiddle exp(-j pi 4k / 4096): the multiples-of-4 entries, sin ascending and cos
+- Post-twiddle (cos, sin) of pi 4k / 4096: the multiples-of-4 entries, sin ascending and cos
   descending.
-- Radix-4 stages: each stage first writes its l triples exp(-j 2 pi m j / (4 l)) (6 l words, the
-  twin's `tw4` slice) into scratch the FFT leaves free, then the butterflies read them as today.
-  Long: the spectrum's half of WORK (WORK + 1024 ..), idle between the pre-twiddle and the
-  post-twiddle, holds the largest stage (768 words). Short: WORK + 256 .. 351. Angles past pi / 2
-  are the quadrant-one entries mirrored and negated, exactly as `sine.cos` and `expTurn` do. Cost
-  about 1020 generated words per long IMDCT (126 per short), a few K bundles a channel.
+- Radix-4 stages: after the pre-twiddle, im_twgen writes the last stage's triples
+  exp(-j 2 pi m j / (4 L)), L = N4 / 4 (768 words long, 96 short) into IN, idle until the
+  post-twiddle. A stage of size l reads every (L / l)th triple: the same values. Angles past
+  pi / 2 are the quadrant-one entries mirrored and negated, as `expTurn` does: six strided runs,
+  one per quadrant of each m.
 - Windows: the sine shape from X's SINE (odd entries long, multiples of 4 at 4n + 2 short) with
   the w / 4 rounded shift in a free third slot; KBD from Y with the << 6 back. Two loop variants
   per half, picked by the shape.

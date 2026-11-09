@@ -54,6 +54,7 @@ pub fn stagePacket(gpa: std.mem.Allocator, state: *emu.State, base: u32, data: [
 
 const Word = @import("ref").dsp.ops.Word;
 const imdct = @import("ref").dsp.aac.imdct;
+const sine = @import("ref").dsp.aac.sine;
 
 /// X:[addr] = v, its 24 bits.
 pub fn putX(st: *emu.State, gpa: std.mem.Allocator, addr: u32, v: Word) !void {
@@ -80,13 +81,15 @@ pub fn putCx(st: *emu.State, gpa: std.mem.Allocator, base: u32, k: usize, c: imd
     try putX(st, gpa, base + 2 * @as(u32, @intCast(k)) + 1, c.im);
 }
 
-/// One IMDCT size's tables: PRE, POST, TW the twin's radix-4 triples, Y REV.
-pub fn stageImdct(st: *emu.State, gpa: std.mem.Allocator, comptime n2: usize, pre: u32, post: u32, tw: u32, rev: u32) !void {
+/// One IMDCT size's bit reversal, Y REV (its twiddles come from the sine table, `stageSine`).
+pub fn stageImdct(st: *emu.State, gpa: std.mem.Allocator, comptime n2: usize, rev: u32) !void {
     const T = imdct.Tables(n2);
-    for (T.pre, T.post, 0..) |a, c, k| {
-        try putCx(st, gpa, pre, k, a);
-        try putCx(st, gpa, post, k, c);
-    }
-    for (T.tw4, 0..) |w, i| for (w, 0..) |c, m| try putCx(st, gpa, tw, 3 * i + m, c);
     for (T.rev, 0..) |r, n| try putY(st, gpa, rev + @as(u32, @intCast(n)), 2 * @as(i32, r));
+}
+
+/// The shared sine table (ref/dsp/aac/sine.zig): the odd entries at `odd`, the multiples of 4
+/// at `four`.
+pub fn stageSine(st: *emu.State, gpa: std.mem.Allocator, odd: u32, four: u32) !void {
+    try putAllX(st, gpa, odd, &sine.odd);
+    try putAllX(st, gpa, four, &sine.four);
 }

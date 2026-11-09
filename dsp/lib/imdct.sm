@@ -13,15 +13,18 @@
 ; scaled + E' - log2 n2 + 7 is one 0x19 op-23 shift (reference.md `x19`), which saturates as the model's comparisons
 ; do.
 ;
-; imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT), N4 = n2 / 2 (the FFT's
+; imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PC, PS, PSTEP, F, REV, ESLOT), N4 = n2 / 2 (the FFT's
 ; points, not a quarter), LOGN2 = log2 n2, STAGES = log2 N4: long (1024, 512, 10, 9), short
 ; (128, 64, 7, 6).
-;   X IN   n2 words in, rewritten (normalised words, then the DCT-IV result u)
+;   X IN   n2 words in, rewritten (normalised words, the FFT's twiddles, then the DCT-IV u)
 ;   X Z    n2 words: n4 = n2/2 complex points, re then im
 ;   X OUT  2 n2 samples out
-;   X PRE  exp(-j pi (n + 1/4) / n2), n4 pairs; X POST exp(-j pi k / n2), n4 pairs
-;   X TW   the radix-4 twiddles (the twin's tw4): per stage of block size l, for j < l, the
-;          pairs exp(-j 2 pi m j / (4 l)), m = 1, 2, 3 (1020 words long, 126 short)
+;   X PC, PS the pre-twiddle's cos and sin of pi (n + 1/4) / n2 for n = 0 in the sine table,
+;          cos stepping down and sin up by PSTEP (long: SINE + 1023, SINE, 2; short:
+;          SINE4 + 510, SINE4 + 2, 8); the twin's cmulc takes the conjugate
+;   X F    SINE4, sin(4 j pi / 4096): the post-twiddle (cos from F + 512 down, sin from F up,
+;          by 1024 / n2) and the radix-4 twiddles, which im_twgen writes into IN after the
+;          pre-twiddle (the last stage's 6 N4 / 4 words; earlier stages read a subset)
 ;   Y REV  Z + 2 rev(n) - 2 for n = 0 .. n4 - 1 (rev: log2 n4 bits reversed)
 ;   Y ESLOT E
 ; imdct takes an odd STAGES (a radix-2 stage first, the long block), imdct_even an even one.
@@ -140,20 +143,22 @@ scale:  yld(s3, ESLOT)
 ; finish of point n - 1, which x03.acp's A10 <- Y:[e7] (fact 193) then scatters; x03.acp's
 ; template also loads s7 with that Y word (facts 190, 748).
 .macro im_pre5(N2, IN) {
-        pkf(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0, 2, R2) ; xr; s10 = xi pr
-        pk(s4, A8, s6, s3, s5, 1, s9, s1, 0, 7) ; pr; s6 = xi pi; xr >>= c
-        pkf(s3, A6, s2, s1, s4, 6, s2, s6, 5, 0, 3, R2) ; xi; s2 = xr pr; s6 = re
-        pk(s5, A8, s0, s0, s0, 3, s9, s3, 0, 7) ; pi; xi >>= c
-        pk(s0, A0, s13, s1, s5, 10, s13, s10, 0, 0) ; s13 = xr pi; s10 = im
+        pkf(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0, 2, R2) ; xr; s10 = xi c
+        pkf(s4, A8, s6, s3, s5, 1, s9, s1, 0, 7, 3, R3) ; c; s6 = xi s; xr >>= c
+        pkf(s3, A6, s2, s1, s4, 6, s2, s6, 0, 0, 3, R2) ; xi; s2 = xr c; s6 = re
+        pkf(s5, A14, s0, s0, s0, 3, s9, s3, 0, 7, 2, R3) ; s; xi >>= c
+        pk(s0, A0, s13, s1, s5, 10, s10, s13, 5, 0) ; s13 = xr s; s10 = im
 }
 
-.macro im_pre(N2, N4, IN, PRE, REV) {
+.macro im_pre(N2, N4, IN, PC, PS, PSTEP, REV) {
         aimm_e(2, IN)
         ldi s12, #IN + N2 - 1
         amov_e(3, s12)
-        aimm_e(4, PRE)
+        aimm_e(4, PC)
+        aimm_e(7, PS)
         lde e7, #REV
         rimm R2, #2
+        rimm R3, #PSTEP
         rimm R4, #IN + N2 + 2
         ldi s15, #24
         im_pre5(N2, IN)
@@ -219,8 +224,42 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         x03.tap0 s1, #4, s0, s0, s0 ; (delay slot) the next ar; past the end, a dummy
 }
 
+; The radix-4 twiddles of the last stage (block size L = N4 / 4) into TW: for j < L the triple
+; exp(-j 2 pi m j / (4 L)), m = 1, 2, 3, re then im (the twin's tw4 for that stage; an earlier
+; stage of size l reads every (L / l)th triple). Angle m j 2048 / L in pi / 4096 is the
+; sine table's four[q], q = m j D, D = 512 / L, mirrored by quadrant as the twin's expTurn:
+; q <= 512 (cos four[512 - q], -sin -four[q]), q <= 1024 (-four[q - 512], -four[1024 - q]), else
+; (-four[1536 - q], four[q - 1024]). One run per quadrant of each m: J0 <= j < J1, re from RE
+; stepping by agu fn RFN, im from IM by IFN (2 up, 3 down, R3 = m D), RX / IX = 1 / 3 negating
+; the word (the third slot, 0 - x) or 0. Uses s1, s3, A4, A6, A8, R3..R5, R7, p3.
+.macro im_tws(TW, M, D, J0, J1, RE, RFN, RX, IM, IFN, IX) {
+        aimm_e(2, (RE))
+        aimm_e(3, (IM))
+        aimm_e(4, TW + 6 * (J0) + 2 * (M - 1))
+        rimm R3, #(M) * (D)
+        rimm R5, #5
+        rimm R4, #TW + 6 * ((J1) - 1) + 2 * (M - 1) + 1
+tw:     pkf(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0, RFN, R3)
+        pkf(s3, A6, s0, s0, s0, RX, s0, s1, 5, 0, IFN, R3)
+        pks(1, A8, IX, s0, s3, 5)
+        pcond p3, R4, A8, #30   ; more: A8 != the last re + 1
+        jmp #3, #3, tw
+        pksf(3, A8, 0, s0, s0, 0, 2, R5) ; (delay slot) im, then the next triple
+        nop()
+}
+
+.macro im_twgen(TW, F, L) {
+        im_tws(TW, 1, 512 / (L), 0, (L), F + 512, 3, 0, F, 2, 3)
+        im_tws(TW, 2, 512 / (L), 0, (L) / 2 + 1, F + 512, 3, 0, F, 2, 3)
+        im_tws(TW, 2, 512 / (L), (L) / 2 + 1, (L), F + 2 * ((L) / 2 + 1) * (512 / (L)) - 512, 2, 1, F + 1024 - 2 * ((L) / 2 + 1) * (512 / (L)), 3, 3)
+        im_tws(TW, 3, 512 / (L), 0, (L) / 3 + 1, F + 512, 3, 0, F, 2, 3)
+        im_tws(TW, 3, 512 / (L), (L) / 3 + 1, 2 * (L) / 3 + 1, F + 3 * ((L) / 3 + 1) * (512 / (L)) - 512, 2, 1, F + 1024 - 3 * ((L) / 3 + 1) * (512 / (L)), 3, 3)
+        im_tws(TW, 3, 512 / (L), 2 * (L) / 3 + 1, (L), F + 1536 - 3 * (2 * (L) / 3 + 1) * (512 / (L)), 3, 1, F + 3 * (2 * (L) / 3 + 1) * (512 / (L)) - 1024, 2, 0)
+}
+
 ; The radix-4 stages: STG of them from l = L0 (block size), groups N4 / (4 l), twiddles from TW
-; (the twin's tw4, a triple per j). Loads step A4, A6, A8, A10 (Z + 8 l g + {0, 2, 4, 6} l + 2 j)
+; (im_twgen's triples, the stage of size l reading every (N4 / 4 l)th: the last load of a triple
+; steps by R7). Loads step A4, A6, A8, A10 (Z + 8 l g + {0, 2, 4, 6} l + 2 j)
 ; and stores step A5, A7, A9, A11 over the same words, so no pointer goes back; twiddles at A12;
 ; R6 = 2 l, R5 = 6 l, R4 the group's end for A10, R2 the stage's twiddles. s12 holds the stage's
 ; right shift (positive) for x02.vc's asrrs.
@@ -235,7 +274,7 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         yst(IM_HALF)
         ldi s3, #N4 / (4 * L0)
         yst(IM_GRPS)
-        ldi s3, #TW
+        ldi s3, #6 * N4 / (4 * L0)
         yst(IM_PJ)
         ldi s3, #STG
         yst(IM_STG)
@@ -247,9 +286,12 @@ stage:  im_dec(20)
         alu s3, s1, s1, #OP_ADD
         alu s1, s1, s3, #OP_ADD ; 6 l
         im_rset(s1, R5)
-        yld(s1, IM_PJ)
-        im_rset(s1, R2)
+        rimm R2, #TW
         aimm_e(2, Z)
+        yld(s1, IM_PJ)
+        ldi s3, #5
+        alu s1, s1, s3, #OP_SUB
+        im_rset(s1, R7)         ; the twiddle step past a triple: 6 (N4 / 4 l) - 5
         x18.rag101 s0, R3, A4, R6, #2
         x12.aset #3, R3         ; A6 = Z + 2 l
         x18.rag101 s0, R3, A6, R6, #2
@@ -282,7 +324,7 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         pk(s1, A10, s9, s3, s4, 0, s0, s0, 0, 0)
         pk(s4, A12, s8, s3, s5, 1, s12, s1, 0, 7)
         pk(s3, A10, s2, s1, s4, 8, s2, s8, 5, 0) ; s8 = F2W2 re
-        pk(s5, A12, s0, s0, s0, 3, s12, s3, 0, 7)
+        pkf(s5, A12, s0, s0, s0, 3, s12, s3, 0, 7, 2, R7)
         pk(s0, A0, s13, s1, s5, 9, s13, s9, 0, 0) ; s9 = F2W2 im
         ; F0 (A4) into s1, s3 beside phase 2's tail
         pk(s1, A4, s11, s3, s4, 0, s0, s0, 0, 0)
@@ -330,13 +372,11 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         jmp #IF_NOT, #3, grp
         nop()
         nop()
-        yld(s1, IM_HALF)
-        alu s4, s1, s1, #OP_ADD
-        alu s4, s4, s1, #OP_ADD
-        alu s4, s4, s4, #OP_ADD ; 6 l: this stage's l triples
         yld(s3, IM_PJ)
-        alu s3, s3, s4, #OP_ADD
+        ldi s4, #2
+        alu s3, s4, s3, #ASRRS  ; the next stage reads every 4th triple's quarter as often
         yst(IM_PJ)
+        yld(s1, IM_HALF)
         alu s3, s1, s1, #OP_ADD
         alu s3, s3, s3, #OP_ADD ; l * 4
         yst(IM_HALF)
@@ -359,16 +399,18 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 ; products (pk) overlap point k - 1's finish, whose stores step A10 up and A12 down by agu_xr
 ; fns 2 and 3 with R2 = 2 (pksf, fact 738), the first store's third slot negating im.
 .macro im_post5() {
-        pk(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0) ; er; s10 = ei pr
-        pk(s4, A8, s6, s3, s5, 0, s0, s0, 0, 0) ; pr; s6 = ei pi
-        pk(s3, A4, s2, s1, s4, 6, s2, s6, 5, 0) ; ei; s2 = er pr; s6 = re
-        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; pi
-        pk(s0, A0, s13, s1, s5, 10, s13, s10, 0, 0) ; s13 = er pi; s10 = im
+        pk(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0) ; er; s10 = ei c
+        pkf(s4, A8, s6, s3, s5, 0, s0, s0, 0, 0, 3, R3) ; c; s6 = ei s
+        pk(s3, A4, s2, s1, s4, 6, s2, s6, 0, 0) ; ei; s2 = er c; s6 = re
+        pkf(s5, A14, s0, s0, s0, 0, s0, s0, 0, 0, 2, R3) ; s
+        pk(s0, A0, s13, s1, s5, 10, s10, s13, 5, 0) ; s13 = er s; s10 = im
 }
 
-.macro im_post(N2, N4, Z, IN, POST) {
+.macro im_post(N2, N4, Z, IN, F) {
         aimm_e(2, Z)
-        aimm_e(4, POST)
+        aimm_e(4, F + 512)
+        aimm_e(7, F)
+        rimm R3, #1024 / N2
         aimm_e(5, IN)
         ldi s12, #IN + N2 - 1
         amov_e(6, s12)
@@ -482,27 +524,29 @@ sneg:   im_frunx(2, 5)
 done:
 }
 
-.macro imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT) {
+.macro imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PC, PS, PSTEP, F, REV, ESLOT) {
         im_norm(N2, IN, OUT, ESLOT, silent)
-        im_pre(N2, N4, IN, PRE, REV)
+        im_pre(N2, N4, IN, PC, PS, PSTEP, REV)
+        im_twgen(IN, F, N4 / 4)
         ldi s3, #0
         yst(IM_SC)
         im_dec(21)
         im_r2(N4, Z)
-        im_r4(N4, Z, TW, 2, (STAGES / 2))
-        im_post(N2, N4, Z, IN, POST)
+        im_r4(N4, Z, IN, 2, (STAGES / 2))
+        im_post(N2, N4, Z, IN, F)
         im_fold(N2, LOGN2, IN, OUT)
 silent: ldi s15, #16
 }
 
 ; The same for an even STAGES (the short block): radix 4 throughout.
-.macro imdct_even(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT) {
+.macro imdct_even(N2, N4, LOGN2, STAGES, IN, Z, OUT, PC, PS, PSTEP, F, REV, ESLOT) {
         im_norm(N2, IN, OUT, ESLOT, silent)
-        im_pre(N2, N4, IN, PRE, REV)
+        im_pre(N2, N4, IN, PC, PS, PSTEP, REV)
+        im_twgen(IN, F, N4 / 4)
         ldi s3, #0
         yst(IM_SC)
-        im_r4(N4, Z, TW, 1, (STAGES / 2))
-        im_post(N2, N4, Z, IN, POST)
+        im_r4(N4, Z, IN, 1, (STAGES / 2))
+        im_post(N2, N4, Z, IN, F)
         im_fold(N2, LOGN2, IN, OUT)
 silent: ldi s15, #16
 }

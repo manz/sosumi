@@ -40,6 +40,11 @@ fn expk(m: usize) Cx {
     return .{ .re = sine.cos(m), .im = ops.sub(0, sine.sin(m)) };
 }
 
+/// (cos, sin) of m pi / 4096, m in [0, 2048].
+fn cs(m: usize) Cx {
+    return .{ .re = sine.cos(m), .im = sine.sin(m) };
+}
+
 /// exp(-j 2 pi a / b) for 0 <= a / b < 3/4, from the sine table (angles past pi negated back).
 fn expTurn(a: usize, b: usize) Cx {
     const m = a * 8192 / b; // exact: b divides 8192 a for the sizes used
@@ -54,18 +59,19 @@ pub fn Tables(comptime n2: usize) type {
     return struct {
         pub const n4 = n2 / 2;
         pub const stages = std.math.log2_int(usize, n4);
-        /// exp(-j pi (n + 1/4) / n2): m = (4n + 1) * 1024 / n2
+        /// (cos, sin) of pi (n + 1/4) / n2, m = (4n + 1) * 1024 / n2: the pre-twiddle is its
+        /// conjugate, taken by `cmulc`, so both parts are sine table words as stored.
         pub const pre: [n4]Cx = blk: {
             @setEvalBranchQuota(200000);
             var t: [n4]Cx = undefined;
-            for (&t, 0..) |*e, n| e.* = expk((4 * n + 1) * (1024 / n2));
+            for (&t, 0..) |*e, n| e.* = cs((4 * n + 1) * (1024 / n2));
             break :blk t;
         };
-        /// exp(-j pi k / n2): m = k * 4096 / n2
+        /// (cos, sin) of pi k / n2, m = k * 4096 / n2, the post-twiddle's conjugate.
         pub const post: [n4]Cx = blk: {
             @setEvalBranchQuota(200000);
             var t: [n4]Cx = undefined;
-            for (&t, 0..) |*e, k| e.* = expk(k * (4096 / n2));
+            for (&t, 0..) |*e, k| e.* = cs(k * (4096 / n2));
             break :blk t;
         };
         /// A radix-2 first stage when `stages` is odd.
@@ -108,6 +114,14 @@ pub fn cmul(a: Cx, b: Cx) Cx {
     return .{
         .re = ops.sub(ops.mulRound23(a.re, b.re), ops.mulRound23(a.im, b.im)),
         .im = ops.add(ops.mulRound23(a.re, b.im), ops.mulRound23(a.im, b.re)),
+    };
+}
+
+/// a * conj(b): re = rnd(a.re b.re) + rnd(a.im b.im), im = rnd(a.im b.re) - rnd(a.re b.im).
+pub fn cmulc(a: Cx, b: Cx) Cx {
+    return .{
+        .re = ops.add(ops.mulRound23(a.re, b.re), ops.mulRound23(a.im, b.im)),
+        .im = ops.sub(ops.mulRound23(a.im, b.re), ops.mulRound23(a.re, b.im)),
     };
 }
 
@@ -200,10 +214,10 @@ fn fft(comptime n2: usize, z: []Cx) u5 {
 pub fn dct4(comptime n2: usize, x: *const [n2]Word, u: *[n2]Word) u5 {
     const T = Tables(n2);
     var z: [T.n4]Cx = undefined;
-    for (0..T.n4) |n| z[T.rev[n]] = cmul(.{ .re = x[2 * n], .im = x[n2 - 1 - 2 * n] }, T.pre[n]);
+    for (0..T.n4) |n| z[T.rev[n]] = cmulc(.{ .re = x[2 * n], .im = x[n2 - 1 - 2 * n] }, T.pre[n]);
     const scaled = fft(n2, &z);
     for (z, 0..) |e, k| {
-        const c = cmul(e, T.post[k]);
+        const c = cmulc(e, T.post[k]);
         u[2 * k] = c.re;
         u[n2 - 1 - 2 * k] = ops.sub(0, c.im);
     }

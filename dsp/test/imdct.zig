@@ -1,5 +1,5 @@
 //! dsp/lib/imdct.sm against its twin, ref/dsp/aac/imdct.zig `imdct`, long and short, with the
-//! twin's own twiddle tables (ISO/IEC 14496-3 4.6.11.3.2).
+//! shared sine table (ISO/IEC 14496-3 4.6.11.3.2).
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
@@ -43,7 +43,8 @@ fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
         var state = h.emu.State{};
         defer state.deinit(gpa);
         for (w, 0..) |v, k| try h.putX(&state, gpa, 0x400 + @as(u32, @intCast(k)), v);
-        try h.stageImdct(&state, gpa, n2, 0x1000, 0x1400, 0x1A00, map.at("REVL"));
+        try h.stageImdct(&state, gpa, n2, map.at("REVL"));
+        try h.stageSine(&state, gpa, 0x1000, 0x1400);
         try h.putY(&state, gpa, map.at("ESLOT"), e);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 26);
         try testing.expect(state.halted);
@@ -54,9 +55,34 @@ fn runs(comptime n2: usize, call: []const u8, seed: u64) !void {
 }
 
 test "imdct transforms a long block as the twin does" {
-    try runs(1024, "imdct(1024, 512, 10, 9, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, " ++ rev_eslot, 0x1DC7);
+    try runs(1024, "imdct(1024, 512, 10, 9, 0x0400, 0x0000, 0x0800, 0x1000 + 1023, 0x1000, 2, 0x1400, " ++ rev_eslot, 0x1DC7);
 }
 
 test "imdct transforms a short block as the twin does" {
-    try runs(128, "imdct_even(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1000, 0x1400, 0x1A00, " ++ rev_eslot, 0x5B7);
+    try runs(128, "imdct_even(128, 64, 7, 6, 0x0400, 0x0000, 0x0800, 0x1400 + 510, 0x1400 + 2, 8, 0x1400, " ++ rev_eslot, 0x5B7);
+}
+
+fn twgen(comptime n2: usize) !void {
+    const gpa = testing.allocator;
+    const T = I.Tables(n2);
+    const l = T.n4 / 4;
+    const src = try std.fmt.allocPrint(gpa, ".include \"lib/bits.sm\"\n.include \"lib/mem.sm\"\n.include \"lib/imdct.sm\"\n        bits_init(0x4000)\n        im_twgen(0x0400, 0x1400, {d})\n        x17.halt\n", .{l});
+    defer gpa.free(src);
+    const prog = try h.assemble(gpa, src);
+    defer gpa.free(prog);
+    var state = h.emu.State{};
+    defer state.deinit(gpa);
+    try h.stageSine(&state, gpa, 0x1000, 0x1400);
+    _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 22);
+    try testing.expect(state.halted);
+    for (T.tw4[T.tw4_len - l ..], 0..) |w, j| for (w, 0..) |c, m| {
+        const at: u32 = 0x400 + @as(u32, @intCast(6 * j + 2 * m));
+        try testing.expectEqual(@as(u32, @as(u24, @bitCast(c.re))), state.readX(at) orelse 0xDEAD);
+        try testing.expectEqual(@as(u32, @as(u24, @bitCast(c.im))), state.readX(at + 1) orelse 0xDEAD);
+    };
+}
+
+test "im_twgen writes the last radix-4 stage's twiddles from the sine table" {
+    try twgen(128);
+    try twgen(1024);
 }
