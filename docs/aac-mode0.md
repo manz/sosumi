@@ -70,6 +70,29 @@ Stereo T, PNS T and seeds, the TNS reflection table and the PNS generator need 2
 Y is within a few hundred words of full, so each stage's slots get placed against this table
 before code moves.
 
+## Twiddles from SINE, no twin change
+
+The twin already reads every twiddle and the sine window from `sine.zig`, so the program can
+too and stay bit-exact; only where it finds the values changes.
+
+- Pre-twiddle exp(-j pi (4n + 1) / 4096) (long; times 8 short): sin from the odd entries at
+  index 2n ascending, cos = sin(2048 - k) from index 1023 - 2n descending, two pointers stepping
+  by 2 (short: the multiples-of-4 entries, by 8).
+- Post-twiddle exp(-j pi 4k / 4096): the multiples-of-4 entries, sin ascending and cos
+  descending.
+- Radix-4 stages: each stage first writes its l triples exp(-j 2 pi m j / (4 l)) (6 l words, the
+  twin's `tw4` slice) into scratch the FFT leaves free, then the butterflies read them as today.
+  Long: the spectrum's half of WORK (WORK + 1024 ..), idle between the pre-twiddle and the
+  post-twiddle, holds the largest stage (768 words). Short: WORK + 256 .. 351. Angles past pi / 2
+  are the quadrant-one entries mirrored and negated, exactly as `sine.cos` and `expTurn` do. Cost
+  about 1020 generated words per long IMDCT (126 per short), a few K bundles a channel.
+- Windows: the sine shape from X's SINE (odd entries long, multiples of 4 at 4n + 2 short) with
+  the w / 4 rounded shift in a free third slot; KBD from Y with the << 6 back. Two loop variants
+  per half, picked by the shape.
+
+X then holds WORK, SPEC_R, OVL0/1, SINE and about 250 words of dequantiser and stage tables
+(the dequantiser's exponents move to Y), inside 7168 with no separate twiddle table.
+
 ## IMDCT in place
 
 imdct.sm today needs IN (n2), Z (n2) and OUT (2 n2): 4096 words for a long block. On WORK:
