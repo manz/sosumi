@@ -84,10 +84,9 @@ fault; LAME writes it with empty main data.
   main_data_begin reaches before the seek must decode without fault.
 - Entry point, reservoir storage and synthesis history are ours to lay out.
 - The synthesis matrix (`mp3_mgrp`) rotates four x03.tap sums, {sHi:sLo} changing every
-  bundle while sL and sB are shared. The exact tap chains on record (facts 791, 792, 794) all
-  keep one pair, so this pattern is exact in x17's emulator only (**OPEN**, measurement asked
-  of the dirty side by x17, 2026-11-10). If it fails, one sum per row at 2 bundles a product
-  costs about 40K bundles a frame back.
+  bundle while sL and sB are shared: each named pair is its own exact 48-bit sum, no
+  cross-talk (**MEASURED**, fact 798: c streamed, x[k] loaded into sB every 4 taps, 4 pairs,
+  36 taps, exact in 3 of 3 runs).
 
 ## Decoding stages
 
