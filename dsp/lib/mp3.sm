@@ -646,6 +646,8 @@ done:
 .const MP_QSF  = MP_Q + 8       ; the entry's scale factor address
 .const MP_QREC = MP_Q + 9       ; the granule record's offset
 .const MP_QZ   = MP_Q + 10      ; 40 zeros: no pretab
+.const MP_QGB  = MP_Q + 114     ; the entry's DQ_G + b
+.const MP_QCNT = MP_Q + 115     ; its lines left, across dq_mant
 .const MP_SMB  = MP_Q + 50      ; stereo: max_band[3] (-1: none)
 .const MP_SN   = MP_Q + 53      ; entries in the list
 .const MP_SGR  = MP_Q + 54      ; the granule at hand
@@ -1139,30 +1141,13 @@ done:
 ; X:MP_XS + 576 ch in place, q -> sign(q) |q|^(4/3) 2^(t / 4) as a Q21 word, t per band entry:
 ; global_gain - 210 - 8 subblock_gain[window] - (sf + preflag pretab) << (1 + scalefac_scale).
 ; |q|^(4/3) = m 2^em 2^(rem / 3) by lib/dequant.sm's dq_mant, P = round(m G / 2^23) with G
-; = X:DQ_G[4 rem + b], b = t mod 4, then one alu asrrs by -(em + floor(t / 4) + 23), clamped
-; to 24 either way: rounding right, saturating left, as the twin. Needs lib/dequant.sm's
+; = X:DQ_G[4 rem + b], b = t mod 4, then one asrrs by -(em + floor(t / 4) + 23): rounding
+; right, saturating left, counts of 24 or more 0 or saturated (fact 774), as the twin. Needs lib/dequant.sm's
 ; tables (X DQ_D, DQ_IT, DQ_G; Y DQ_IE, DQ_IR).
 
-; s<r> = clamp(s<r>, -24, 24). Uses s12, s13.
-.macro mp3_clamp24(r) {
-        ldi s13, #24
-        alu s12, s13, r, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; r > 24
-        jmp #IF_NOT, #3, lo
-        nop()
-        nop()
-        alu r, s13, s0, #OP_ADD
-lo:     alu s12, r, s13, #OP_ADD
-        ptst p3, s0, #LT12, #PTST ; r < -24
-        jmp #IF_NOT, #3, done
-        nop()
-        nop()
-        alu r, s0, s13, #OP_SUB
-done:
-}
-
 ; The granule and channel in MP_CK, after mp3_spec. Uses every s register but s14, s15 (the
-; reader's state is dropped: each granule seeks afresh), e6, e7, A8, A10 and amov's registers.
+; reader's state is dropped: each granule seeks afresh), e6, e7, R7, A8..A10 and amov's
+; registers. A line is one pass of 17 bundles, no branch taken below |q| = 129.
 .macro mp3_requant() {
         lde e7, #MP_CCH
         ldy s2, e7
@@ -1171,6 +1156,7 @@ done:
         ldi s12, #MP_XS
         alu s2, s2, s12, #OP_ADD
         amov(A10, s2)
+        amov(A9, s2)
         lde e7, #MP_CK
         ldy s1, e7
         ldi s12, #40
@@ -1304,48 +1290,64 @@ sf:     lde e7, #MP_QSF
         alu s3, s10, s3, #OP_SUB ; b
         ldi s11, #DQ_G
         alu s11, s11, s3, #OP_ADD ; DQ_G + b
-        ldi s12, #23
-        alu s10, s2, s12, #OP_ADD ; sh + 23
+        mp3_put(MP_QGB, 11)
+        amov_e(4, s11)
+        x19.xrd s11, #8         ; G = DQ_G[b]: rem is 0 up to 128
+        ldi s12, #-23
+        alu s10, s12, s2, #OP_SUB ; -(sh + 23)
         lde e7, #MP_QE
         ldy s1, e7
         alu s1, s1, s14, #OP_ADD
         mp3_put(MP_QE, 1)
-        ; the lines: s9 left, s10 = sh + 23, s11 = DQ_G + b
-line:   x19.xrd s1, #10         ; q
-        alu s12, s1, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #3, #3, next
+        ; the lines: s12 left, s10 = -(sh + 23), s11 = G; q read at A10, the word stored at A9.
+        ; up = em + sh + 23 needs no clamp: asrrs counts of 24 or more give 0 or saturate (774)
+        alu s12, s9, s0, #OP_ADD
+        ldi s7, #128
+        ldi s9, #23
+        ldi s13, #-DQ_D
+line:   pk(s1, A10, s0, s0, s0, 12, s12, s14, 5, 0) ; q
+        x18.una s2, s1, #7, R13, s0 ; |q| (708; R13 takes it too, unused)
+        pk(s0, A0, s0, s0, s0, 8, s7, s2, 5, 0) ; 128 - |q|
+        pk(s0, A0, s0, s0, s0, 4, s2, s2, 0, 0) ; 2 |q|
+        ptst p3, s0, #LT8, #PTST ; |q| > 128
+        x18.una s0, s4, #1, R7, s13 ; R7 = DQ_D + 2 |q| (x17 own-x18alu011)
+        jmp #3, #3, big
+        x12.aset #4, R7         ; (delay slot) A8
+        pk(s5, A8, s0, s0, s0, 6, s9, s1, 0, 6) ; (delay slot) m; q >> 23
+        pk(s3, A8, s0, s0, s0, 6, s6, s6, 0, 0) ; em
+        pk(s0, A0, s8, s5, s11, 3, s10, s3, 5, 0) ; P = rnd(m G / 2^23); -up
+        pk(s0, A0, s0, s0, s0, 8, s3, s8, 0, 7) ; rshr(P, -up), or saturating shl
+        pk(s0, A0, s0, s0, s0, 6, s6, s14, 0, 0) ; sign: +-1
+lend:   ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, line
+        x18.mpy s8, s0, s8, s6  ; (delay slot)
+        pks(8, A9, 0, s0, s0, 0) ; (delay slot)
+        jmp #ALWAYS, #0, ent
         nop()
         nop()
-        ptst p3, s0, #LT12, #PTST
-        jmp #IF_NOT, #3, mag
-        nop()
-        nop()
-        alu s1, s0, s1, #OP_SUB ; |q|
-mag:    dq_mant()
-        alu s4, s11, s5, #OP_ADD
+        ; |q| > 128: dq_mant (s1 = |q|), its gain DQ_G[4 rem + b]; q kept in s9, s12 in Y
+big:    alu s9, s1, s0, #OP_ADD
+        mp3_put(MP_QCNT, 12)
+        alu s1, s2, s0, #OP_ADD
+        dq_mant()
+        lde e7, #MP_QGB
+        ldy s4, e7
+        alu s4, s4, s5, #OP_ADD
         amov_e(4, s4)
         x19.xrd s7, #8          ; G
-        x02.mpy s8, s2, s7      ; P = round(m G / 2^23)
-        alu s3, s3, s10, #OP_ADD ; em + sh + 23
-        mp3_clamp24(s3)
-        alu s12, s0, s3, #OP_SUB
-        alu s8, s12, s8, #ASRRS ; rshr, or saturating shl (fact 774)
-        x19.xrd s4, #10
-        ptst p3, s0, #LT4, #PTST
-        jmp #IF_NOT, #3, put
-        nop()
-        nop()
-        alu s8, s0, s8, #OP_SUB
-put:    stx A10, s8
-next:   x02.ainc #10, #10
-        alu s9, s9, s14, #OP_SUB
-        alu s12, s9, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #IF_NOT, #3, line
-        nop()
-        nop()
-        jmp #ALWAYS, #0, ent
+        x02.mpy s8, s2, s7      ; P
+        alu s3, s10, s3, #OP_SUB ; -up
+        alu s8, s3, s8, #ASRRS
+        ldi s12, #23
+        alu s6, s12, s9, #ASR
+        alu s6, s6, s6, #OP_ADD
+        alu s6, s6, s14, #OP_ADD
+        lde e7, #MP_QCNT
+        ldy s12, e7
+        ldi s7, #128
+        ldi s9, #23
+        ldi s13, #-DQ_D
+        jmp #ALWAYS, #0, lend
         nop()
         nop()
 done:
