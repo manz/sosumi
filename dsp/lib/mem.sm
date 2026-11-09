@@ -67,16 +67,26 @@
 ;   5 a - b), CODE 7 asrrs(XB >> XA), rounded half up as x19 op 23 (730). LD = s0 with LA = A0
 ;   is no load, MD = s0 no product, XD = 0 no third slot. XD is the register's number.
 .macro pk(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE) {
-        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE, #0, R0
 }
 
 ; pkn: pk with the third slot's #n (CODE 4: (XA op XB + 2^(N-1)) >> N, the rounded shift, 730).
 .macro pkn(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE, N) {
-        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #N, #CODE
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #N, #CODE, #0, R0
 }
 
 ; pks(SN, SA, XD, XA, XB, OP): X:[SA] <- s<SN>, SA + 1 (x02.vs: the store lands at the old SA,
 ;   513, 730), beside the third slot's adder as pk's CODE 0. SN and XD are register numbers.
+;pkf / pksf: pk / pks with the A step's agu_xr fn and R (x02 A slot, facts 157, 403, 738):
+;   fn 0 x + 1, 1 x - 1, 2 x + R, 3 x - R.
+.macro pkf(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE, FN, R) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE, #FN, R
+}
+
+.macro pksf(SN, SA, XD, XA, XB, OP, FN, R) {
+        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #FN, R
+}
+
 .macro pks(SN, SA, XD, XA, XB, OP) {
-        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3)
+        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #0, R0
 }
