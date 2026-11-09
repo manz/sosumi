@@ -421,7 +421,8 @@ coef:   alu s4, s7, s0, #OP_ADD
         alu s7, s7, s14, #OP_SUB
         alu s11, s8, s0, #OP_ADD
         getbits_s(s3)
-        x19.alu s12, s14, s8, #SHIFT ; 2^bits
+        alu s12, s0, s8, #OP_SUB
+        alu s12, s12, s14, #ASRRS ; 2^bits (fact 774)
         alu s4, s3, s3, #OP_ADD
         alu s4, s4, s12, #OP_SUB ; 2v - 2^bits: the sign bit set when >= 0
         ptst p3, s0, #LT4, #PTST
@@ -589,15 +590,15 @@ band:   yld(s3, AK_WSFB)
         alu s3, s6, s0, #OP_ADD
         yst(AK_WO)
         alu s3, s7, s6, #OP_SUB ; the band's width
-        ldi s5, #-1             ; pairs
+        ldi s5, #1              ; pairs
         ldi s4, #5
         alu s4, s2, s4, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, pairs
         nop()
         nop()
-        ldi s5, #-2             ; quads
-pairs:  x19.alu s3, s3, s5, #SHIFT ; tuples (the width is a multiple of 4)
+        ldi s5, #2              ; quads
+pairs:  alu s3, s5, s3, #ASRRS ; tuples (the width is a multiple of 4)
         yst(AK_WNT)
         yld(s3, AK_WFW)
         yst(AK_WW)
@@ -606,8 +607,8 @@ win:    yld(s3, AK_WW)
         alu s4, s3, s5, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, bnext
-        ldi s4, #7              ; (delay slot)
-        x19.alu s3, s3, s4, #SHIFT ; (delay slot) w * 128
+        ldi s4, #-7             ; (delay slot)
+        alu s3, s4, s3, #ASRRS  ; (delay slot) w * 128
         yld(s5, AK_WO)
         alu s3, s3, s5, #OP_ADD
         amov_e(3, s3)
@@ -986,15 +987,15 @@ done:
         alu s4, s2, s4, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, rshort
-        ldi s4, #10             ; (delay slot)
-        x19.alu s5, s8, s4, #SHIFT ; (delay slot) prev * 0x400
+        ldi s4, #-10            ; (delay slot)
+        alu s5, s4, s8, #ASRRS  ; (delay slot) prev * 0x400
         ldi s4, #WLONG
         alu s5, s5, s4, #OP_ADD
         jmp #ALWAYS, #0, rcopy
         nop()
         nop()
-rshort: ldi s4, #7
-        x19.alu s5, s8, s4, #SHIFT
+rshort: ldi s4, #-7
+        alu s5, s4, s8, #ASRRS
         ldi s4, #WSHORT
         alu s5, s5, s4, #OP_ADD
 rcopy:  alu s3, s5, s0, #OP_ADD
@@ -1010,15 +1011,15 @@ rcopy:  alu s3, s5, s0, #OP_ADD
         jmp #3, #3, flong
         nop()
         nop()
-        ldi s4, #7
-        x19.alu s5, s8, s4, #SHIFT
+        ldi s4, #-7
+        alu s5, s4, s8, #ASRRS
         ldi s4, #WSHORT
         alu s5, s5, s4, #OP_ADD
         jmp #ALWAYS, #0, fcopy
         nop()
         nop()
-flong:  ldi s4, #10
-        x19.alu s5, s8, s4, #SHIFT
+flong:  ldi s4, #-10
+        alu s5, s4, s8, #ASRRS
         ldi s4, #WLONG
         alu s5, s5, s4, #OP_ADD
 fcopy:  alu s3, s5, s0, #OP_ADD
@@ -1105,8 +1106,8 @@ sloop:  yld(s5, AK_IMI)
         nop()
 halves: ak_halves()
         yld(s4, AK_FSL)         ; the slot's overlap, OVL0 or OVL1 = OVL0 + 0x400
-        ldi s3, #10
-        x19.alu s3, s4, s3, #SHIFT
+        ldi s3, #-10
+        alu s3, s3, s4, #ASRRS
         ldi s4, #OVL0
         alu s3, s3, s4, #OP_ADD
         yst(WIN_OVL)
@@ -1255,8 +1256,8 @@ ak_cpe: yld(s3, AK_SLOT)
         x17.mve e8, s13
         yld(s1, CUR + R_NB)
         yld(s2, AK_MSP)
-        ldi s4, #-1
-        x19.alu s7, s2, s4, #SHIFT ; 0 or 1: the value for none or all
+        ldi s4, #1
+        alu s7, s4, s2, #ASRRS  ; 0 or 1: the value for none or all
 ak_msu: alu s4, s1, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, ak_parse
