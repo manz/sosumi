@@ -1,12 +1,13 @@
 ; The host's output ring, shared by every decoder program (specs/aac.md output contract).
 ; Needs lib/mem.sm (yld, yst).
 ;
-; Two slots of RING_SLOT words at OUTY, slot k at OUTY + RING_SLOT k: interleaved 16-bit stereo
-; frames. Slot k's entry: Y:RING_E + 2k = 1 (owned), Y:RING_E + 2k + 1 its length in words. The
-; host releases a slot by writing 0 to its owned word. The init pass leaves the header Y:0..4 =
-; 0, 2, RING_SLOT, 0, 0x10 (dsp/harness.zig `stageRing`). Per packet the program fills slot
-; Y[OSL], publishes it (status HOST_ST bit 0 set, HOST_ST + 1 = 0, HOST_P0 cleared; never
-; HOST_ST + 2 or + 3) and flips Y[OSL]; OSL is the program's own persistent word, 0 at start.
+; Slots at OUTY of interleaved 16-bit stereo frames: AAC and PCM two of RING_SLOT words, slot
+; k at OUTY + RING_SLOT k; ALAC one of 0x2000 (specs/alac.md). Slot k's entry: Y:RING_E + 2k
+; = 1 (owned), Y:RING_E + 2k + 1 its length in words. The host releases a slot by writing 0 to
+; its owned word. The init pass leaves the header Y:0..4 = 0, slots, words per slot, 0, 0x10
+; (dsp/harness.zig `stageRing`). Per packet the program fills a slot, owns it (ring_own) and
+; sets the status (ring_ready; never HOST_ST + 2 or + 3). A two-slot program does both with
+; ring_publish, which also clears HOST_P0 and flips its persistent slot word (0 at start).
 
 .const OUTY      = 0x0080       ; slot 0; slot 1 at + RING_SLOT
 .const RING_SLOT = 0x800        ; words per slot: 1024 stereo frames
@@ -23,14 +24,12 @@
         alu dst, dst, s4, #OP_ADD
 }
 
-; Copies slot Y[OSL]'s left samples onto its right ones, for N frames: a mono stream fills
-; both sides. Uses s3, s4, s6, s13, e6..e8, p3.
-.macro ring_dup(OSL, N) {
-        ring_base(s13, OSL)
+; Copies a slot's left samples onto its right ones: a mono stream fills both sides. s13 = the
+; slot's base - 1 (ring_base), s6 = frames, at least 1. Uses s3, s4, s6, s13, e7, e8, p3.
+.macro ring_dupn() {
         x17.mve e8, s13         ; the left sample
         alu s13, s13, s14, #OP_ADD
         x17.mve e7, s13         ; the right
-        ldi s6, #(N)
 dup:    ldy s3, e8
         x17.sty e7, #3, #0
         x18.eagu e8, e8, #AGU_INC
@@ -43,9 +42,15 @@ dup:    ldy s3, e8
         x18.eagu e7, e7, #AGU_INC ; (delay slot)
 }
 
-; Hands slot Y[OSL] to the host with length s7 (words) and flips Y[OSL]. Uses s3..s5, s13, e6.
-.macro ring_publish(OSL) {
-        yld(s5, OSL)
+; ring_dupn for N frames of slot Y[OSL].
+.macro ring_dup(OSL, N) {
+        ring_base(s13, OSL)
+        ldi s6, #(N)
+        ring_dupn()
+}
+
+; Slot s5's entry: owned, length s7 (words). Uses s3, s5, s13, e6.
+.macro ring_own() {
         alu s5, s5, s5, #OP_ADD
         ldi s13, #RING_E - 1    ; x17.mve adds 1
         alu s13, s13, s5, #OP_ADD
@@ -55,7 +60,11 @@ dup:    ldy s3, e8
         x18.eagu e6, e6, #AGU_INC
         alu s3, s7, s0, #OP_ADD
         x17.sty e6, #3, #0      ; its length
-        yld(s3, HOST_ST)        ; bit 0 set, the others kept: v + 1 - (v & 1)
+}
+
+; Output ready: HOST_ST bit 0 set, the others kept, HOST_ST + 1 = 0. Uses s3..s5, e6.
+.macro ring_ready() {
+        yld(s3, HOST_ST)        ; v + 1 - (v & 1)
         ldi s4, #1
         alu s5, s4, s3, #ASR
         ldi s4, #-1
@@ -66,7 +75,15 @@ dup:    ldy s3, e8
         yst(HOST_ST)
         ldi s3, #0
         yst(HOST_ST + 1)        ; host bytes +2 must be 0
-        yst(HOST_P0)
+}
+
+; Hands slot Y[OSL] of a two-slot ring to the host with length s7 (words), clears HOST_P0 and
+; flips Y[OSL]. Uses s3..s5, s13, e6.
+.macro ring_publish(OSL) {
+        yld(s5, OSL)
+        ring_own()
+        ring_ready()
+        yst(HOST_P0)            ; s3 = 0
         yld(s3, OSL)
         alu s3, s14, s3, #OP_SUB
         yst(OSL)

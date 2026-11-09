@@ -85,11 +85,11 @@ pub fn putY(st: *emu.State, gpa: std.mem.Allocator, addr: u32, v: i32) !void {
 }
 
 /// A Y word read back as signed 16 bits; a missing word reads as 0xDEAD.
-/// The output ring's header as the init pass leaves it (lib/ring.sm, specs/aac.md output
-/// contract): Y:0..4 = 0, 2 slots, RING_SLOT words each, 0, 0x10.
-pub fn stageRing(st: *emu.State, gpa: std.mem.Allocator) !void {
-    const slot = @import("map.zig").at("RING_SLOT");
-    for ([_]u32{ 0, 2, slot, 0, 0x10 }, 0..) |v, i| try st.y_mem.put(gpa, @intCast(i), v);
+/// The output ring's header as the init pass leaves it (lib/ring.sm): Y:0..4 = 0, `slots`,
+/// `words` per slot, 0, 0x10. AAC and PCM 2 x RING_SLOT (specs/aac.md), ALAC 1 x 0x2000
+/// (specs/alac.md).
+pub fn stageRing(st: *emu.State, gpa: std.mem.Allocator, slots: u32, words: u32) !void {
+    for ([_]u32{ 0, slots, words, 0, 0x10 }, 0..) |v, i| try st.y_mem.put(gpa, @intCast(i), v);
 }
 
 pub fn sx16(v: ?u32) i32 {

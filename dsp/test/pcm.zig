@@ -23,7 +23,7 @@ test "pcm_packet copies WAV and AIFF samples into the host ring, packet after pa
     for ([_]u32{ 1, 0 }) |little| {
         var hst = try host.Host.init(gpa, .{ .max_bundles = 1 << 24 });
         defer hst.deinit();
-        try h.stageRing(&hst.state, gpa);
+        try h.stageRing(&hst.state, gpa, 2, 0x800);
         try hst.state.y_mem.put(gpa, 0xFD81, little);
         var want: std.ArrayList(i16) = .empty;
         defer want.deinit(gpa);
