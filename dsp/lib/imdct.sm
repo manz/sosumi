@@ -288,30 +288,17 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         x03.tap0 s1, #4, s0, s0, s0 ; (delay slot) the next ar; past the end, a dummy
 }
 
-; One block's two words from A an into D1, D2, shifted by s12.
-.macro im_ld2(D1, D2, an) {
-        x03.tap0 D1, #an, s0, s0, s0
-        x03.tap0 D2, #an, s0, s0, s0
-        x19.alu D1, D1, s12, #SHIFT
-        x19.alu D2, D2, s12, #SHIFT
-}
-
-; (RE, IM) = (A1, A2) * W, W = the next twiddle pair from A12. Uses s4, s5, A1 (x02.mpy).
-.macro im_cm(RE, IM, A1, A2) {
-        x03.tap0 s4, #12, s0, s0, s0 ; wr
-        x03.tap0 s5, #12, s0, s0, s0 ; wi
-        x02.mpy RE, A1, s4
-        x02.mpy IM, A2, s5
-        alu RE, RE, IM, #OP_SUB
-        x02.mpy IM, A1, s5
-        x02.mpy A1, A2, s4
-        alu IM, IM, A1, #OP_ADD
-}
-
 ; The radix-4 stages: STG of them from l = L0 (block size), groups N4 / (4 l), twiddles from TW
-; (the twin's tw4, a triple per j). Blocks at A4, A6, A8, A10 (Z + 8 l g + {0, 2, 4, 6} l + 2 j),
-; twiddles at A12; R6 = 2 l, R5 = 6 l, R4 the group's end for A10, R2 the stage's twiddles,
-; R1 = -2.
+; (the twin's tw4, a triple per j). Loads step A4, A6, A8, A10 (Z + 8 l g + {0, 2, 4, 6} l + 2 j)
+; and stores step A5, A7, A9, A11 over the same words, so no pointer goes back; twiddles at A12;
+; R6 = 2 l, R5 = 6 l, R4 the group's end for A10, R2 the stage's twiddles. s12 holds the stage's
+; right shift (positive) for x02.vc's asrrs.
+;
+; A butterfly runs its three complex products as overlapping five-bundle phases (pk: X load,
+; multiply, third slot per bundle): phase k at bundle 5k loads the block's words into s1, s3 and
+; the twiddle into s4, s5, shifts the words, and makes RE = rnd(s1 wr) - rnd(s3 wi), IM =
+; rnd(s1 wi) + rnd(s3 wr) through s2 and s13, the twin's cmul. F1 W^j lands in s6, s7, F2 W^2j in
+; s8, s9, F3 W^3j in s10, s11, then F0 in s1, s3.
 .macro im_r4(N4, Z, TW, L0, STG) {
         ldi s3, #L0
         yst(IM_HALF)
@@ -321,8 +308,8 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         yst(IM_PJ)
         ldi s3, #STG
         yst(IM_STG)
-        rimm R1, #-2
 stage:  im_dec(20)
+        alu s12, s6, s0, #OP_ADD ; the shift, positive for asrrs
         yld(s1, IM_HALF)
         alu s1, s1, s1, #OP_ADD ; 2 l
         im_rset(s1, R6)
@@ -338,79 +325,73 @@ stage:  im_dec(20)
         x12.aset #4, R3         ; A8
         x18.rag101 s0, R3, A8, R6, #2
         x12.aset #5, R3         ; A10
+        x02.aa A4, A4, R0, #2, A5, A0 ; the store pointers on the load pointers
+        x02.aa A6, A6, R0, #2, A7, A0
+        x02.aa A8, A8, R0, #2, A9, A0
+        x02.aa A10, A10, R0, #2, A11, A0
         yld(s3, IM_GRPS)
         yst(IM_J)
         ldi s13, #IM_J - 1
         x17.mve e8, s13
 grp:    x18.rag101 s0, R4, A10, R6, #2 ; the group's end for A10
         x12.aset #6, R2         ; A12 = the stage's twiddles
-bf:     im_ld2(s1, s3, 8)       ; F1 = block 2
-        im_cm(s6, s7, s1, s3)   ; F1 W^j
-        im_ld2(s1, s3, 6)       ; F2 = block 1
-        im_cm(s8, s9, s1, s3)   ; F2 W^2j
-        im_ld2(s1, s3, 10)      ; F3 = block 3
-        im_cm(s10, s11, s1, s3) ; F3 W^3j
-        im_ld2(s1, s3, 4)       ; F0
-        x18.rag101 s0, R3, A4, R1, #2 ; every block back to its j (R1 = -2)
-        x12.aset #2, R3
-        x18.rag101 s0, R3, A6, R1, #2
-        x12.aset #3, R3
-        x18.rag101 s0, R3, A8, R1, #2
-        x12.aset #4, R3
-        x18.rag101 s0, R3, A10, R1, #2
-        x12.aset #5, R3
-        alu s4, s1, s8, #OP_ADD ; p = F0 + F2 W^2j
-        alu s5, s3, s9, #OP_ADD
+        ; phase 0: F1 (A8) into s6, s7
+bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
+        pk(s4, A12, s0, s0, s0, 1, s12, s1, 0, 7)
+        pk(s3, A8, s2, s1, s4, 0, s0, s0, 0, 0)
+        pk(s5, A12, s0, s0, s0, 3, s12, s3, 0, 7)
+        pk(s0, A0, s13, s1, s5, 0, s0, s0, 0, 0)
+        ; phase 1 from here: F2 (A6) into s8, s9
+        pk(s1, A6, s7, s3, s4, 0, s0, s0, 0, 0)
+        pk(s4, A12, s6, s3, s5, 1, s12, s1, 0, 7)
+        pk(s3, A6, s2, s1, s4, 6, s2, s6, 5, 0) ; s6 = F1W re
+        pk(s5, A12, s0, s0, s0, 3, s12, s3, 0, 7)
+        pk(s0, A0, s13, s1, s5, 7, s13, s7, 0, 0) ; s7 = F1W im
+        ; phase 2: F3 (A10) into s10, s11
+        pk(s1, A10, s9, s3, s4, 0, s0, s0, 0, 0)
+        pk(s4, A12, s8, s3, s5, 1, s12, s1, 0, 7)
+        pk(s3, A10, s2, s1, s4, 8, s2, s8, 5, 0) ; s8 = F2W2 re
+        pk(s5, A12, s0, s0, s0, 3, s12, s3, 0, 7)
+        pk(s0, A0, s13, s1, s5, 9, s13, s9, 0, 0) ; s9 = F2W2 im
+        ; F0 (A4) into s1, s3 beside phase 2's tail
+        pk(s1, A4, s11, s3, s4, 0, s0, s0, 0, 0)
+        pk(s0, A0, s10, s3, s5, 1, s12, s1, 0, 7)
+        pk(s3, A4, s0, s0, s0, 10, s2, s10, 5, 0) ; s10 = F3W3 re
+        pk(s0, A0, s0, s0, s0, 3, s12, s3, 0, 7)
+        pk(s0, A0, s0, s0, s0, 11, s13, s11, 0, 0) ; s11 = F3W3 im
+        alu s2, s1, s8, #OP_ADD ; p = F0 + F2 W^2j
         alu s1, s1, s8, #OP_SUB ; q
+        alu s8, s3, s9, #OP_ADD
         alu s3, s3, s9, #OP_SUB
-        alu s8, s6, s10, #OP_ADD ; r = F1 W^j + F3 W^3j
-        alu s9, s7, s11, #OP_ADD
+        alu s9, s6, s10, #OP_ADD ; r = F1 W^j + F3 W^3j
         alu s6, s6, s10, #OP_SUB ; s
+        alu s10, s7, s11, #OP_ADD
         alu s7, s7, s11, #OP_SUB
-        alu s10, s4, s8, #OP_ADD ; p + r
-        alu s11, s5, s9, #OP_ADD
-        alu s4, s4, s8, #OP_SUB ; p - r
-        alu s5, s5, s9, #OP_SUB
-        alu s8, s1, s7, #OP_ADD ; q - j s
-        alu s9, s3, s6, #OP_SUB
-        alu s1, s1, s7, #OP_SUB ; q + j s
-        alu s3, s3, s6, #OP_ADD
-        stx A4, s10
-        x02.ainc #4, #4
-        stx A4, s11
-        x02.ainc #4, #4
-        stx A6, s8
-        x02.ainc #6, #6
-        stx A6, s9
-        x02.ainc #6, #6
-        stx A8, s4
-        x02.ainc #8, #8
-        stx A8, s5
-        x02.ainc #8, #8
-        stx A10, s1
-        x02.ainc #10, #10
-        stx A10, s3
-        x02.ainc #10, #10
-        im_trk(s10, s6)
-        im_trk(s11, s6)
-        im_trk(s8, s6)
-        im_trk(s9, s6)
-        im_trk(s4, s6)
-        im_trk(s5, s6)
-        im_trk(s1, s6)
-        x01.norm s6, s3
+        alu s11, s2, s9, #OP_ADD ; p + r
+        pks(11, A5, 2, s2, s9, 5) ; p - r
+        pks(2, A9, 9, s8, s10, 0)
+        pks(9, A5, 8, s8, s10, 5)
+        pks(8, A9, 10, s1, s7, 0) ; q - j s
+        pks(10, A7, 1, s1, s7, 5) ; q + j s
+        pks(1, A11, 7, s3, s6, 5)
+        pks(7, A7, 3, s3, s6, 0)
+        pks(3, A11, 0, s0, s0, 0)
+        im_trk(s11, s4)
+        im_trk(s2, s4)
+        im_trk(s9, s4)
+        im_trk(s8, s4)
+        im_trk(s10, s4)
+        im_trk(s1, s4)
+        im_trk(s7, s4)
+        x01.norm s4, s3
         pcond p3, R4, A10, #30  ; more in the group: A10 != R4
         jmp #3, #3, bf
-        x18.min s15, s15, s6    ; (delay slot)
+        x18.min s15, s15, s4    ; (delay slot)
         nop()
-        x18.rag101 s0, R3, A4, R5, #2
-        x12.aset #2, R3         ; the next group: every block + 6 l
-        x18.rag101 s0, R3, A6, R5, #2
-        x12.aset #3, R3
-        x18.rag101 s0, R3, A8, R5, #2
-        x12.aset #4, R3
-        x18.rag101 s0, R3, A10, R5, #2
-        x12.aset #5, R3
+        x02.aa A4, A4, R5, #2, A5, A0 ; the next group: every block + 6 l
+        x02.aa A6, A6, R5, #2, A7, A0
+        x02.aa A8, A8, R5, #2, A9, A0
+        x02.aa A10, A10, R5, #2, A11, A0
         ldy s4, e8
         alu s4, s4, s14, #OP_SUB
         x17.sty e8, #4, #0
@@ -441,6 +422,7 @@ bf:     im_ld2(s1, s3, 8)       ; F1 = block 2
         nop()
         nop()
 }
+
 
 ; u[2k] = re(Z[k] POST[k]), u[n2 - 1 - 2k] = -im(Z[k] POST[k]), u over IN.
 .macro im_post(N2, N4, Z, IN, POST) {

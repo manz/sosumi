@@ -58,3 +58,20 @@
         x19.a3 s0, R7, e6, #25, #2, #0
         x12.aset #h, R7
 }
+
+; Packed x02 bundles (x17 reference.md x02.vc, x02.vs; facts 156-161, 182-185, 513, 549, 627,
+; 628, 730, all measured together in one bundle). Every slot reads before any slot writes.
+;
+; pk(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE): LD <- X:[LA], LA + 1 (the read uses the old LA);
+;   MD <- rnd(MA * MB / 2^23); s<XD> <- the third slot: CODE 0 the adder, XA op XB (OP 0 a + b,
+;   5 a - b), CODE 7 asrrs(XB >> XA), rounded half up as x19 op 23 (730). LD = s0 with LA = A0
+;   is no load, MD = s0 no product, XD = 0 no third slot. XD is the register's number.
+.macro pk(LD, LA, MD, MA, MB, XD, XA, XB, OP, CODE) {
+        x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE
+}
+
+; pks(SN, SA, XD, XA, XB, OP): X:[SA] <- s<SN>, SA + 1 (x02.vs: the store lands at the old SA,
+;   513, 730), beside the third slot's adder as pk's CODE 0. SN and XD are register numbers.
+.macro pks(SN, SA, XD, XA, XB, OP) {
+        x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3)
+}
