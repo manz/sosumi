@@ -13,7 +13,9 @@
 //!
 //! The window D = d / 2^16 has integer d, so D in Q17 (2 d, below 2^18) is exact. An output
 //! sample is one 16-tap sum of Q21 V by Q17 D: 2ab sits at 2^39, PCM units at 2^24, so one
-//! rounded read of the sum is the sample; it saturates to 16 bits by comparisons.
+//! rounded read of the sum is the sample; it saturates to 16 bits by comparisons. Sample 32 - j
+//! (j < 16) reads V[j] by -D where the ISO window reads V[32 - j] = -V[j]: the same sum unless
+//! V[j] = -2^23, whose negation wraps (sm1 reads the word once for both samples).
 const std = @import("std");
 const ops = @import("../ops.zig");
 const window = @import("../../mp3/tables/synth_window.zig");
@@ -101,7 +103,11 @@ pub fn slot(st: *State, s: *const [32]Word, out: *[32]i16) void {
     for (0..32) |j| {
         var acc: ops.Acc = 0;
         for (0..8) |i| {
-            acc = ops.mac(acc, st.v[i * 128 + j], d[i * 64 + j]);
+            // sample 32 - j shares V[j] with sample j (V[32 - j] = -V[j]): sm1 reads it once
+            acc = if (j > 16)
+                ops.mac(acc, st.v[i * 128 + 32 - j], ops.sub(0, d[i * 64 + j]))
+            else
+                ops.mac(acc, st.v[i * 128 + j], d[i * 64 + j]);
             acc = ops.mac(acc, st.v[i * 128 + 96 + j], d[i * 64 + 32 + j]);
         }
         out[j] = clamp16(ops.accRshr(acc, 24));

@@ -138,7 +138,8 @@ covers 48 coefficients in its long part where the subband count says 72 (OPEN).
 `ref/mp3`'s parse: Q21 words, every sum of products one x03.tap sum (exact to 48 bits) rounded
 once, the IMDCT and synthesis matrices folded to their distinct rows (324 taps per long
 subband, 32 rows of V per slot, folded by N's symmetries to 384 products over butterflied
-subband sums), the synthesis window exact in Q17. The hybrid's windows are Q23 (1.0 held as
+subband sums), the synthesis window exact in Q17, sample 32 - j reading V[j] by -D (one read for
+both samples; differs from V[32 - j] by D only if V[j] = -2^23 wraps). The hybrid's windows are Q23 (1.0 held as
 2^23 - 1), each product one x02 rounded multiply. Against `tools/compare`:
 
 | Reference | Result over the eleven LAME fixtures |
