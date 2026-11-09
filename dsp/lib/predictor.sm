@@ -311,16 +311,13 @@ pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
         x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
         alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
-        stx A11, s13
-        x02.ainc #11, #11       ; (overwrites s2)
         x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
         alu s4, s4, s12, #OP_SUB
-        alu s5, s5, s14, #OP_ADD ; w += 1
-        alu s8, s8, s14, #OP_SUB
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
-        x19.xrd s3, #9          ; (delay slot) next out
-        x02.ainc #9, #9         ; (delay slot)
+        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
+        nop()                   ; (delay slot)
         ptst p3, s0, #LE8, #PTST ; every coefficient visited
         jmp #IF_NOT, #3, pstep
         x19.xrd s13, #11        ; (delay slot) next c
@@ -337,16 +334,13 @@ nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
         x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
         alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
-        stx A11, s13
-        x02.ainc #11, #11       ; (overwrites s2)
         x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
         alu s4, s4, s12, #OP_SUB
-        alu s5, s5, s14, #OP_ADD ; w += 1
-        alu s8, s8, s14, #OP_SUB
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
-        x19.xrd s3, #9          ; (delay slot) next out
-        x02.ainc #9, #9         ; (delay slot)
+        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
+        nop()                   ; (delay slot)
         ptst p3, s0, #LE8, #PTST ; every coefficient visited
         jmp #IF_NOT, #3, nstep
         x19.xrd s13, #11        ; (delay slot) next c
