@@ -74,9 +74,16 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
   last frame's length as its frame count x 2: **INFERRED**. The host releases slots only for
   modes 0, 1 and 5, so ALAC's slot is never released: the program does not wait on its owned
   word (**OPEN**).
-- Input (fact 788): the stream read of `specs/aac.md`'s input contract. Before every arm the
-  host writes +0x40C = 0x801 and, at the register block +0x420, word 0 bit 16 and word 2 the
-  packet's length in bits. How a program reads that length: **OPEN**.
+- Input (fact 788, corrected): the stream read of `specs/aac.md`'s input contract. Before
+  every arm the host writes +0x40C = 0x801, sets +0x400 = 1, reads the 16-word block
+  +0x420..+0x45C and +0x404, writes the block back with word 0 = 0x10000, word 2 = the bit
+  length (bytes x 8) of the packet the next descriptor delivers, every other word 0, reads
+  +0x404, sets +0x400 = 0, arms (+0x98C = 1) and writes the descriptor (MEASURED, every
+  packet of one track). How a program reads word 2: **OPEN**. The host's per-packet code does
+  not write the parameter block (FD80 and up) (MEASURED as far as an MMIO log shows: the
+  block is SRAM).
+- The EQ is a CPU-side filter in the output stage, shared by every codec: no part of an sm1
+  image (MEASURED).
 - Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
   object, so at least part of it runs there (**INFERRED**).
 - Entry point, buffers, persistent state, error path: **OPEN**. Nothing is traced: the dev
