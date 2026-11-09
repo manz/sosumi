@@ -356,43 +356,31 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 }
 
 
-; u[2k] = re(Z[k] POST[k]), u[n2 - 1 - 2k] = -im(Z[k] POST[k]), u over IN.
+; u[2k] = re(Z[k] POST[k]), u[n2 - 1 - 2k] = -im(Z[k] POST[k]), u over IN. Point k's loads and
+; products (pk) overlap point k - 1's finish, whose stores step A10 up and A12 down by agu_xr
+; fns 2 and 3 with R2 = 2 (pksf, fact 738), the first store's third slot negating im.
+.macro im_post5() {
+        pk(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0) ; er; s10 = ei pr
+        pk(s4, A8, s6, s3, s5, 0, s0, s0, 0, 0) ; pr; s6 = ei pi
+        pk(s3, A4, s2, s1, s4, 6, s2, s6, 5, 0) ; ei; s2 = er pr; s6 = re
+        pk(s5, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; pi
+        pk(s0, A0, s13, s1, s5, 10, s13, s10, 0, 0) ; s13 = er pi; s10 = im
+}
+
 .macro im_post(N2, N4, Z, IN, POST) {
         aimm_e(2, Z)
         aimm_e(4, POST)
-        ldi s12, #IN
-        amov_e(5, s12)
+        aimm_e(5, IN)
         ldi s12, #IN + N2 - 1
         amov_e(6, s12)
-        rimm R2, #-2
-        ldi s11, #N4
-post:   x19.xrd s1, #4          ; er
-        x02.ainc #4, #4
-        x19.xrd s12, #4         ; ei
-        x02.ainc #4, #4
-        x19.xrd s3, #8          ; pr
-        x02.ainc #8, #8
-        x19.xrd s5, #8          ; pi
-        x02.ainc #8, #8
-        x02.mpy s6, s1, s3
-        x02.mpy s8, s12, s5
-        alu s6, s6, s8, #OP_SUB ; re
-        x02.mpy s8, s1, s5
-        x02.mpy s9, s12, s3
-        alu s8, s8, s9, #OP_ADD ; im
-        stx A10, s6
-        x02.ainc #10, #10
-        x02.ainc #10, #10
-        alu s8, s0, s8, #OP_SUB
-        stx A12, s8
-        x18.rag101 s0, R3, A12, R2, #2
-        x12.aset #6, R3
-        alu s11, s11, s14, #OP_SUB
-        alu s4, s11, s0, #OP_ADD
-        ptst p3, s0, #EQ4, #PTST
-        jmp #IF_NOT, #3, post
-        nop()
-        nop()
+        rimm R2, #2
+        rimm R4, #Z + N2 + 2
+        im_post5()
+post:   im_post5()
+        pcond p3, R4, A4, #30   ; more: A4 != Z + N2 + 2
+        jmp #3, #3, post
+        pksf(6, A10, 10, s0, s10, 5, 2, R2) ; (delay slot) u[2k] = re; s10 = -im
+        pksf(10, A12, 0, s0, s0, 0, 3, R2) ; (delay slot)
 }
 
 ; COUNT samples OUT.. <- shift23(v, s6), v = alu(X, Y, OP) of s1 = X[A8], A8 stepping by R2.
@@ -413,7 +401,27 @@ fr:     x19.xrd s1, #8
         nop()
 }
 
-; OUT[n] = shiftSat(fold(u)[n], scaled + E' - log2 n2 + 7).
+; COUNT samples (a multiple of 4) to A9 on, A9 ending at END + 1: rshr(op(X[A8]), s12), A8 by
+; agu_xr FN (0 up, 1 down). Per sample a pk (load, shift by x02.vc code 7, fact 730) and a pks
+; (store, the third slot's op: XOP 0 +, 5 negate). One load past the run's last is harmless.
+.macro im_frun(COUNT, FN, OP, XOP, END) {
+        rimm R4, #END
+        pkf(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0, FN, R0)
+        alu s5, s0, s1, OP
+fq:     pkf(s1, A8, s0, s0, s0, 3, s12, s5, 0, 7, FN, R0)
+        pks(3, A9, 5, s0, s1, XOP)
+        pkf(s1, A8, s0, s0, s0, 3, s12, s5, 0, 7, FN, R0)
+        pks(3, A9, 5, s0, s1, XOP)
+        pkf(s1, A8, s0, s0, s0, 3, s12, s5, 0, 7, FN, R0)
+        pks(3, A9, 5, s0, s1, XOP)
+        pcond p3, R4, A9, #30   ; more: A9 != END
+        jmp #3, #3, fq
+        pkf(s1, A8, s0, s0, s0, 3, s12, s5, 0, 7, FN, R0) ; (delay slot)
+        pks(3, A9, 5, s0, s1, XOP) ; (delay slot)
+}
+
+; OUT[n] = shiftSat(fold(u)[n], scaled + E' - log2 n2 + 7). A right shift of 0..23 runs packed
+; (im_frun); a left shift, which saturates, or one of 24 and more, takes the x19 op-23 loops.
 .macro im_fold(N2, LOGN2, IN, OUT) {
         yld(s6, IM_SC)
         yld(s3, IM_EX)
@@ -421,7 +429,28 @@ fr:     x19.xrd s1, #8
         ldi s3, #7 - LOGN2
         alu s6, s6, s3, #OP_ADD
         aimm_o(4, OUT)
-        ldi s12, #IN + N2 / 2
+        alu s4, s6, s0, #OP_ADD
+        ptst p3, s0, #LE4, #PTST
+        jmp #IF_NOT, #3, slow   ; a left shift
+        ldi s3, #-23            ; (delay slot)
+        nop()
+        alu s4, s6, s3, #OP_SUB
+        ptst p3, s0, #LT4, #PTST
+        jmp #3, #3, slow        ; s6 <= -24
+        alu s12, s0, s6, #OP_SUB ; (delay slot) the right shift
+        nop()
+        aimm_e(4, IN + N2 / 2)
+        im_frun(N2 / 2, 0, #OP_ADD, 0, OUT + N2 / 2 - 1)
+        ldi s12, #IN + N2 - 1
+        amov_e(4, s12)
+        alu s12, s0, s6, #OP_SUB
+        im_frun(N2, 1, #OP_SUB, 5, OUT + 3 * N2 / 2 - 1)
+        aimm_e(4, IN)
+        im_frun(N2 / 2, 0, #OP_SUB, 5, OUT + 2 * N2 - 1)
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+slow:   ldi s12, #IN + N2 / 2
         amov_e(4, s12)
         rimm R2, #1
         im_fold_run(N2 / 2, s1, s0, #OP_ADD)
@@ -432,6 +461,7 @@ fr:     x19.xrd s1, #8
         aimm_e(4, IN)
         rimm R2, #1
         im_fold_run(N2 / 2, s0, s1, #OP_SUB)
+done:
 }
 
 .macro imdct(N2, N4, LOGN2, STAGES, IN, Z, OUT, PRE, POST, TW, REV, ESLOT) {
