@@ -113,6 +113,7 @@ test "mp3_granules decodes each granule to subband samples through the reservoir
         defer state.deinit(gpa);
         try tables.put(&state, gpa, map.at);
         try h.stageDequant(&state, gpa);
+        try h.putY(&state, gpa, map.at("MP_OUT"), 0x80);
         var parser: ref.mp3.decoder.Parser = .{};
         var hyb: [2]ref.dsp.mp3.hybrid.State = .{ .{}, .{} };
         for (fr) |frame| {
@@ -413,4 +414,67 @@ test "mp3_synth matches ref/dsp/mp3/synth.zig over random granules" {
     }
     std.debug.print("mp3 synth: {d} clipped samples, worst {d} bundles per granule-channel\n", .{ clipped, worst });
     try testing.expect(clipped > 0);
+}
+
+test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Decoder does" {
+    const gpa = testing.allocator;
+    const prog = try h.assemble(gpa,
+        \\.include "lib/ybits.sm"
+        \\.include "lib/stream.sm"
+        \\.include "lib/mem.sm"
+        \\.include "lib/ring.sm"
+        \\.include "lib/huffman.sm"
+        \\.include "lib/sections.sm"
+        \\.include "lib/dequant.sm"
+        \\.include "lib/mp3.sm"
+        \\        mp3_packet()
+        \\        x17.halt
+        \\
+    );
+    defer gpa.free(prog);
+    var frames: usize = 0;
+    var worst: usize = 0;
+    var total: usize = 0;
+    for (fixtures) |file| {
+        const fr = try tables.frames(gpa, file);
+        defer gpa.free(fr);
+        var state = h.emu.State{};
+        defer state.deinit(gpa);
+        try tables.put(&state, gpa, map.at);
+        try h.stageDequant(&state, gpa);
+        try h.stageRing(&state, gpa, 2, map.at("MP_RSL"));
+        const zeros: [2048]i24 = @splat(0);
+        try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
+        try h.putAllX(&state, gpa, map.at("MP_XOV"), zeros[0..1152]);
+        inline for (.{ "MP_YP", "MP_OSL", "MP_RLEN" }) |name| try h.putY(&state, gpa, map.at(name), 0);
+        try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);
+        var dec: ref.dsp.mp3.decoder.Decoder = .{};
+        var want: [2304]i16 = undefined;
+        for (fr, 0..) |frame, n| {
+            const slot = y(&state, map.at("MP_OSL"));
+            try h.stagePacket(gpa, &state, frame);
+            state.halted = false;
+            const nb = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 23);
+            worst = @max(worst, nb);
+            total += nb;
+            try testing.expect(state.halted);
+            try testing.expect(!state.stream_starved);
+            const f = try dec.decode(frame, &want);
+            const len: u32 = @as(u32, f.header.samples()) * f.header.channels();
+            try testing.expectEqual(@as(u32, 1), y(&state, map.at("RING_E") + 2 * slot));
+            try testing.expectEqual(len, y(&state, map.at("RING_E") + 2 * slot + 1));
+            try testing.expectEqual(1 - slot, y(&state, map.at("MP_OSL")));
+            const base = map.at("OUTY") + map.at("MP_RSL") * slot;
+            for (want[0..len], 0..) |v, i| {
+                const got = h.sx16(state.getY(base + @as(u32, @intCast(i))));
+                if (got != v) {
+                    std.debug.print("frame {d} sample {d}: want {d} got {d}\n", .{ n, i, v, got });
+                    return error.TestExpectedEqual;
+                }
+            }
+            try h.putY(&state, gpa, map.at("RING_E") + 2 * slot, 0); // the host releases it
+            frames += 1;
+        }
+    }
+    std.debug.print("mp3 packet: {d} frames bit-exact, {d} syllables, worst frame {d} bundles, mean {d}\n", .{ frames, prog.len, worst, total / frames });
 }

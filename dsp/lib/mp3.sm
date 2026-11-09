@@ -668,6 +668,8 @@ done:
 .const MP_YT   = MP_Q + 110     ; synthesis: time slots left
 .const MP_YO   = MP_Q + 111     ; synthesis: the next sample's Y address - 1
 .const MP_OUT  = MP_Q + 112     ; the frame's PCM: its first sample's Y address
+.const MP_OSL  = MP_Q + 113     ; the ring slot this frame fills, 0 at start, flipped per frame
+.const MP_RSL  = 0x900          ; words per ring slot: 1152 stereo frames (specs/mp3.md, fact 788)
 .const MP_XOV  = 0x0480         ; X: overlap, [ch][sb][18]
 .const MP_XV   = 0x0900         ; X: synthesis history, [ch][1024]
 .const MP_XN   = 0x13C0         ; X: synthesis rows (mp3_synth's groups), Q23, 384 words
@@ -1769,6 +1771,7 @@ done:
         ldi s1, #0
         mp3_put(MP_HCH, 1)
 gch:    mp3_hybrid()
+        mp3_synth()
         lde e7, #MP_HCH
         ldy s1, e7
         alu s1, s1, s14, #OP_ADD
@@ -2696,4 +2699,60 @@ yj:     mp3_win16()
         jmp #3, #3, yslot
         nop()
         nop()
+}
+
+; One packet (specs/mp3.md, the sm1 side): the frame on the stream decoded into ring slot
+; Y[MP_OSL] (MP_RSL words each from OUTY), samples x nch words, zeros when its main data is not
+; at hand (twin: ref/dsp/mp3/decoder.zig), published (lib/ring.sm). Needs lib/ring.sm.
+.macro mp3_packet() {
+        stream_on()
+        ybits_init()
+        mp3_header()
+        mp3_sideinfo()
+        mp3_main()
+        lde e7, #MP_OSL
+        ldy s1, e7
+        ldi s12, #MP_RSL
+        x18.mpy s1, s0, s1, s12
+        ldi s12, #OUTY
+        alu s1, s1, s12, #OP_ADD
+        mp3_put(MP_OUT, 1)
+        lde e7, #MP_OK
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST
+        jmp #3, #3, mute
+        nop()
+        nop()
+        mp3_granules()
+        jmp #ALWAYS, #0, keep
+        nop()
+        nop()
+mute:   mp3_plen(s6)
+        lde e7, #MP_OUT
+        ldy s1, e7
+        alu s1, s1, s14, #OP_SUB
+        x17.mve e7, s1
+        ldi s3, #0
+zero:   x17.styi e7, #3, #0, e7
+        alu s6, s6, s14, #OP_SUB
+        alu s12, s6, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, zero
+        nop()
+        nop()
+keep:   mp3_keep()
+        mp3_plen(s7)
+        ring_publish(MP_OSL)
+}
+
+; dst = the frame's PCM words: 576 x granules x channels. Uses s12, e7.
+.macro mp3_plen(dst) {
+        lde e7, #MH_MP1
+        ldy dst, e7
+        alu dst, dst, s14, #OP_ADD
+        ldi s12, #576
+        x18.mpy dst, s0, dst, s12
+        lde e7, #MH_NCH
+        ldy s12, e7
+        x18.mpy dst, s0, dst, s12
 }
