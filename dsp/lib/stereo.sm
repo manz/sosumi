@@ -230,7 +230,7 @@ rgw2:   x18.eagu e10, e10, #AGU_INC
         alu s4, s6, s4, #OP_SUB
         ptst p3, s0, #LT4, #PTST ; n < 24
         jmp #3, #3, mshift
-        alu s12, s0, s6, #OP_SUB ; (delay slot) -n
+        alu s12, s6, s0, #OP_ADD ; (delay slot) n
         nop()
         alu s4, s0, s0, #OP_ADD ; stx An, s0 stores the X latch (x17 fact 709)
 mz:     stx A4, s4
@@ -245,7 +245,7 @@ mz:     stx A4, s4
         nop()
         nop()
 mshift: x19.xrd s1, #4
-        x19.alu s1, s1, s12, #SHIFT
+        alu s1, s12, s1, #ASRRS
         stx A4, s1
         x02.ainc #4, #4
         alu s11, s11, s14, #OP_SUB
@@ -367,9 +367,10 @@ msdone:
 .macro st_qb(p) {
         ldi s4, #2
         alu s5, p, s4, #OP_SUB
+        ldi s12, #2
+        alu s5, s12, s5, #ASRRS ; rshr(pos - 2, 2) = floor(pos / 4)
         ldi s12, #-2
-        x19.alu s5, s5, s12, #SHIFT ; rshr(pos - 2, 2) = floor(pos / 4)
-        x19.alu s12, s5, s4, #SHIFT
+        alu s12, s12, s5, #ASRRS
         alu s6, p, s12, #OP_SUB
 }
 
@@ -468,7 +469,7 @@ isrun:  ldy s9, e7              ; start
         ldi s4, #ST_R
         alu s4, s4, s9, #OP_ADD
         amov_e(3, s4)
-        alu s12, s0, s11, #OP_SUB ; -n
+        alu s12, s11, s0, #OP_ADD ; n
         ldi s4, #24
         alu s4, s11, s4, #OP_SUB
         ptst p3, s0, #LT4, #PTST
@@ -480,7 +481,7 @@ isrun:  ldy s9, e7              ; start
 isw:    x19.xrd s1, #4
         x02.ainc #4, #4
         x02.mpy s5, s1, s6
-        x19.alu s5, s5, s12, #SHIFT
+        alu s5, s12, s5, #ASRRS
         ldi s4, #3
         alu s4, s8, s4, #OP_SUB
         ptst p3, s0, #EQ4, #PTST ; kind 3: negated

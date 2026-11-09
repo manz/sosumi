@@ -110,8 +110,8 @@ sdone:  pks(1, A10, 0, s0, s0, 0) ; b_0 = y
         jmp #ALWAYS, #0, ls
         pksf(1, A4, 0, s0, s0, 0, 2, R2) ; (delay slot) the output, A4 by R2
         alu s10, s10, s14, #OP_SUB ; (delay slot)
-ldone:  ldi s12, #22
-        x19.alu s12, s14, s12, #SHIFT ; 2^22
+ldone:  ldi s12, #-22
+        alu s12, s12, s14, #ASRRS ; 2^22
         alu s4, s3, s12, #OP_SUB
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, FAIL   ; max |v| >= 2^22
@@ -143,14 +143,14 @@ cdone:
 .macro tn_halve(A, N) {
         amov(A4, A)
         alu s9, N, s0, #OP_ADD
-        ldi s12, #-1
+        ldi s12, #1
 hl:     alu s4, s9, s0, #OP_ADD
         ptst p3, s0, #EQ4, #PTST
         jmp #3, #3, hdone
         nop()
         nop()
         x19.xrd s1, #4
-        x19.alu s1, s1, s12, #SHIFT
+        alu s1, s12, s1, #ASRRS
         stx A4, s1
         x02.ainc #4, #4
         jmp #ALWAYS, #0, hl

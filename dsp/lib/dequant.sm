@@ -72,23 +72,23 @@ more:   alu s12, s1, s7, #OP_SUB
         jmp #ALWAYS, #0, more
         alu s7, s7, s7, #OP_ADD ; (delay slot)
         nop()
-found:  alu s8, s6, s14, #OP_SUB
-        x19.alu s8, s14, s8, #SHIFT ; 2^(s-1)
+found:  alu s8, s14, s6, #OP_SUB
+        alu s8, s8, s14, #ASRRS ; 2^(s-1)
         alu s8, s1, s8, #OP_SUB
-        alu s12, s0, s6, #OP_SUB
-        x19.alu s8, s8, s12, #SHIFT ; j = floor(mag / 2^s)
+        alu s8, s6, s8, #ASRRS  ; j = floor(mag / 2^s)
         ldi s4, #DQ_IT - 64
         alu s4, s4, s8, #OP_ADD
         amov_e(4, s4)            ; (clobbers s7)
-        x19.alu s12, s8, s6, #SHIFT
+        alu s12, s0, s6, #OP_SUB
+        alu s12, s12, s8, #ASRRS
         alu s7, s1, s12, #OP_SUB ; f = mag - j 2^s
         x19.xrd s3, #8          ; lo
         x02.ainc #8, #8
         x19.xrd s4, #8          ; hi
         alu s4, s4, s3, #OP_SUB ; d
         ldi s12, #23
-        alu s12, s12, s6, #OP_SUB
-        x19.alu s7, s7, s12, #SHIFT ; f 2^(23 - s), below 2^23
+        alu s12, s6, s12, #OP_SUB
+        alu s7, s12, s7, #ASRRS ; f 2^(23 - s), below 2^23
         x02.mpy s8, s4, s7      ; round(d f / 2^s)
         alu s2, s3, s8, #OP_ADD ; m
         ldi s13, #DQ_IE - 1
@@ -142,9 +142,10 @@ done:
         alu s6, s6, s4, #OP_SUB ; t
         ldi s4, #2
         alu s7, s6, s4, #OP_SUB
+        ldi s12, #2
+        alu s7, s12, s7, #ASRRS ; floor(t / 4)
         ldi s12, #-2
-        x19.alu s7, s7, s12, #SHIFT ; floor(t / 4)
-        x19.alu s12, s7, s4, #SHIFT
+        alu s12, s12, s7, #ASRRS
         alu s6, s6, s12, #OP_SUB ; b
         alu s7, s7, s4, #OP_ADD ; + 2
 }
@@ -161,8 +162,8 @@ done:
 ; A12 = DQ_D, R5 = DQ_OUT - DQ_SPEC - 1. Uses s3, s4 and amov's registers.
 .macro dq_fset() {
         ldi s9, #129
-        ldi s11, #22
-        x19.alu s12, s14, s11, #SHIFT ; 2^22
+        ldi s11, #-22
+        alu s12, s11, s14, #ASRRS ; 2^22
         alu s3, s12, s14, #OP_SUB
         alu s12, s12, s3, #OP_ADD ; 2^23 - 1
         ldi s11, #23
@@ -402,15 +403,7 @@ big:    alu s11, s8, s0, #OP_ADD
         x19.xrd s4, #9          ; G
         x02.mpy s6, s2, s4      ; P
         alu s12, s10, s3, #OP_SUB ; n = E - e
-        ldi s4, #24
-        alu s4, s12, s4, #OP_SUB
-        ptst p3, s0, #LT4, #PTST
-        jmp #3, #3, nok
-        nop()
-        nop()
-        ldi s12, #23            ; P < 2^21.75, so any n >= 23 gives 0
-nok:    alu s12, s0, s12, #OP_SUB
-        x19.alu s6, s6, s12, #SHIFT ; rshr(P, n)
+        alu s6, s12, s6, #ASRRS ; rshr(P, n), 0 from n = 24 (x17 fact 774)
         alu s4, s11, s0, #OP_ADD
         ptst p3, s0, #LT4, #PTST
         jmp #IF_NOT, #3, put

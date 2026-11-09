@@ -122,7 +122,8 @@ word:   ldi s4, #4
         alu s7, s7, s4, #OP_ADD ; N + 4
         alu s4, s7, s0, #OP_ADD ; kept past readn
         readn(s8)
-        x19.alu s5, s14, s4, #SHIFT ; 2^(N+4)
+        alu s5, s0, s4, #OP_SUB
+        alu s5, s5, s14, #ASRRS ; 2^(N+4)
         alu s5, s5, s8, #OP_ADD ; + word
         alu s4, x, s0, #OP_ADD
         ptst p3, s0, #LT4, #PTST
