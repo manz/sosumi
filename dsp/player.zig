@@ -1,6 +1,6 @@
 //! ALAC packets through x17's host model and dsp/lib/alac.sm: the host stages each packet at
-//! Y:0x80, runs alac_packet to its stop and drains the output ring (specs/aac.md output
-//! contract; alac.sm's header for its slots).
+//! Y:PKT (emulator only until the stream read), writes the configure words, runs alac_packet
+//! to its stop and drains the ring's one stereo slot (specs/alac.md).
 const std = @import("std");
 const ref = @import("ref");
 const host = @import("host");
@@ -9,12 +9,12 @@ const h = @import("harness.zig");
 pub const emu = h.emu;
 pub const aac = @import("aac_player.zig");
 
-const packet_base = 0x80;
+const packet_base = 0x4000; // alac.sm PKT, emulator-only staging
 const pk = 0x2E00;
 const pk_n = pk + 6;
 const pk_status = pk + 7;
 
-pub const Error = error{ Unsupported, Status } || host.Error || std.mem.Allocator.Error;
+pub const Error = error{ Unsupported, Status, MonoCopy } || host.Error || std.mem.Allocator.Error;
 
 pub const Site = h.Site;
 
@@ -31,36 +31,46 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(Site)) ![]u32
         \\.include "lib/predictor.sm"
         \\.include "lib/unmix.sm"
         \\.include "lib/mem.sm"
+        \\.include "lib/ring.sm"
         \\.include "lib/alac.sm"
-        \\        bits_init(0x80)
+        \\        bits_init(PKT)
         \\        alac_packet()
         \\        x17.halt
         \\
     , sites);
 }
 
-/// What alac.sm decodes: 16-bit output, at most two channels, frames up to 4096.
+/// What alac.sm decodes: 16-bit output, at most two channels, 4096-sample frames (the length
+/// the ring's slot fixes; the host does not pass the cookie's).
 pub fn supported(cfg: ref.alac.config.Config) bool {
-    return cfg.bit_depth <= 16 and cfg.channels <= 2 and cfg.frame_length <= 4096;
+    return cfg.bit_depth <= 16 and cfg.channels <= 2 and cfg.frame_length == 4096;
 }
 
 pub const Player = struct {
     host: host.Host,
     prog: []const u32,
     params: []host.Param,
+    nch: usize,
+    /// The last packet's PCM, `nch` interleaved.
+    pcm: std.ArrayList(i16) = .empty,
     /// alac_packet's status for the last packet (alac.sm header).
     status: u32 = 0,
     bundles: usize = 0,
 
     pub fn init(gpa: std.mem.Allocator, prog: []const u32, cfg: ref.alac.config.Config) Error!Player {
         if (!supported(cfg)) return error.Unsupported;
-        // The track's config into alac.sm's slots, written by the host before every packet
-        // (x17 host model `Config.params`, a stub until the device's path is measured).
-        const values = [_]u32{ cfg.frame_length, cfg.bit_depth, cfg.pb, cfg.mb, cfg.kb, cfg.channels };
-        const params = try gpa.alloc(host.Param, values.len);
+        // The cookie's fields as the host's configure leaves them (specs/alac.md): FD80 bits
+        // 0-4, then depth, pb, kb, mb at FD82..FD85.
+        const values = [_]host.Param{
+            .{ .addr = 0xFD80, .value = 0x1F },
+            .{ .addr = 0xFD82, .value = cfg.bit_depth },
+            .{ .addr = 0xFD83, .value = cfg.pb },
+            .{ .addr = 0xFD84, .value = cfg.kb },
+            .{ .addr = 0xFD85, .value = cfg.mb },
+        };
+        const params = try gpa.dupe(host.Param, &values);
         errdefer gpa.free(params);
-        for (params, values, 0..) |*q, v, i| q.* = .{ .addr = pk + @as(u32, @intCast(i)), .value = v };
-        return .{
+        var p: Player = .{
             .host = try host.Host.init(gpa, .{
                 .rate_hz = cfg.sample_rate,
                 .packet = .{ .base = packet_base, .len_at = packet_base - 1 },
@@ -69,10 +79,16 @@ pub const Player = struct {
             }),
             .prog = prog,
             .params = params,
+            .nch = cfg.channels,
         };
+        errdefer p.host.deinit();
+        // the init pass's ring header: one slot of 0x2000 words
+        try h.stageRing(&p.host.state, gpa, 1, 0x2000);
+        return p;
     }
 
     pub fn deinit(self: *Player) void {
+        self.pcm.deinit(self.host.gpa);
         self.host.deinit();
         self.host.gpa.free(self.params);
     }
@@ -84,7 +100,15 @@ pub const Player = struct {
         self.bundles = r.bundles;
         self.status = self.host.state.y_mem.get(pk_status) orelse 0;
         if (self.status != 0) return error.Status;
-        return self.host.pcm.items;
+        if (self.nch == 2) return self.host.pcm.items;
+        // the slot is always stereo: a mono channel sits on both sides
+        const st = self.host.pcm.items;
+        self.pcm.clearRetainingCapacity();
+        for (0..st.len / 2) |i| {
+            if (st[2 * i + 1] != st[2 * i]) return error.MonoCopy;
+            try self.pcm.append(self.host.gpa, st[2 * i]);
+        }
+        return self.pcm.items;
     }
 
     /// Counts, from now on, the bundles run at each syllable (x17 emulator `State.profile`).

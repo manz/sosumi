@@ -1,10 +1,10 @@
 ; Audited from x17 b95e52f examples/lib/alac.sm, 2026-11-08 (docs/x17-import.md).
 ; Twin: ref/dsp/alac/decoder.zig; Apple ALAC ALACDecoder.cpp (Apache 2.0), Decode.
 ; One ALAC packet: the twin of `Decoder.decode` in ref/dsp/alac/decoder.zig.
-; Needs lib/bits.sm, lib/rice.sm, lib/predictor.sm and lib/unmix.sm first; bits_init must
-; point the reader at the packet.
+; Needs lib/bits.sm, lib/rice.sm, lib/predictor.sm, lib/unmix.sm and lib/ring.sm first;
+; bits_init must point the reader at the packet.
 ;
-; Elements: SCE, LFE (one lane) and CPE (two), until END or every channel is filled. Valid
+; Elements: SCE, LFE (one lane) and CPE (two), until END or two channels are filled. Valid
 ; streams only: the header checks the reference makes (the 12 zero bits, n <= frame length,
 ; a CPE past the last channel) are not repeated. The status slot reports what stops it.
 ;
@@ -17,21 +17,22 @@
 ;   Y UY           a pair's lane 0 once decoded, as its low 16 bits, so that lane 1 can take X;
 ;                  unmix reads it back from here. The output is u + v - ... and its
 ;                  difference with v, sign-extended from depth <= 16: only u mod 2^16 counts.
-;   Y RING         the packet, staged by the host from Y:0x80 (bits_init(RING)), and the
-;                  output ring over it: one entry of n * channels 16-bit samples,
-;                  channel-interleaved, written once the element has read every bit. The
-;                  ring's second half overlays UY; each word lands behind the read of the
-;                  UY word it covers. A pair whose packet reaches UY is refused (status 6).
-;   An escape (verbatim) element at depth 16 with lanes = channels goes straight to the
-;   ring, each sample written behind its read. Other escape pairs take the UY route.
-; Ring table (host contract, ours): Y:1 entries (1), Y:2 units (8192), Y:5 entry 0 owned,
-; Y:6 its length in units; Y:0xFD95 = 0 then Y:0xFD94 = 1 when the output is ready.
+;   Y PKT          the packet, staged by the emulator's host (bits_init(PKT)) until the
+;                  stream read replaces it; outside mode 0.
+;   Y RING         the output slot: n stereo frames, written once the element has read every
+;                  bit. Its second half overlays UY; each word lands behind the read of the
+;                  UY word it covers.
+;   An escape (verbatim) pair at depth 16 goes straight to the ring, each sample written
+;   behind its read. Other escape pairs take the UY route.
+; Output (specs/alac.md, lib/ring.sm): the ring's one slot of 0x2000 words at RING, n stereo
+; frames (a mono element on both sides), entry 0 owned with length 2n, then ring_ready. The
+; init pass leaves the header (1 slot, 0x2000 words). Frames are ALAC_FL long unless partial.
 ;
-; Y slots at PK, filled by the host: +0 frame length, +1 depth, +2 pb, +3 mb, +4 kb,
-; +5 channels (<= 2). Written: +6 samples per channel, +7 status (0 ok, 1 a zero run
-; overran, 2 an unsupported element, 3 pb * pb_factor / 4 above the Rice loop's 127, 4 a
-; depth above 16 or shifted low bytes, which 16-bit output cannot carry, 6 a pair's packet
-; reaching UY). The rest is scratch, see the .consts.
+; Parameter words from the host (specs/alac.md configure): PK_DEP depth, PK_PB pb, PK_KB kb,
+; PK_MB mb. Channels come from the element tags. Y slots at PK, written: +6 samples per
+; channel, +7 status (0 ok, 1 a zero run overran, 2 an unsupported element, 3 pb * pb_factor
+; / 4 above the Rice loop's 127, 4 a depth above 16 or shifted low bytes, which 16-bit output
+; cannot carry). The rest is scratch, see the .consts.
 ; Mode != 0 integrates the lane first.
 ;
 ; Needs lib/mem.sm (yat, yld, yst, amov, aimm).
@@ -39,8 +40,9 @@
 
 .const MIX   = 0x0000
 .const CSCR  = 0x1000
-.const RING  = 0x0080
-.const UNITS = 8192
+.const RING  = OUTY
+.const PKT   = 0x4000           ; emulator-only packet staging (specs/alac.md input)
+.const ALAC_FL = 4096          ; frame length: the ring's slot holds 4096 stereo frames
 .const UY    = 0x1D00           ; 4096 words, up to COEFY
 .const COEFY = 0x2D00
 .const RICE  = 0x2DA0
@@ -48,12 +50,10 @@
 .const UNMIX = 0x2DE0
 
 .const PK     = 0x2E00
-.const PK_FL  = PK + 0
-.const PK_DEP = PK + 1
-.const PK_PB  = PK + 2
-.const PK_MB  = PK + 3
-.const PK_KB  = PK + 4
-.const PK_NCH = PK + 5
+.const PK_DEP = 0xFD82
+.const PK_PB  = 0xFD83
+.const PK_KB  = 0xFD84
+.const PK_MB  = 0xFD85
 .const PK_N   = PK + 6
 .const PK_ST  = PK + 7
 .const PK_CH  = PK + 8
@@ -95,7 +95,7 @@ l0:
         ldi s3, #0
         yst(PK_ST)
         yst(PK_CH)
-        yld(s3, PK_FL)
+        ldi s3, #ALAC_FL
         yst(PK_N)
         yld(s3, PK_DEP)
         ldi s4, #16
@@ -111,9 +111,9 @@ l0:
 
 alac_elem:
         yld(s3, PK_CH)
-        yld(s4, PK_NCH)
+        ldi s4, #2
         alu s4, s3, s4, #OP_SUB
-        ptst p3, s0, #LT4, #PTST ; ch < channels
+        ptst p3, s0, #LT4, #PTST ; ch < 2
         jmp #IF_NOT, #3, alac_end
         nop()
         nop()
@@ -411,7 +411,7 @@ alac_verb:
         ldi s3, #0
         yst(PK_BS)
         yst(PK_MXR)
-        ; depth 16 and lanes = channels: straight to the ring
+        ; depth 16 and a pair: straight to the ring
         yld(s3, PK_DEP)
         ldi s4, #16
         alu s4, s3, s4, #OP_SUB
@@ -420,7 +420,7 @@ alac_verb:
         nop()
         nop()
         yld(s3, PK_LN)
-        yld(s4, PK_NCH)
+        ldi s4, #2
         alu s4, s3, s4, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, alac_vl
@@ -468,26 +468,8 @@ alac_vn:
         nop()
         nop()
 
-        ; unmix into the ring at RING + ch, one gap of channels - lanes per frame
+        ; unmix into the ring at RING + ch, one gap of 2 - lanes per frame
 alac_out:
-        ; a pair read its packet past UY after lane 0 landed there: refused
-        yld(s3, PK_LN)
-        alu s4, s3, s14, #OP_SUB
-        ptst p3, s0, #EQ4, #PTST ; one lane
-        jmp #3, #3, alac_uok
-        nop()
-        nop()
-        x03.esrc s3, e5
-        ldi s4, #UY
-        alu s12, s4, s3, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; e5 > UY
-        jmp #IF_NOT, #3, alac_uok
-        nop()
-        nop()
-        ldi s3, #6
-        jmp #ALWAYS, #0, alac_fail
-        nop()
-        nop()
 alac_uok:
         unmix_slots(UNMIX)
         yld(s3, PK_N)
@@ -504,7 +486,7 @@ alac_uok:
         x17.sty e7, #3, #0
         yld(s3, PK_LN)
         x17.sty e8, #3, #0
-        yld(s4, PK_NCH)
+        ldi s4, #2
         alu s3, s4, s3, #OP_SUB
         x17.sty e10, #3, #0     ; gap
         aimm_e(1, MIX)
@@ -539,35 +521,22 @@ alac_next:
         nop()
         nop()
 alac_end:
-        ; the ring entry: n * channels units, then the status header
-        ldi s3, #1
-        yst(1)
-        ldi s3, #UNITS
-        yst(2)
-        alu s3, s14, s0, #OP_ADD
-        yst(5)
-        yld(s1, PK_N)
-        yld(s4, PK_NCH)
-        alu s3, s0, s0, #OP_ADD
-alac_len:
-        alu s12, s4, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
-        jmp #3, #3, alac_lend
+        ; one channel (an SCE or LFE): its left samples onto the right
+        yld(s3, PK_CH)
+        alu s4, s3, s14, #OP_SUB
+        ptst p3, s0, #EQ4, #PTST ; ch == 1
+        jmp #IF_NOT, #3, alac_own
         nop()
         nop()
-        alu s3, s3, s1, #OP_ADD
-        alu s4, s4, s14, #OP_SUB
-        jmp #ALWAYS, #0, alac_len
-        nop()
-        nop()
-alac_lend:
-        yst(6)
-        ldi s3, #0
-        lde e6, #0xFD95
-        x17.sty e6, #3, #0
-        alu s3, s14, s0, #OP_ADD
-        lde e6, #0xFD94
-        x17.sty e6, #3, #0
+        ldi s13, #RING - 1
+        yld(s6, PK_N)
+        ring_dupn()
+alac_own:
+        yld(s7, PK_N)
+        alu s7, s7, s7, #OP_ADD ; n stereo frames
+        ldi s5, #0
+        ring_own()
+        ring_ready()
         jmp #ALWAYS, #0, alac_done
         nop()
         nop()
@@ -597,7 +566,7 @@ ty:     alu s12, s1, s0, #OP_ADD
 tydone:
 }
 
-; An escape element at depth 16 with lanes = channels, straight into the ring at RING + ch:
+; An escape pair at depth 16, straight into the ring at RING + ch:
 ; each 16-bit sample is stored as read. The write trails the read by the element header
 ; (more than 16 bits), so no unread packet word is overwritten. Uses e11, s1, s3, s4.
 .macro alac_vdirect() {

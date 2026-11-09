@@ -236,7 +236,7 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, mo
     const nch: usize = cfg.channels;
     std.debug.print("ALAC, {d} ch, {d} bit, {d} Hz, frame {d}\n", .{ nch, cfg.bit_depth, cfg.sample_rate, cfg.frame_length });
     if (!dsp.supported(cfg)) {
-        std.debug.print("alac_packet decodes 16-bit, 1 or 2 channel tracks with frames up to 4096\n", .{});
+        std.debug.print("alac_packet decodes 16-bit, 1 or 2 channel tracks with 4096-sample frames\n", .{});
         std.process.exit(1);
     }
     const check = mode == .check;
