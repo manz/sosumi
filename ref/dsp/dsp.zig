@@ -4,6 +4,7 @@ pub const ops = @import("ops.zig");
 pub const bits = @import("bits.zig");
 pub const alac = @import("alac/alac.zig");
 pub const aac = @import("aac/aac.zig");
+pub const mp3 = @import("mp3/mp3.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());

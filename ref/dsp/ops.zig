@@ -71,6 +71,27 @@ pub fn isNeg(a: Word) bool {
     return a < 0;
 }
 
+/// x03.tap's running sum (x17 reference.md x03.tap; facts 672, 701, 702; exact on silicon over a
+/// counted two-pointer chain, 792): {hi:lo} += 2ab, 24 x 24 into 48 bits, no rounding.
+pub const Acc = i48;
+
+pub fn mac(acc: Acc, a: Word, b: Word) Acc {
+    return acc +% 2 * @as(Acc, a) * b;
+}
+
+/// The sum read back as one word, (acc + 2^(s-1)) / 2^s floored, wrapped to 24 bits, s in 1..24:
+/// hi and lo come out as words, and with L = lo read signed and H = hi + [L < 0] the value is
+/// H 2^(24 - s) + rshr(L, s) (the ALAC predictor's readout, predictor.sm `hpos`).
+pub fn accRshr(acc: Acc, s: u5) Word {
+    const hi: Word = @truncate(acc >> 24);
+    const l: Word = @bitCast(@as(u24, @truncate(@as(u48, @bitCast(acc)))));
+    const h = if (isNeg(l)) add(hi, 1) else hi;
+    const low = if (s == 24) @as(Word, 0) else rshr(l, s);
+    const up: u5 = @intCast(24 - @as(u32, s));
+    const hs = if (up > 15) shl(shl(h, 15), @intCast(up - 15)) else shl(h, @intCast(up));
+    return add(hs, low);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers, built only from the primitives
 // ---------------------------------------------------------------------------
@@ -182,6 +203,18 @@ fn expectWide(a: i16, b: Word) !void {
     try testing.expect(w.lo >= 0 and w.lo < 1 << 15);
     try testing.expectEqual(@as(i24, @truncate(@divFloor(p, 1 << 15))), w.hi);
     try testing.expectEqual(@mod(p, 1 << 15), w.lo);
+}
+
+test "accRshr is the rounded shift of the 48-bit sum, wrapped" {
+    var prng = std.Random.DefaultPrng.init(0x792);
+    const rnd = prng.random();
+    for (0..100_000) |_| {
+        var acc: Acc = 0;
+        for (0..rnd.intRangeAtMost(usize, 1, 36)) |_| acc = mac(acc, rnd.int(Word), rnd.intRangeAtMost(Word, -(1 << 21), 1 << 21));
+        const s: u5 = rnd.intRangeAtMost(u5, 1, 24);
+        const want: Word = @truncate((acc + (@as(Acc, 1) << (s - 1))) >> s);
+        try testing.expectEqual(want, accRshr(acc, s));
+    }
 }
 
 test "Wide sums carry into hi" {

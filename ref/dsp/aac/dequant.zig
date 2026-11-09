@@ -69,10 +69,10 @@ pub const interp_e = [8]Word{ 0, 1 - 13, 2 - 13, 4 - 13, 5 - 13, 6 - 13, 8 - 13,
 pub const interp_rem = [8]Word{ 0, 1, 2, 0, 1, 2, 0, 1 };
 
 /// |q|^(4/3) as m * 2^e, and the third-power leftover for the gain index.
-const Mant = struct { m: Word, e: Word, rem: Word };
+pub const Mant = struct { m: Word, e: Word, rem: Word };
 
 /// mag in 1..16383 (8191 plus pulses, and MP3's range).
-fn mantissa(mag: Word) Mant {
+pub fn mantissa(mag: Word) Mant {
     if (ops.isNeg(ops.sub(128, mag))) {
         var s: u5 = 1;
         var top: Word = 256;
