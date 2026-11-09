@@ -117,7 +117,7 @@ band:   ldy s2, e7
         nop()
         nop()
 dec:    ldi s1, #tab
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         huff_decode(s3)
         ldi s4, #60
         alu s3, s3, s4, #OP_SUB ; the delta

@@ -118,7 +118,7 @@ fn packedValue(comptime book: u4) fn (usize) u16 {
     }.f;
 }
 
-pub const root_width = 8;
+pub const root_width = 6;
 
 pub const scalefactor = makeTable(&ref_tables.scalefactor, root_width, identity);
 
@@ -265,5 +265,5 @@ test "all twelve tables fit in Y with room for buffers" {
     // Y:0..0x2E7F is the safe 16-bit region (specs/questions.md 6): 11904 words.
     var total: usize = scalefactor.words.len;
     for (spectral) |t| total += t.words.len;
-    try testing.expectEqual(@as(usize, 4544), total);
+    try testing.expectEqual(@as(usize, 2910), total); // root 6; root 8 took 4544
 }

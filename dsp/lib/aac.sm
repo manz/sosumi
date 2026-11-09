@@ -442,7 +442,7 @@ more:   yld(s4, AK_WN)
         nop()
         yst(AK_WN)
         yld(s1, AK_WTAB)
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         spec_quad_s()
         jmp #ALWAYS, #0, more
         nop()
@@ -457,7 +457,7 @@ more:   yld(s4, AK_WN)
         nop()
         yst(AK_WN)
         yld(s1, AK_WTAB)
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         spec_quad_u()
         jmp #ALWAYS, #0, more
         nop()
@@ -472,7 +472,7 @@ more:   yld(s4, AK_WN)
         nop()
         yst(AK_WN)
         yld(s1, AK_WTAB)
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         spec_pair_s()
         jmp #ALWAYS, #0, more
         nop()
@@ -487,7 +487,7 @@ more:   yld(s4, AK_WN)
         nop()
         yst(AK_WN)
         yld(s1, AK_WTAB)
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         spec_pair_u()
         jmp #ALWAYS, #0, more
         nop()
@@ -502,7 +502,7 @@ more:   yld(s4, AK_WN)
         nop()
         yst(AK_WN)
         yld(s1, AK_WTAB)
-        ldi s11, #8
+        ldi s11, #HUFF_ROOT
         spec_pair_esc(FAIL)
         jmp #ALWAYS, #0, more
         nop()

@@ -14,6 +14,10 @@
 ; clobbered. hi = floor(e / 32) by the alu head's asr (fact 774). ldy sign-extends
 ; (reference.md `ldy`, own-ldysx), so every entry must stay below 0x8000: values and bases below 1024.
 
+; Every code's root table width (ref/dsp/aac/huffman.zig root_width): 6 keeps the codes in 2910
+; words of Y (8 took 4544), codewords past 6 bits taking a second step.
+.const HUFF_ROOT = 6
+
 .macro huff_decode(dst) {
         alu s1, s1, s14, #OP_SUB ; s1, s3 sit one below the table: x17.mve adds 1
         ldi s4, #5
