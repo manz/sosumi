@@ -139,7 +139,7 @@ scale:  yld(s3, ESLOT)
 ; in s15. Y REV holds Z + 2 rev(n). Point n's loads and products (pk, A4 up and A6 down by
 ; agu_xr fns 2 and 3 with R2 = 2, fact 738; the shift by x02.vc code 7, 730) overlap the
 ; finish of point n - 1, which x03.acp's A10 <- Y:[e7] (fact 193) then scatters; x03.acp's
-; template also loads s7 with that Y word (fact 190).
+; template also loads s7 with that Y word (facts 190, 748).
 .macro im_pre5(N2, IN) {
         pkf(s1, A4, s10, s3, s4, 0, s0, s0, 0, 0, 2, R2) ; xr; s10 = xi pr
         pk(s4, A8, s6, s3, s5, 1, s9, s1, 0, 7) ; pr; s6 = xi pi; xr >>= c

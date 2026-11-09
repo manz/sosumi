@@ -17,7 +17,7 @@
 .const WIN_R   = 0x2389
 .const WIN_F   = 0x238A
 
-; A6 = Y:[SLOT] (x03.acp, fact 193). x03.acp also loads s7 with that word (fact 190). Uses e6, s7.
+; A6 = Y:[SLOT] (x03.acp, fact 193). x03.acp also loads s7 with that word (facts 190, 748). Uses e6, s7.
 .macro win_a6(SLOT) {
         lde e6, #SLOT
         x03.acp A6, A0, e6, #1
