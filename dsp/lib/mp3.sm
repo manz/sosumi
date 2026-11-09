@@ -3312,6 +3312,19 @@ yslot:  lde e7, #MP_HCH
 ; Y[MP_OSL] (MP_RSL words each from OUTY), samples x nch words, zeros when its main data is not
 ; at hand (twin: ref/dsp/mp3/decoder.zig), published (lib/ring.sm). Needs lib/ring.sm.
 .macro mp3_packet() {
+        ; a slot is reused only once the host has released it (x17 handbook §11, fact 797):
+        ; with slot Y[MP_OSL] still owned, FD95 = 0x21 and the stop, the frame left unread
+        lde e7, #MP_OSL
+        ldy s1, e7
+        alu s1, s1, s1, #OP_ADD
+        ldi s12, #RING_E - 1    ; x17.mve adds 1
+        alu s1, s1, s12, #OP_ADD
+        x17.mve e7, s1
+        ldy s12, e7
+        ptst p3, s0, #EQ12, #PTST
+        jmp #IF_NOT, #3, full
+        nop()
+        nop()
         stream_on()
         ybits_init()
         mp3_header()
@@ -3350,6 +3363,12 @@ zero:   x17.styi e7, #3, #0, e7
 keep:   mp3_keep()
         mp3_plen(s7)
         ring_publish(MP_OSL)
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+full:   ldi s3, #0x21
+        yst(HOST_ST + 1)
+done:
 }
 
 ; dst = the frame's PCM words: 576 x granules x channels. Uses s12, e7.

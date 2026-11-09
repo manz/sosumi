@@ -83,6 +83,11 @@ fault; LAME writes it with empty main data.
   the reservoir and filterbank state carry across the discontinuity, and a frame whose
   main_data_begin reaches before the seek must decode without fault.
 - Entry point, reservoir storage and synthesis history are ours to lay out.
+- Ring full: mp3_packet checks its slot's owned word before reading the frame. Still owned,
+  it writes FD95 = 0x21 and stops (x17 handbook §11, fact 797), the frame left unread on the
+  stream, so the next run reads it first. The device's own program waits in the bit-12 feed
+  wait instead; how a program enters that wait, and whether the host resumes a program that
+  stopped, are **OPEN**.
 - The synthesis matrix (`mp3_mgrp`) rotates four x03.tap sums, {sHi:sLo} changing every
   bundle while sL and sB are shared: each named pair is its own exact 48-bit sum, no
   cross-talk (**MEASURED**, fact 798: c streamed, x[k] loaded into sB every 4 taps, 4 pairs,
