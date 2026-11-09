@@ -17,11 +17,15 @@
 .const WIN_R   = 0x2389
 .const WIN_F   = 0x238A
 
-; A6 = Y:[SLOT] + OFF (x03.acp, fact 193; x02.aa fn 2, 403). x03.acp's template zeroes s7.
-; Uses e6, R7.
-.macro win_a6(SLOT, OFF) {
+; A6 = Y:[SLOT] (x03.acp, fact 193). x03.acp's template zeroes s7. Uses e6.
+.macro win_a6(SLOT) {
         lde e6, #SLOT
         x03.acp A6, A0, e6, #1
+}
+
+; A6 = Y:[SLOT] + OFF (x02.aa fn 2, 403). Uses e6, R7.
+.macro win_a6o(SLOT, OFF) {
+        win_a6(SLOT)
         rimm R7, #OFF
         x02.aa A6, A6, R7, #2, A0, A0
 }
@@ -40,7 +44,7 @@
 ; Uses s1, s3 .. s13, e6, e7, R2, R3, R7, A4, A6, A8, A10, A14, p3 (all the macros here).
 .macro win_long(T, PCM) {
         aimm_e(2, T)
-        win_a6(WIN_R, 0)
+        win_a6(WIN_R)
         win_a8ovl()
         rimm R4, #0             ; set below: A8's end
         lde e7, #PCM
@@ -60,7 +64,7 @@ first:  pk(s3, A6, s0, s0, s0, 0, s0, s0, 0, 0) ; w
         x18.max s5, s5, s10     ; (delay slot)
         x17.styi e7, #5, #0, e7 ; (delay slot)
         ; s1 holds T[1024], A4 = T + 1025
-        win_a6(WIN_F, 1023)     ; the current shape, falling
+        win_a6o(WIN_F, 1023)     ; the current shape, falling
         win_a8ovl()
         rimm R4, #T + 2048      ; A4's end
 second: x19.xrd s3, #6          ; w
@@ -82,12 +86,12 @@ second: x19.xrd s3, #6          ; w
 
 ; The other sequences build the Q5 block in X B (2048 words) from runs, then win_out.
 
-; B.. = rnd(T.. * W.. / 2^23) over COUNT words (even), W = Y:[SLOT] + OFF rising: two samples a
+; B.. = rnd(T.. * W.. / 2^23) over COUNT words (even), W = Y:[SLOT] rising: two samples a
 ; pass of eight bundles, t alternating between s1 and s7 so no bundle loads a register its
 ; product reads. Uses s1, s3, s5 .. s7, R4, A4, A6, A8 and aimm's registers.
-.macro win_run(COUNT, T, SLOT, OFF, B) {
+.macro win_run(COUNT, T, SLOT, B) {
         aimm_e(2, T)
-        win_a6(SLOT, OFF)
+        win_a6(SLOT)
         aimm_e(4, B)
         rimm R4, #T + 1 + COUNT ; A4's end
         pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
@@ -104,7 +108,7 @@ wr:     pk(s3, A6, s0, s0, s0, 0, s0, s0, 0, 0)
 ; The same with W falling from Y:[SLOT] + OFF (x02.aa fn 1 steps A6 down, 403, 738).
 .macro win_rund(COUNT, T, SLOT, OFF, B) {
         aimm_e(2, T)
-        win_a6(SLOT, OFF)
+        win_a6o(SLOT, OFF)
         aimm_e(4, B)
         rimm R4, #T + 1 + COUNT
         pk(s1, A4, s0, s0, s0, 0, s0, s0, 0, 0)
@@ -122,9 +126,9 @@ wd:     x19.xrd s3, #6
 
 ; B.. += rnd(T.. * W.. / 2^23), W rising: the short windows' overlapping halves, two samples a
 ; pass of ten bundles. Uses win_run's registers and s8, A10.
-.macro win_acc(COUNT, T, SLOT, OFF, B) {
+.macro win_acc(COUNT, T, SLOT, B) {
         aimm_e(2, T)
-        win_a6(SLOT, OFF)
+        win_a6(SLOT)
         aimm_e(4, B)
         aimm_e(5, B)
         rimm R4, #T + 1 + COUNT
@@ -215,7 +219,7 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 
 ; long_start: the previous long shape rising, the current short one falling.
 .macro win_start(T, B, PCM) {
-        win_run(1024, T, WIN_R, 0, B)
+        win_run(1024, T, WIN_R, B)
         win_quarter(448, T + 1024, B + 1024)
         win_rund(128, T + 1472, WIN_F, 127, B + 1472)
         win_zero(448, B + 1600)
@@ -225,7 +229,7 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 ; long_stop: the previous short shape rising, the current long one falling.
 .macro win_stop(T, B, PCM) {
         win_zero(448, B)
-        win_run(128, T + 448, WIN_R, 0, B + 448)
+        win_run(128, T + 448, WIN_R, B + 448)
         win_quarter(448, T + 576, B + 576)
         win_rund(1024, T + 1024, WIN_F, 1023, B + 1024)
         win_out(B, PCM)
@@ -235,14 +239,14 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 ; half (the current shape's) adds onto window w - 1's falling half (window 0 lands on nothing);
 ; the falling half lands on words nothing has written yet.
 .macro win_short1(T, B, w) {
-        win_acc(128, T + 256 * w, WIN_F, 0, B + 448 + 128 * w)
+        win_acc(128, T + 256 * w, WIN_F, B + 448 + 128 * w)
         win_rund(128, T + 256 * w + 128, WIN_F, 127, B + 576 + 128 * w)
 }
 
 ; eight_short: the previous short shape rising for window 0's left, else the current one.
 .macro win_short(T, B, PCM) {
         win_zero(448, B)
-        win_run(128, T, WIN_R, 0, B + 448)
+        win_run(128, T, WIN_R, B + 448)
         win_rund(128, T + 128, WIN_F, 127, B + 576)
         win_short1(T, B, 1)
         win_short1(T, B, 2)
