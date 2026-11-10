@@ -114,21 +114,22 @@
 .const XSAVE  = XSTT + 0x31
 .const IMS_IN  = 0x0100         ; the short IMDCT's 128 words in (Z and its 256 out at WORK)
 
-; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ld loads and steps e8 (x17
-; reference.md x19.ld, fact 793: not x19.ldn), x17.styi stores and steps e7 (658), both in the back edge's slots.
-; Uses s3, s4, e7, e8, p3. p3 is cleared first, so the loop never reads a stale p3.
+; Y[DST ..] = Y[SRC ..], N >= 1 words, eight bundles a word: ldy loads (x17 reference.md ldy),
+; x18.eagu steps e8 (AGU_INC), x17.styi stores and steps e7 (658), nothing in the back edge's
+; slots. No x19.ld: the first x19.ld after ak_walk hangs on silicon and drags Y down by
+; dst - src, where this form completes (specs/questions.md Q21, diag6). Uses s3, s4, e7, e8, p3.
 .macro ak_ycopy(DST, SRC, N) {
         lde e8, #SRC
         lde e7, #DST
-        ldi s4, #N - 1
-        ptst p3, s0, #LT4, #PTST ; p3 = 0 (s4 = N - 1 > 0)
-        x19.ld s3, #4, e8, #2
+        ldi s4, #N
+cp:     ldy s3, e8
+        x18.eagu e8, e8, #AGU_INC
         x17.styi e7, #3, #0, e7
-cp:     alu s4, s4, s14, #OP_SUB
+        alu s4, s4, s14, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, cp
-        x19.ld s3, #4, e8, #2  ; (delay slot) the next word
-        x17.styi e7, #3, #0, e7 ; (delay slot)
+        nop()
+        nop()
 }
 
 ; X[A8 ..] = X[A4 ..], s6 words (s6 > 0), three bundles a word: x03's counted loop (x17
