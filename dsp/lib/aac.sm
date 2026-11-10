@@ -116,8 +116,7 @@
 
 ; Y[DST ..] = Y[SRC ..], N >= 2 words, five bundles a word: x19.ld loads and steps e8 (x17
 ; reference.md x19.ld, fact 793: not x19.ldn), x17.styi stores and steps e7 (658), both in the back edge's slots.
-; Uses s3, s4, e7, e8, p3. p3 = 1 at entry makes the first x19.ld + x17.styi pair run on in
-; place on silicon (dirty-side verdict 2026-11-10; not in the emulator), so it is cleared first.
+; Uses s3, s4, e7, e8, p3. p3 is cleared first, so the loop never reads a stale p3.
 .macro ak_ycopy(DST, SRC, N) {
         lde e8, #SRC
         lde e7, #DST
