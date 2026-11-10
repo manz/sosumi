@@ -7,7 +7,7 @@
 ;   A prefix of 9 ones is an escape: the next s3 bits, raw.
 ;   Otherwise, pre ones then a zero; hi = the next k - 1 bits; with base = pre * m,
 ;   hi == 0 gives base, else base + 2 * hi + bit - 1.
-; Uses s4 (as dst), s5, s7, s8; s1..s3 survive.
+; Uses s4 (as dst), s5, s7, s8 and getbits's s6, s11, s12, s13; s1..s3 survive.
 ;
 ; The prefix bits come straight off the cache (subtract 2^(avail - 1), test the sign). hi
 ; and its bit are read as one k-bit v = 2 * hi + bit: v >= 2 gives base + v - 1, and v < 2
@@ -17,32 +17,86 @@
 .const MAX_PREFIX = 9
 
 .macro rice_get(dst) {
-        alu s8, s0, s14, #OP_SUB ; pre = -1: the delay slot counts each bit
-pfx:    alu s12, s10, s14, #OP_SUB ; sh = avail - 1
+        ; The prefix: each bit is tested against a running threshold, not consumed. With
+        ; D = cache - 2^avail < 0 and x = 2^(avail - 1 - j), the bit after j ones is a one
+        ; when D + x >= 0 (the cache is at least 2^avail - x). c = min(avail, cap) bits are
+        ; tested per pass, cap the ones still allowed before the escape; stop = avail - c is
+        ; avail after the pass. The ones and the zero then leave the cache with one mask.
+        ; The first bit goes alone, the old way: a zero (about half the codewords) is done.
+        alu s8, s0, s14, #OP_SUB ; pre = -1: each tested bit counts
+        alu s12, s10, s14, #OP_SUB ; sh = avail - 1
         ptst p3, s0, #LT12, #PTST ; cache empty
-pfx2:   jmp #IF_NOT, #3, pbit
+        jmp #IF_NOT, #3, rb0
+        x19.alu s13, s14, s12, #SHIFT ; (delay slot) 2^sh
         nop()                   ; (delay slot)
-        nop()
         refill()
         alu s12, s10, s14, #OP_SUB
-pbit:   x19.alu s13, s14, s12, #SHIFT ; 2^sh
-        alu s10, s12, s0, #OP_ADD ; avail -= 1
-        alu s12, s9, s13, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; the bit is 0
+        x19.alu s13, s14, s12, #SHIFT
+rb0:    alu s12, s9, s13, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; the first bit is 0
         jmp #3, #3, gotpre
+        alu s8, s8, s14, #OP_ADD ; (delay slot) pre = 0
+        alu s10, s10, s14, #OP_SUB ; (delay slot) the bit leaves
+        alu s9, s12, s0, #OP_ADD ; a one: it leaves the cache too
+        ldi s4, #MAX_PREFIX - 1 ; cap: eight more
+rpass:  alu s12, s10, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; cache empty
+        jmp #IF_NOT, #3, rgo
+        x19.alu s13, s14, s10, #SHIFT ; (delay slot) 2^avail
+        alu s6, s10, s4, #OP_SUB ; (delay slot) avail - cap
+        refill()
+        x19.alu s13, s14, s10, #SHIFT
+        alu s6, s10, s4, #OP_SUB
+rgo:    x01.selneg s6, s6, #0   ; min(avail - cap, 0)
+        alu s4, s4, s6, #OP_ADD ; c = min(avail, cap)
+        alu s7, s10, s4, #OP_SUB ; stop = avail - c
+        alu s5, s9, s13, #OP_SUB ; D
+        alu s13, s14, s13, #ASR ; x = 2^(avail - 1) (fact 774)
+        alu s12, s5, s13, #OP_ADD
+rbit:   ptst p3, s0, #LT12, #PTST ; D + x < 0: a zero
+        jmp #3, #3, rzero
         alu s8, s8, s14, #OP_ADD ; (delay slot) pre += 1
-        ldi s7, #MAX_PREFIX - 1 ; (delay slot)
-        alu s9, s12, s0, #OP_ADD ; the 1 leaves the cache
-        alu s12, s8, s7, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; fewer than 9 ones so far
-        jmp #3, #3, pfx2
-        alu s12, s10, s14, #OP_SUB ; (delay slot) pfx's two bundles; the escape path
-        ptst p3, s0, #LT12, #PTST ; (delay slot) resets s12 and p3 before use
-        alu s7, s3, s0, #OP_ADD ; escape: n = escape width
-        readn(dst)
+        alu s4, s4, s14, #OP_SUB ; (delay slot) c -= 1
+        ptst p3, s0, #LE4, #PTST ; c == 0: c ones
+        jmp #IF_NOT, #3, rbit
+        alu s13, s14, s13, #ASR ; (delay slot) x /= 2
+        alu s12, s5, s13, #OP_ADD ; (delay slot)
+        ; c ones: they leave the cache (avail = stop), then nine ones are the escape, else
+        ; the cache was spent: refill and test on with cap = 9 - ones = 8 - pre
+        alu s10, s7, s0, #OP_ADD
+        x19.alu s13, s14, s7, #SHIFT
+        alu s13, s13, s14, #OP_SUB
+        x18.and s9, s9, s13
+        ldi s4, #MAX_PREFIX - 1
+        alu s12, s8, s4, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; pre + 1 == 9: the escape
+        jmp #IF_NOT, #3, rpass
+        alu s4, s4, s8, #OP_SUB ; (delay slot) cap
+        nop()                   ; (delay slot)
+        ; the escape: the next s3 (<= 22) bits, raw; above 15 in two reads, 8 then s3 - 8
+        ldi s11, #15
+        alu s12, s11, s3, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; s3 > 15
+        jmp #IF_NOT, #3, resc1
+        alu s11, s3, s0, #OP_ADD ; (delay slot) k = s3
+        nop()                   ; (delay slot)
+        ldi s11, #8
+        getbits_s(s5)           ; the top 8
+        ldi s11, #-8
+        alu s11, s3, s11, #OP_ADD ; s3 - 8, kept by getbits_s
+        getbits_s(dst)
+        x19.alu s5, s5, s11, #SHIFT ; top << (s3 - 8) < 2^23
+        jmp #ALWAYS, #0, done
+        alu dst, dst, s5, #OP_ADD ; (delay slot)
+        nop()                   ; (delay slot)
+resc1:  getbits_s(dst)
         jmp #ALWAYS, #0, done
         nop()
         nop()
+        ; a zero after pre ones: x = 2^avail' with avail' = stop + c, the zero included
+rzero:  alu s10, s7, s4, #OP_ADD
+        alu s13, s13, s14, #OP_SUB
+        x18.and s9, s9, s13
 gotpre: ldi s5, #8
         x19.alu s5, s1, s5, #SHIFT ; m << 8
         ldi s7, #15
