@@ -64,7 +64,7 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
 - The host's +0x58 gate: mode 3 neither releases nor advances the input where modes 0, 1
   and 5 do (**FIRMWARE**).
 - Per packet the host hands the engine compressed bits (mode and length in bits, **INFERRED**); no host stage before the run found; after the run and the read-back **OPEN** (`specs/questions.md` 11).
-- Configure (fact 788, MEASURED from the host's configure): Y:0xFD80 |= 0x1F (bits 0-4),
+- Configure (fact 788, read from the host's configure code, not yet read back on silicon (Q26)): Y:0xFD80 |= 0x1F (bits 0-4),
   Y:0xFD82 bit depth, Y:0xFD83 pb, Y:0xFD84 kb, Y:0xFD85 mb (kb before mb). Channel count,
   frame length and sample rate are not passed, and the program never sees the cookie: channels
   come from the frame's element tags, the frame length from the ring below.
