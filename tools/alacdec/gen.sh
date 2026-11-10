@@ -10,6 +10,7 @@ F="ffmpeg -hide_banner -loglevel error -y"
 
 # extra sources: 24-bit at 48 and 96 kHz, white noise (incompressible: verbatim packets), 5.1
 $F -i $T/sweep.wav -ar 48000 -c:a pcm_s24le $A/sweep24.wav
+$F -i $T/sweep.wav -ar 48000 $A/sweep48.wav
 $F -i $T/clicks.wav -ar 96000 -c:a pcm_s24le $A/clicks24_96k.wav
 $F -f lavfi -i "anoisesrc=color=white:amplitude=1:sample_rate=44100:d=4" -ac 2 $A/white.wav
 $F -f lavfi -i "anoisesrc=color=white:amplitude=1:sample_rate=48000:d=4" -ac 2 -c:a pcm_s24le $A/white24.wav
@@ -22,7 +23,7 @@ refs() { # name depth
   afconvert -f WAVE -d $ai $A/$1.m4a $A/$1.apple.wav
   python3 -I tools/compare/wavdata.py $A/$1.apple.wav $A/$1.apple.raw
 }
-for s in tone pink clicks mono white surround; do
+for s in tone pink clicks mono white surround sweep48; do
   afconvert -f m4af -d alac $A/$s.wav $A/$s.at.m4a; refs $s.at 16
   $F -i $A/$s.wav -c:a alac $A/$s.ff.m4a; refs $s.ff 16
 done
