@@ -76,19 +76,14 @@ pub const Player = struct {
     }
 };
 
-/// One space's words as image directives (x17 ASSEMBLY.md "Placement and layout").
-const emitData = @import("aac_player.zig").emitData;
-
 /// mp3_packet's x17 image source: one init pass carrying, as .xdata and .ydata, every word
 /// `stageInit` sets, then a halt; then the decoder pass, its libraries included from `lib`.
 pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !void {
     var st: h.emu.State = .{};
     defer st.deinit(gpa);
     try stageInit(&st, gpa);
-    try w.writeAll("; mp3_packet's image (dsp/mp3_player.zig imageSource)\n.pass init\n");
-    try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
-    try emitData(w, gpa, ".ydata", &st.y_mem, 0xFFFF);
-    try w.writeAll("        x17.halt\n\n.pass decoder\n");
+    try w.writeAll("; mp3_packet's image (dsp/mp3_player.zig imageSource)\n");
+    try @import("aac_player.zig").initPass(gpa, w, &st, 2);
     for (libs) |f| try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll("        mp3_packet()\n        x17.halt\n");
 }

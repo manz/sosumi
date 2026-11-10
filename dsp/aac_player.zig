@@ -164,6 +164,26 @@ pub fn emitData(w: *std.Io.Writer, gpa: std.mem.Allocator, dir: []const u8, mem:
     }
 }
 
+/// An image's init pass (x17 ASSEMBLY.md "Placement and layout"): `st`'s words as .xdata and
+/// .ydata, with the ring's `slots` entries cleared (owned 0, length 0), then code that clears
+/// BITS_ON (lib/stream.sm), whose DSP-only Y no .ydata reaches: the first packet after the
+/// load enables the stream. Then the decoder pass's header.
+pub fn initPass(gpa: std.mem.Allocator, w: *std.Io.Writer, st: *h.emu.State, slots: u32) !void {
+    for (0..2 * slots) |k| try st.y_mem.put(gpa, map.at("RING_E") + @as(u32, @intCast(k)), 0);
+    try w.writeAll(".pass init\n");
+    try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
+    try emitData(w, gpa, ".ydata", &st.y_mem, 0xFFFF);
+    try w.print(
+        \\        ldi s3, #0
+        \\        lde e6, #0x{X}
+        \\        x17.sty e6, #3, #0      ; BITS_ON = 0
+        \\        x17.halt
+        \\
+        \\.pass decoder
+        \\
+    , .{map.at("BITS_ON")});
+}
+
 /// aac_packet's x17 image source: one init pass carrying, as .xdata and .ydata, every word the
 /// host sets before the first access unit (`Player.init`: the tables for `fi`, AK_NCH) and the
 /// stream state the emulator reads as zero (the overlaps, the PNS generator, prev_shape), then
@@ -177,11 +197,9 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     for (0..2048) |k| try st.x_mem.put(gpa, map.at("OVL0") + @as(u32, @intCast(k)), 0);
     try st.x_mem.put(gpa, map.at("XRNG"), 0);
     for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);
+    try st.y_mem.put(gpa, map.at("AK_OSL"), 0);
     try w.print("; aac_packet's image (dsp/aac_player.zig imageSource: freq_index {d}, {d} channels)\n", .{ fi, nch });
-    try w.writeAll(".pass init\n");
-    try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
-    try emitData(w, gpa, ".ydata", &st.y_mem, 0xFFFF);
-    try w.writeAll("        x17.halt\n\n.pass decoder\n");
+    try initPass(gpa, w, &st, 2);
     for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "ring", "aac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll(
