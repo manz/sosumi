@@ -6,7 +6,7 @@
 //!     dspplay in.m4a | ffplay -nodisp -autoexit -f s16le -ar 44100 -ch_layout stereo -
 //!     dspplay in.m4a --check
 //!     dspplay in.m4a --profile[=rows]
-//!     dspplay in.aac --profile-worst[=rows]   (the most expensive AAC packet alone)
+//!     dspplay in.aac|in.m4a --profile-worst[=rows]   (the most expensive packet alone)
 //!
 //! One emulator, packets in order, as the device runs them. The summary gives the device's
 //! speed from the bundles run, at 37.4 ns a bundle (x17 handbook §1): below 1x real time the
@@ -263,14 +263,26 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, mo
     defer gpa.free(silence);
     @memset(silence, 0);
 
+    // --profile-worst: the counts before the packet, and the worst packet's own
+    const before: []u64 = try gpa.alloc(u64, if (profile_worst) prof.counts.len else 0);
+    defer gpa.free(before);
+    const worst: []u64 = try gpa.alloc(u64, before.len);
+    defer gpa.free(worst);
+    var worst_at: usize = 0;
+
     var t: Tally = .{};
     while (try packets.next()) |pkt| {
         const k = t.packets;
+        if (profile_worst) @memcpy(before, prof.counts);
         const pcm = player.feed(pkt) catch |e| blk: {
             if (t.failed < 5) std.debug.print("packet {d}: {s} (status {d})\n", .{ k, @errorName(e), player.status });
             t.failed += 1;
             break :blk silence;
         };
+        if (profile_worst and player.bundles > t.worst) {
+            for (worst, prof.counts, before) |*d, c, b| d.* = c - b;
+            worst_at = k;
+        }
         t.add(player.bundles, pcm.len / nch);
         if (check) {
             const n = try twin.decode(pkt, want);
@@ -289,7 +301,11 @@ fn playAlac(gpa: std.mem.Allocator, w: *std.Io.Writer, packets: *mp4.Packets, mo
         writeStereo(w, pcm, nch) catch break;
     }
     t.report(cfg.sample_rate, check, "ref/dsp/alac");
-    if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
+    if (profile_worst) {
+        std.debug.print("worst packet: {d}\n", .{worst_at});
+        @memcpy(prof.counts, worst);
+        try prof.report(gpa, 1, profile_rows);
+    } else if (mode == .profile) try prof.report(gpa, t.packets, profile_rows);
 }
 
 /// An AAC track's access units in order, from an .m4a's packets or an ADTS stream's frames.
