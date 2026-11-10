@@ -17,13 +17,14 @@
 ;   e11 Y:base+0  n
 ;   e12 Y:base+1  order (0..31)
 ;   e13 Y:base+2  den_shift (0..15)
-;   e14 Y:base+3  chan_bits (8..23, with den_shift + chan_bits <= 32, chan_bits <= 18 + den_shift)
+;   e14 Y:base+3  24 - chan_bits (chan_bits 8..23, with den_shift + chan_bits <= 32, chan_bits
+;                 <= 18 + den_shift), sxcb's shift
 ;   e15 Y:base+4  scratch: samples left
 ;
 ; Keeps the bit reader (e5, s9, s10) and s14, s15. Uses every other s register; unpredict
 ; parks s9 and s10 at X:[A10 + 40], +41 (past the coefficients and their zeros up to +35; Y
 ; is 16 bits, the cache is not), and keeps two constants at +42, +43 through A12, A13 to free them for the tap and the adaptation, through A5. It also writes R6, R7, e6
-; and p3.
+; and p3, and R4 (the out end).
 ; Left shifts by a runtime count that must wrap go through sxr first, so the 0x19 shift
 ; (which saturates) never overflows.
 
@@ -59,9 +60,13 @@
         sxr(x, s13)
 }
 
-; sxe from chan_bits.
+; x = x sign-extended from chan_bits: up by 24 - chan_bits (the pred_slots word), wrapping at
+; 24 bits, then back down, arithmetic (alu code 6, fact 774). Uses s12, s13.
 .macro sxcb(x) {
-        sxe(x, e14)
+        ldy s13, e14            ; 24 - chan_bits
+        alu s12, s0, s13, #OP_SUB
+        alu x, s12, x, #ASR
+        alu x, s13, x, #ASR
 }
 
 ; dst = floor(v / 2^n), n (0..15) in a register: rshr(v - h, n), h = rshr(2^n - 1, 1).
@@ -206,6 +211,13 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         x17.mve e6, s13         ; e6 = -M - 1
         x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -M
         ragu R6, A10, R7, #29   ; A10 - R7
+        ; R4 = A3 + left: the sample loop runs while A3 != R4
+        ldy s13, e15
+        ldi s12, #-2
+        alu s13, s12, s13, #OP_SUB
+        x17.mve e6, s13         ; e6 = -left - 1 (x17.mve adds 1)
+        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -left
+        ragu R4, A3, R7, #29    ; A3 - R7
         ; the adaptation's K for each sign of res and -ds, once: X:[A10 + 42], +43, +44
         x03.agu A12, A10, #42, #0, A0
         x03.agu A13, A10, #43, #0, A0
@@ -221,10 +233,8 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         alu s9, s0, s2, #OP_SUB ; -h: K for res > 0
         stx A12, s9
         stx A13, s10
-sample: ldy s7, e15
-        alu s12, s7, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST
-        jmp #3, #3, finish
+sample: pcond p3, R4, A3, #30   ; more: A3 != R4
+        jmp #IF_NOT, #3, finish
         x19.xrd s7, #8          ; (delay slot) top; finish ignores s7 and A9
         x19.aagu A9, A7, #5, #0 ; (delay slot)
         ; sum = sum_k c_k (out[j - 1 - k] - top) = sum_k c_k out[j - 1 - k] - top sum_k c_k, on
@@ -256,20 +266,16 @@ ptap:   x03.tap s8, #11, s4, s2, s3
         ; acc = 2 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed). ALAC's
         ; pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 1), the shifter's half-up
         ; right shift; with H = hi + [L < 0], rshr(acc, ds + 1) = H 2^(23-ds) + rshr(L, ds + 1),
-        ; and only its low chan_bits <= 23 bits count: (H mod 2^ds) << (23 - ds) stays in 23.
-        alu s12, s3, s0, #OP_ADD
-        ptst p3, s0, #LT12, #PTST ; L < 0
-        jmp #IF_NOT, #3, hpos
-        ldy s10, e13            ; (delay slot) ds
-        ldi s11, #-1            ; (delay slot)
-        alu s2, s2, s14, #OP_ADD
-hpos:   alu s11, s11, s10, #OP_SUB ; -(ds + 1)
-        x19.alu s13, s14, s10, #SHIFT ; 2^ds
-        alu s13, s13, s14, #OP_SUB
+        ; and only its low chan_bits <= 23 bits count, so H 2^(23-ds) may wrap at 24 bits.
+        ldy s10, e13            ; ds
         ldi s12, #23
-        alu s12, s12, s10, #OP_SUB ; 23 - ds
-        x18.and s2, s2, s13     ; H mod 2^ds
-        x19.alu s2, s2, s12, #SHIFT
+        alu s13, s12, s3, #ASR  ; L >> 23: -1 when L < 0 (alu code 6, fact 774)
+        alu s2, s2, s13, #OP_SUB ; H = hi + [L < 0]
+        ldi s11, #-23
+        alu s12, s10, s11, #OP_ADD ; ds - 23
+        alu s2, s12, s2, #ASR   ; H << (23 - ds), wrapping at 24 bits: only the low chan_bits count
+        ldi s11, #-1
+        alu s11, s11, s10, #OP_SUB ; -(ds + 1)
         x19.alu s3, s3, s11, #SHIFT ; rshr(L, ds + 1)
         alu s4, s2, s3, #OP_ADD ; pred
         x19.xrd s1, #2          ; res
@@ -279,9 +285,6 @@ hpos:   alu s11, s11, s10, #OP_SUB ; -(ds + 1)
         sxcb(s3)
         stx A3, s3              ; out[j]
         x02.ainc #3, #3
-        ldy s5, e15
-        alu s5, s5, s14, #OP_SUB
-        x17.sty e15, #5, #0     ; left -= 1
         alu s12, s1, s14, #OP_SUB
         ptst p3, s0, #LT12, #PTST ; res <= 0
         jmp #IF_NOT, #3, adp    ; res > 0
@@ -317,8 +320,7 @@ pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
         pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
-        nop()                   ; (delay slot)
-        ptst p3, s0, #LE8, #PTST ; every coefficient visited
+        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
         jmp #IF_NOT, #3, pstep
         x19.xrd s13, #11        ; (delay slot) next c
         alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
@@ -340,8 +342,7 @@ nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
         pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
-        nop()                   ; (delay slot)
-        ptst p3, s0, #LE8, #PTST ; every coefficient visited
+        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
         jmp #IF_NOT, #3, nstep
         x19.xrd s13, #11        ; (delay slot) next c
         alu s3, s7, s3, #OP_SUB ; (delay slot) next dd

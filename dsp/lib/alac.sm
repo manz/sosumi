@@ -330,8 +330,10 @@ alac_rok:
         ysub(1)
         ldy s3, e6
         x17.sty e13, #3, #0     ; den_shift
-        yld(s3, PK_CB)
-        x17.sty e14, #3, #0
+        yld(s4, PK_CB)
+        ldi s3, #24
+        alu s3, s3, s4, #OP_SUB
+        x17.sty e14, #3, #0     ; 24 - chan_bits
         ysub(0)
         ldy s3, e6              ; mode
         alu s4, s3, s14, #OP_SUB
