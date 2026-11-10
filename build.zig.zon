@@ -6,8 +6,8 @@
     .dependencies = .{
         // the sm1 assembler and emulator, x17 master: the stream read (facts 783, 784), no x19.ldn (793), asrc writes A1 (795), x16 operand checks (E0029), facts 800, 801, st.wr to x19.ld gap (804), rop pass-through sign extension (810)
         .x17 = .{
-            .url = "git+https://github.com/manz/x17#fa14327aa3f4f1d96867923a0d5152bdd28f5917",
-            .hash = "x17-0.0.0-vrV6NE1CFAAXZwQwdisGA7SaJwQYnMP1-9ysZ8d2jDIO",
+            .url = "git+https://github.com/manz/x17#d96055b708d7438d052d062f45b41a9e49edc424",
+            .hash = "x17-0.0.0-vrV6NFhUFAC1XoKCcOULOCYeb76KGs9W5QQ9ctsqHhEV",
         },
     },
     .paths = .{
