@@ -121,3 +121,18 @@ pub const Player = struct {
         return self.host.state.y_mem.get(pk_n) orelse 0;
     }
 };
+
+/// alac_packet's x17 image source: an init pass with the ring's header (one slot of 0x2000
+/// words, specs/alac.md fact 788) and nothing else (alac.sm keeps no state across packets and
+/// reads no table), then the decoder pass, its libraries included from `lib` (dsp/lib). The
+/// cookie's depth, pb, kb and mb are the host's per-track parameter words (FD82..FD85).
+pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !void {
+    var st: emu.State = .{};
+    defer st.deinit(gpa);
+    try h.stageRing(&st, gpa, 1, 0x2000);
+    try w.writeAll("; alac_packet's image (dsp/player.zig imageSource)\n");
+    try aac.initPass(gpa, w, &st, 1);
+    for ([_][]const u8{ "bits", "rice", "predictor", "unmix", "mem", "ring", "alac" }) |f|
+        try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
+    try w.writeAll("        bits_init()\n        alac_packet()\n        x17.halt\n");
+}

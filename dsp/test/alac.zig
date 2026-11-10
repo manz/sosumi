@@ -4,6 +4,8 @@
 const std = @import("std");
 const ref = @import("ref");
 const player = @import("../player.zig");
+const h = @import("../harness.zig");
+const image = @import("image");
 
 const testing = std.testing;
 
@@ -57,4 +59,59 @@ test "alac_packet through the host decodes the dumped packets as the twin's Deco
     inline for (.{ "mono.at", "tone.at", "white24.at", "clicks.c0.ff", "clicks.o30.ff", "mono.at.int", "tone.at.int" }) |name| {
         try check(gpa, prog, @embedFile(name ++ ".pkts"));
     }
+}
+
+test "the ALAC x17 image's init pass, then its decoder at q256, decode as the twin" {
+    const gpa = testing.allocator;
+    var src: std.Io.Writer.Allocating = .init(gpa);
+    defer src.deinit();
+    try player.imageSource(gpa, &src.writer, "lib");
+    var prog = try h.assembleImage(gpa, src.written());
+    defer prog.deinit();
+    const bytes = try image.write(gpa, &prog);
+    defer gpa.free(bytes);
+    var img = try image.parse(gpa, bytes);
+    defer img.deinit(gpa);
+    const p = try gpa.alloc(u32, 0x4000);
+    defer gpa.free(p);
+    var state = h.emu.State{};
+    defer state.deinit(gpa);
+    for ([_]u8{ 0, image.decoder_pass }) |pass| {
+        @memset(p, 0);
+        for (img.sections) |sec| if (sec.pass == pass) switch (sec.kind) {
+            .p => image.placeRows(p, sec),
+            .x => for (sec.words, 0..) |w, k| try state.x_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
+            .y, .param => for (sec.words, 0..) |w, k| try state.y_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
+        };
+        if (pass == 0) {
+            _ = try h.emu.runFrom(gpa, &state, p, 0, 1 << 10);
+            try testing.expect(state.halted);
+        }
+    }
+    const dump = @embedFile("tone.at.pkts");
+    const nch = le32(dump, 24);
+    // the per-track configure words the host writes (specs/alac.md)
+    for ([_][2]u32{ .{ 0xFD80, 0x1F }, .{ 0xFD82, le32(dump, 8) }, .{ 0xFD83, le32(dump, 12) }, .{ 0xFD84, le32(dump, 20) }, .{ 0xFD85, le32(dump, 16) } }) |q|
+        try state.y_mem.put(gpa, q[0], q[1]);
+    var at: usize = 32;
+    for (0..le32(dump, 28)) |_| {
+        const len = le32(dump, at);
+        const pkt = dump[at + 4 .. at + 4 + len];
+        at += 4 + len;
+        const n = le32(dump, at);
+        at += 4;
+        const want = dump[at .. at + 4 * n * nch];
+        at += want.len;
+        try h.stagePacket(gpa, &state, pkt);
+        state.halted = false;
+        state.cur_lane = 0;
+        _ = try h.emu.runFrom(gpa, &state, p, 256, 1 << 26);
+        try testing.expect(state.halted and !state.stream_starved);
+        try testing.expectEqual(@as(u32, 2 * n), state.getY(6).?);
+        for (0..n * nch) |i| {
+            const off: u32 = @intCast(if (nch == 1) 2 * i else i);
+            try testing.expectEqual(@as(i16, @truncate(@as(i32, @bitCast(le32(want, 4 * i))))), h.sx16(state.getY(0x80 + off)));
+        }
+    }
+    try testing.expectEqual(dump.len, at);
 }
