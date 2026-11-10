@@ -4,10 +4,10 @@
     .version = "0.0.0",
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        // the sm1 assembler and emulator, x17 master: the stream read (facts 783, 784), no x19.ldn (793), asrc writes A1 (795), x16 operand checks (E0029)
+        // the sm1 assembler and emulator, x17 master: the stream read (facts 783, 784), no x19.ldn (793), asrc writes A1 (795), x16 operand checks (E0029), facts 800, 801
         .x17 = .{
-            .url = "git+https://github.com/manz/x17#b0bfbe5b8e9472561e676be1182568c4e852f95a",
-            .hash = "x17-0.0.0-vrV6NMWjEwC54P5L05ZxYbt3ogGFmysj15FtuL3V7L0d",
+            .url = "git+https://github.com/manz/x17#b21c533c73502d2ec323eb6046bb2993386a5344",
+            .hash = "x17-0.0.0-vrV6NHcSFADRh0xUINzY7zJyR6lb2hf81TzqV7tWgkf6",
         },
     },
     .paths = .{
