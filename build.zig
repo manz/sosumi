@@ -17,7 +17,8 @@ pub fn build(b: *std.Build) void {
 
     // the stage libraries in dsp/lib, run in x17's emulator against ref/dsp
     const x17 = b.dependency("x17", .{ .target = target, .optimize = optimize });
-    const dsp_t = b.addTest(.{ .root_module = b.createModule(.{
+    const filter = b.option([]const u8, "test-filter", "Run only the dsp tests whose name contains this");
+    const dsp_t = b.addTest(.{ .filters = if (filter) |f| b.dupeStrings(&.{f}) else &.{}, .root_module = b.createModule(.{
         .root_source_file = b.path("dsp/tests.zig"),
         .target = target,
         .optimize = optimize,
