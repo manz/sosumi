@@ -24,6 +24,21 @@
         nop()                   ; (delay slot)
 }
 
+; D = min(D, X), D = max(D, X), signed 24-bit: x18.min / x18.max select on a's sign only (min
+; keeps a < 0, max keeps a > 0, else b; fact 951), so through the difference: D - X, its
+; negative / positive part against s0, + X. |D - X| < 2^23; D and X distinct, X unchanged.
+.macro smin(D, X) {
+        alu D, D, X, #OP_SUB
+        x18.min D, D, s0
+        alu D, D, X, #OP_ADD
+}
+
+.macro smax(D, X) {
+        alu D, D, X, #OP_SUB
+        x18.max D, D, s0
+        alu D, D, X, #OP_ADD
+}
+
 ; e6 = addr: one lde (reference.md `lde`, own-entry: k = 2, 3, 5..15 load e<k> <- #imm16).
 .macro yat(addr) {
         lde e6, #addr

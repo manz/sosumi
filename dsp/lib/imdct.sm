@@ -50,18 +50,19 @@
         ldi s10, #0
         ldi s7, #0
 mm:     pk(s1, A8, s0, s0, s0, 3, s0, s7, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s4, A8, s0, s0, s0, 3, s0, s1, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s5, A8, s0, s0, s0, 3, s0, s4, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s7, A8, s0, s0, s0, 3, s0, s5, 7, 0)
+        smax(s10, s3)
         pcond p3, R4, A8, #30   ; more: A8 != BASE + COUNT
         jmp #3, #3, mm
-        x18.max s10, s10, s3    ; (delay slot)
+        nop()
         nop()
         pk(s0, A0, s0, s0, s0, 3, s0, s7, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
 }
 
 ; Normalise IN's scale: s9 = c, the right shift im_pre's loads take (1: one rounded halving when
@@ -115,7 +116,7 @@ scale:  yld(s3, ESLOT)
 ; handbook §10, fact 708). Uses T.
 .macro im_trk(V, T) {
         x01.norm T, V
-        x18.min s15, s15, T
+        smin(s15, T)
 }
 
 ; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - s15), the rounded
@@ -167,12 +168,14 @@ pre:    im_pre5(N2, IN)
         pks(6, A10, 0, s0, s0, 0)
         pks(10, A10, 0, s0, s0, 0)
         x01.norm s8, s6
-        x18.min s15, s15, s8
+        smin(s15, s8)
         x01.norm s8, s10
+        alu s15, s15, s8, #OP_SUB ; smin(s15, s8), its tail in the slots
+        x18.eagu e7, e7, #AGU_INC
         pcond p3, R4, A4, #30   ; more: A4 != IN + N2 + 2
         jmp #3, #3, pre
-        x18.min s15, s15, s8    ; (delay slot)
-        x18.eagu e7, e7, #AGU_INC ; (delay slot)
+        x18.min s15, s15, s0    ; (delay slot)
+        alu s15, s15, s8, #OP_ADD ; (delay slot)
 }
 
 ; RD = s<src> (the R write path of mem.sm's amov). Uses s13, e6.
@@ -217,10 +220,12 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         im_trk(s9, s13)
         im_trk(s1, s13)
         x01.norm s13, s3
+        alu s15, s15, s13, #OP_SUB ; smin(s15, s13), its tail in a slot
+        x18.min s15, s15, s0
         alu s4, s4, s14, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, r2
-        x18.min s15, s15, s13   ; (delay slot)
+        alu s15, s15, s13, #OP_ADD ; (delay slot)
         x03.tap0 s1, #4, s0, s0, s0 ; (delay slot) the next ar; past the end, a dummy
 }
 
@@ -357,10 +362,11 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         im_trk(s1, s4)
         im_trk(s7, s4)
         x01.norm s4, s3
+        alu s15, s15, s4, #OP_SUB ; smin(s15, s4), its tail in the slots
         pcond p3, R4, A10, #30  ; more in the group: A10 != R4
         jmp #3, #3, bf
-        x18.min s15, s15, s4    ; (delay slot)
-        nop()
+        x18.min s15, s15, s0    ; (delay slot)
+        alu s15, s15, s4, #OP_ADD ; (delay slot)
         x02.aa A4, A4, R5, #2, A5, A0 ; the next group: every block + 6 l
         x02.aa A6, A6, R5, #2, A7, A0
         x02.aa A8, A8, R5, #2, A9, A0

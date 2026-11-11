@@ -129,7 +129,7 @@ done:
         x19.xrd s13, #11        ; c
         alu s5, s14, s0, #OP_ADD ; w = 1
         alu s3, s7, s3, #OP_SUB ; dd = top - out
-        alu s1, s0, s14, #OP_SUB ; -1
+        ldi s1, #-23            ; sgn's shift counts (x18.min / max select on sign, 951)
         ldi s6, #-8
         ldi s11, #8
 }
@@ -307,8 +307,8 @@ ptap:   x03.tap s8, #11, s4, s2, s3
         ; the next out is formed in the last delay slot, so the loop re-enters past adp/adn.
 adp:    adapt_init(12)
 pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        x18.min s12, s3, s14    ; min(dd, 1)
-        x18.max s12, s12, s1    ; sgn(dd)
+        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
+        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
         alu s13, s13, s12, #OP_SUB ; c -/+= sgn(dd)
         alu s2, s2, s9, #OP_ADD ; |dd| + K
         alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
@@ -329,8 +329,8 @@ pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         nop()
 adn:    adapt_init(5)
 nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        x18.min s12, s3, s14    ; min(dd, 1)
-        x18.max s12, s12, s1    ; sgn(dd)
+        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
+        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
         alu s13, s13, s12, #OP_ADD ; c -/+= sgn(dd)
         alu s2, s2, s9, #OP_ADD ; |dd| + K
         alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)

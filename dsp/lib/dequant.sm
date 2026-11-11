@@ -159,7 +159,8 @@ done:
 }
 
 ; Pass 2's run constants: s9 = 129, s11 = 23, s12 = 2^23 - 1, s13 = G = X[Y:[DQ_GB]] (rem 0),
-; A12 = DQ_D, R5 = DQ_OUT - DQ_SPEC - 1. Uses s3, s4 and amov's registers.
+; s7 = base - 23 (s10 = base), A12 = DQ_D, R5 = DQ_OUT - DQ_SPEC - 1. Uses s3, s4 and amov's
+; registers.
 .macro dq_fset() {
         ldi s9, #129
         ldi s11, #-22
@@ -172,6 +173,7 @@ done:
         x19.xrd s13, #9         ; G
         aimm_e(6, DQ_D)
         rimm R5, #DQ_OUT - DQ_SPEC - 1
+        alu s7, s10, s11, #OP_SUB ; base - 23, after amov (it clobbers s7)
 }
 
 ; The group and band walk both passes share: e7 books, e8 scale factors, e9/e11 the band's
@@ -238,18 +240,19 @@ win:    yld(s4, DQ_WL)
         yld(s10, DQ_MQ)
         ldi s7, #0
 mx:     pk(s1, A2, s0, s0, s0, 3, s0, s7, 7, 0) ; q; s3 = |the previous|
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s4, A2, s0, s0, s0, 3, s0, s1, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s5, A2, s0, s0, s0, 3, s0, s4, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         pk(s7, A2, s0, s0, s0, 3, s0, s5, 7, 0)
+        smax(s10, s3)
         pcond p3, R4, A2, #30   ; more: A2 != the end (bands are multiples of 4)
         jmp #3, #3, mx
-        x18.max s10, s10, s3    ; (delay slot)
+        nop()
         nop()
         pk(s0, A0, s0, s0, s0, 3, s0, s7, 7, 0)
-        x18.max s10, s10, s3
+        smax(s10, s3)
         alu s3, s10, s0, #OP_ADD
         yst(DQ_MQ)
         yld(s3, DQ_CW)
@@ -388,8 +391,9 @@ nz:     pk(s0, A0, s0, s0, s0, 1, s0, s8, 7, 0) ; |q|
         pk(s0, A0, s0, s0, s0, 4, s11, s8, 0, 6) ; (delay slot) asr(q, 23)
         pk(s2, A9, s0, s0, s0, 4, s12, s4, 5, 0) ; m; the sign factor
         pk(s3, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; em
-        pk(s0, A0, s6, s2, s13, 5, s10, s3, 5, 0) ; P; n = base - em
-        x18.min s5, s5, s11
+        pk(s0, A0, s6, s2, s13, 5, s7, s3, 5, 0) ; P; n - 23 = base - 23 - em
+        x18.min s5, s5, s0      ; min(n - 23, 0): x18.min keeps a < 0, else b (fact 951)
+        alu s5, s5, s11, #OP_ADD ; min(n, 23)
         pk(s0, A0, s0, s0, s0, 6, s5, s6, 0, 7) ; v = rshr(P, n)
         pk(s0, A0, s6, s6, s4, 0, s0, s0, 0, 0) ; the sign
         jmp #ALWAYS, #0, cnext
