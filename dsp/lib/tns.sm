@@ -69,8 +69,9 @@
 }
 
 ; The lattice over s10 samples from A4, stepping R2; s11 = order >= 1, R5 = TN_KC + order + 1, B'
-; zero. Every value (input, f, b) joins a running max of |v| in s3 (pk's third slot |b|, x02.vc
-; code 0 op 7, fact 730; x18.max, 708), and the run fails at its end when that max >= 2^22.
+; zero. Every value (input, f, b) joins a running OR of |v| in s3 (pk's third slot |b|, x02.vc
+; code 0 op 7, fact 730; x18.or, 952), and the run fails at its end when that OR >= 2^22, as
+; when the max is (|v| >= 0: the OR's top bit is the max's).
 ; That is the twin's per-value test: the first value out of range comes from values inside it,
 ; so it is exact (|f - k b| < 2^23, so |v| does not wrap), and later values cannot lower the
 ; max. Jumps to FAIL then. A stage loads k_(j+1) and b_(j+1) for the next while it finishes its
@@ -91,23 +92,21 @@ ls:     alu s4, s10, s0, #OP_ADD
         pk(s0, A0, s8, s5, s6, 0, s0, s0, 0, 0) ; k b
         pk(s5, A6, s0, s0, s0, 1, s1, s8, 5, 0) ; the next k; f -= k b
         pk(s6, A8, s0, s0, s0, 9, s0, s1, 7, 0) ; the next b; |f|
-        smax(s3, s4)
-        smax(s3, s9)
         pcond p3, R5, A6, #30   ; more stages: A6 != TN_KC + order + 1
+        x18.or s3, s3, s4
         jmp #IF_NOT, #3, sdone
-        nop()
+        x18.or s3, s3, s9       ; (delay slot)
         nop()
 st:     pk(s0, A0, s8, s5, s6, 0, s0, s0, 0, 0) ; k_m b_(m-1)
         pk(s0, A0, s0, s0, s0, 1, s1, s8, 5, 0) ; f_(m-1)
         pk(s0, A0, s9, s5, s1, 4, s0, s1, 7, 0) ; k_m f; |f|
         pk(s5, A6, s0, s0, s0, 9, s9, s6, 0, 0) ; the next k; b_m
         pks(9, A10, 12, s0, s9, 7) ; b_m stored; |b_m|
-        smax(s3, s12)
-        smax(s3, s4)
+        x18.or s3, s3, s12
         pcond p3, R5, A6, #30
         jmp #3, #3, st
         pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) the next b
-        nop()                   ; (delay slot)
+        x18.or s3, s3, s4       ; (delay slot)
 sdone:  pks(1, A10, 0, s0, s0, 0) ; b_0 = y
         jmp #ALWAYS, #0, ls
         pksf(1, A4, 0, s0, s0, 0, 2, R2) ; (delay slot) the output, A4 by R2

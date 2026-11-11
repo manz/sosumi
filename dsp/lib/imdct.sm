@@ -42,27 +42,27 @@
 .const IM_STG  = IM_Y + 5       ; stages left
 .const IM_J    = IM_Y + 6       ; groups left in the stage
 
-; s10 = max |X[BASE ..]| over COUNT words, a multiple of 4: pk loads with the third slot's
-; |b| (x02.vc code 0 op 7, fact 730) and x18.max (708). Uses s1, s3, s4, s5, s7, A8, R4, p3.
+; s10 = the OR of |X[BASE ..]| over COUNT words, a multiple of 4: pk loads with the third slot's
+; |b| (x02.vc code 0 op 7, fact 730) and x18.or (952). It has max |x|'s top bit, all im_norm's
+; tests read (zero, >= 2^22, doublings to 2^21). Uses s1, s3, s4, s5, s7, A8, R4, p3.
 .macro im_scan(BASE, COUNT) {
         aimm_e(4, BASE)
         rimm R4, #BASE + COUNT
         ldi s10, #0
         ldi s7, #0
 mm:     pk(s1, A8, s0, s0, s0, 3, s0, s7, 7, 0)
-        smax(s10, s3)
+        x18.or s10, s10, s3
         pk(s4, A8, s0, s0, s0, 3, s0, s1, 7, 0)
-        smax(s10, s3)
+        x18.or s10, s10, s3
         pk(s5, A8, s0, s0, s0, 3, s0, s4, 7, 0)
-        smax(s10, s3)
+        x18.or s10, s10, s3
         pk(s7, A8, s0, s0, s0, 3, s0, s5, 7, 0)
-        smax(s10, s3)
         pcond p3, R4, A8, #30   ; more: A8 != BASE + COUNT
         jmp #3, #3, mm
-        nop()
+        x18.or s10, s10, s3     ; (delay slot)
         nop()
         pk(s0, A0, s0, s0, s0, 3, s0, s7, 7, 0)
-        smax(s10, s3)
+        x18.or s10, s10, s3
 }
 
 ; Normalise IN's scale: s9 = c, the right shift im_pre's loads take (1: one rounded halving when
