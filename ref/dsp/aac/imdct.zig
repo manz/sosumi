@@ -132,10 +132,13 @@ fn atLeast(a: Word, k: u5) bool {
 }
 
 /// The right shift that brings every component into [-2^lim, 2^lim]: k - lim when positive,
-/// every component in [-2^k, 2^k) with k = 23 - (the fewest redundant sign bits).
+/// every |component| below 2^k with k = 23 - norm(the OR of the |components|). The OR stands
+/// for a min over norms (one bitwise op per word on sm1); |a| makes it one step conservative
+/// for a = -2^j, where norm(a) itself would allow 2^j.
 fn stageShift(z: []const Cx, lim: u5) u5 {
-    var n: u5 = 24;
-    for (z) |c| n = @min(n, @min(ops.norm(c.re), ops.norm(c.im)));
+    var m: Word = 0;
+    for (z) |c| m = ops.bitOr(m, ops.bitOr(ops.abs(c.re), ops.abs(c.im)));
+    const n = ops.norm(m);
     const k: i32 = 23 - @as(i32, n);
     return @intCast(@max(0, k - lim));
 }
@@ -397,8 +400,10 @@ test "normalising puts the largest word in [2^21, 2^22) and keeps the value" {
 test "a stage's shift brings every component within 2^lim" {
     var z = [_]Cx{ .{ .re = 0, .im = (1 << 20) - 1 }, .{ .re = 5, .im = 0 } };
     try testing.expectEqual(@as(u5, 0), stageShift(&z, 20));
-    z[1].re = -(1 << 20); // fits [-2^20, 2^20)
+    z[1].re = -(1 << 20) + 1;
     try testing.expectEqual(@as(u5, 0), stageShift(&z, 20));
+    z[1].re = -(1 << 20); // |a| = 2^20: one step conservative
+    try testing.expectEqual(@as(u5, 1), stageShift(&z, 20));
     z[1].re = 1 << 20;
     try testing.expectEqual(@as(u5, 1), stageShift(&z, 20));
     z[0].im = (1 << 23) - 1;

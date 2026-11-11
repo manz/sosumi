@@ -6,7 +6,7 @@
 //! Helpers below the primitives are compositions, written only in primitives.
 //!
 //! What is not here because it is not measured: a persistent wide accumulator, a carry flag, a
-//! wrapping arithmetic right shift other than the rounded one, bitwise AND/OR on data. A model
+//! wrapping arithmetic right shift other than the rounded one, bitwise AND on data. A model
 //! that wants one asks for a probe first.
 const std = @import("std");
 
@@ -63,6 +63,18 @@ pub fn norm(a: Word) u5 {
     if (a == 0) return 24;
     const m: u24 = @bitCast(if (a < 0) ~a else a);
     return @intCast(23 - (24 - @as(u32, @clz(m))));
+}
+
+/// |a| over 24 bits, wrapping: abs(-2^23) = -2^23. `x18.una sD, sA, #7` (x17 handbook
+/// "24-bit logic, min/max and abs", fact 708).
+pub fn abs(a: Word) Word {
+    return if (a < 0) 0 -% a else a;
+}
+
+/// a | b over 24 bits. `x18.or` (class 011 code 0x1D op 2), plain bitwise on silicon, negatives
+/// included (fact 952: 256 operand pairs).
+pub fn bitOr(a: Word, b: Word) Word {
+    return a | b;
 }
 
 /// The sign test: ptst condition "negative" (own-ptst, own-ptst-pos), the one predicate
@@ -169,6 +181,12 @@ test "norm counts the redundant sign bits as x01 does" {
 }
 
 const testing = std.testing;
+
+test "abs wraps at -2^23; bitOr is bitwise" {
+    try std.testing.expectEqual(@as(Word, 5), abs(-5));
+    try std.testing.expectEqual(@as(Word, -0x800000), abs(-0x800000));
+    try std.testing.expectEqual(@as(Word, -0x7FFF), bitOr(-0x8000, 1));
+}
 
 test "isZero from the sign test alone" {
     for ([_]Word{ 0, 1, -1, std.math.maxInt(Word), std.math.minInt(Word) }) |x| try testing.expectEqual(x == 0, isZero(x));

@@ -7,8 +7,8 @@
 ; comparisons), then a pre-twiddle into an n2/2-point complex FFT in bit-reversed order, the
 ; FFT's stages (radix 2 first when log2 n4 is odd, then radix 4), a post-twiddle and the fold.
 ; cmul is two rounded products summed. Before each stage the fewest redundant sign bits among
-; its inputs (x01.norm, tracked with x18.min as the stage before stores them) decide a rounded
-; right shift down to 2^20 (radix 4) or 2^21 (radix 2), the shifts joining the exponent. The
+; its inputs (the OR of their |x|, tracked as the stage before stores them, then x01.norm) decide
+; a rounded right shift down to 2^20 (radix 4) or 2^21 (radix 2), the shifts joining the exponent. The
 ; output shift
 ; scaled + E' - log2 n2 + 7 is one 0x19 op-23 shift (reference.md `x19`), which saturates as the model's comparisons
 ; do.
@@ -30,7 +30,7 @@
 ; imdct takes an odd STAGES (a radix-2 stage first, the long block), imdct_even an even one.
 ; Needs lib/bits.sm (s0 = 0, s14 = 1) and lib/mem.sm. x02.ainc's template also writes
 ; s2 (its w2 multiply slot) and x02.mpy steps A1, so nothing lives in s2 or A1 here. Uses every s register but s0
-; and s14 (s15 is left 16 for bits.sm), e6..e8, R1..R7, A2..A6, A8..A10, A12, A14 and Y
+; and s14 (s15 is left 16 for bits.sm), e6..e8, R1..R7, R13, A2..A6, A8..A10, A12, A14 and Y
 ; IM_Y .. IM_Y + 7.
 
 .const IM_Y    = 0x2348
@@ -112,23 +112,24 @@ scale:  yld(s3, ESLOT)
         yst(IM_EX)              ; E' = E + c
 }
 
-; s15 = min(s15, norm(V)), the fewest redundant sign bits so far (x01.norm, x18.min: x17
-; handbook §10, fact 708). Uses T.
+; s15 |= |V|, the OR of the magnitudes so far (x18.una #7, 24-bit abs, fact 708; x18.or, fact
+; 952): norm(s15) is the twin's stageShift norm. Uses T and R13 (una's side write).
 .macro im_trk(V, T) {
-        x01.norm T, V
-        smin(s15, T)
+        x18.una T, V, #7, R13, s0
+        x18.or s15, s15, T
 }
 
-; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - s15), the rounded
-; right shift its loads take; IM_SC += s6, s15 = 24 again. Uses s3.
+; The stage's scaling from s15 (the twin's stageShift): s6 = max(0, 23 - LIM - norm(s15)), the
+; rounded right shift its loads take; IM_SC += s6, s15 = 0 again. Uses s3.
 .macro im_dec(LIM) {
+        x01.norm s3, s15
         ldi s6, #23 - LIM
-        alu s6, s6, s15, #OP_SUB
+        alu s6, s6, s3, #OP_SUB
         x18.max s6, s6, s0
         yld(s3, IM_SC)
         alu s3, s3, s6, #OP_ADD
         yst(IM_SC)
-        ldi s15, #24
+        ldi s15, #0
 }
 
 ; A<2k> = the value s<src> + 2 (mem.sm's amov path without its first two steps): e6, R7.
@@ -161,21 +162,18 @@ scale:  yld(s3, ESLOT)
         rimm R2, #2
         rimm R3, #PSTEP
         rimm R4, #IN + N2 + 2
-        ldi s15, #24
+        ldi s15, #0
         im_pre5(N2, IN)
 pre:    im_pre5(N2, IN)
         x03.acp A10, A0, e7, #1
         pks(6, A10, 0, s0, s0, 0)
         pks(10, A10, 0, s0, s0, 0)
-        x01.norm s8, s6
-        smin(s15, s8)
-        x01.norm s8, s10
-        alu s15, s15, s8, #OP_SUB ; smin(s15, s8), its tail in the slots
-        x18.eagu e7, e7, #AGU_INC
+        im_trk(s6, s8)
+        x18.una s8, s10, #7, R13, s0
         pcond p3, R4, A4, #30   ; more: A4 != IN + N2 + 2
         jmp #3, #3, pre
-        x18.min s15, s15, s0    ; (delay slot)
-        alu s15, s15, s8, #OP_ADD ; (delay slot)
+        x18.or s15, s15, s8     ; (delay slot)
+        x18.eagu e7, e7, #AGU_INC ; (delay slot)
 }
 
 ; RD = s<src> (the R write path of mem.sm's amov). Uses s13, e6.
@@ -219,13 +217,11 @@ r2:     x03.tap0 s3, #4, s0, s0, s0 ; ai
         im_trk(s8, s13)
         im_trk(s9, s13)
         im_trk(s1, s13)
-        x01.norm s13, s3
-        alu s15, s15, s13, #OP_SUB ; smin(s15, s13), its tail in a slot
-        x18.min s15, s15, s0
+        x18.una s13, s3, #7, R13, s0
         alu s4, s4, s14, #OP_SUB
         ptst p3, s0, #EQ4, #PTST
         jmp #IF_NOT, #3, r2
-        alu s15, s15, s13, #OP_ADD ; (delay slot)
+        x18.or s15, s15, s13    ; (delay slot)
         x03.tap0 s1, #4, s0, s0, s0 ; (delay slot) the next ar; past the end, a dummy
 }
 
@@ -361,12 +357,11 @@ bf:     pk(s1, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         im_trk(s10, s4)
         im_trk(s1, s4)
         im_trk(s7, s4)
-        x01.norm s4, s3
-        alu s15, s15, s4, #OP_SUB ; smin(s15, s4), its tail in the slots
+        x18.una s4, s3, #7, R13, s0
         pcond p3, R4, A10, #30  ; more in the group: A10 != R4
         jmp #3, #3, bf
-        x18.min s15, s15, s0    ; (delay slot)
-        alu s15, s15, s4, #OP_ADD ; (delay slot)
+        x18.or s15, s15, s4     ; (delay slot)
+        nop()
         x02.aa A4, A4, R5, #2, A5, A0 ; the next group: every block + 6 l
         x02.aa A6, A6, R5, #2, A7, A0
         x02.aa A8, A8, R5, #2, A9, A0
