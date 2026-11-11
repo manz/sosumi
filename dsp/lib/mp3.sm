@@ -3000,7 +3000,8 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
 ; as mp3_win16), two taps by D's paired table (X:MP_XD, dsp/mp3/tables.zig: per age,
 ; d[j], then -+d[32 - j], the sign of V[32 - j] against V[j] folded in), the D stream
 ; stepping 31 then 1 (R5; the last block steps back by R1 = 479). Samples to Y at e7 (+ nch,
-; R7) and e6 (- nch, R6), saturated by s8 / s9. s4 holds the first D on entry and sample
+; R7) and e6 (- nch, R6), saturated to 16 bits by asrrs by s9 = -8 (24-bit saturation), then asr
+; by s8 = 8 (fact 774; x18.min / max return b when b is 0x7FFF or -0x8000, fact 950). s4 holds the first D on entry and sample
 ; 16's on exit (one column short: A8 + 31). Uses s1..s13, p3.
 .macro mp3_wpair() {
         ldi s12, #15
@@ -3056,11 +3057,11 @@ yp:     pkf(s5, A9, s0, s0, s0, 12, s12, s14, 5, 0, 2, R4) ; V0; one pair less
         pk(s0, A0, s0, s0, s0, 1, s2, s6, 5, 0)
         pk(s0, A0, s0, s0, s0, 13, s7, s11, 0, 6)
         pk(s0, A0, s0, s0, s0, 6, s10, s13, 5, 0)
-        x18.max s1, s1, s8
-        x18.min s1, s1, s9
-        x18.max s6, s6, s8
+        alu s1, s9, s1, #ASRRS
+        alu s1, s8, s1, #ASR
+        alu s6, s9, s6, #ASRRS
         ptst p3, s0, #EQ12, #PTST
-        x18.min s6, s6, s9
+        alu s6, s8, s6, #ASR
         jmp #IF_NOT, #3, yp
         x17.stys e7, #1, #0, e7, R7 ; (delay slot) sample j, then + nch
         x17.stys e6, #6, #0, e6, R6 ; (delay slot) sample 32 - j, then - nch
@@ -3265,9 +3266,8 @@ yslot:  lde e7, #MP_HCH
         rimm R2, #447
         rimm R1, #479
         ldi s7, #23
-        ldi s9, #32767
-        alu s8, s0, s9, #OP_SUB
-        alu s8, s8, s14, #OP_SUB ; -32768
+        ldi s9, #-8             ; the 16-bit clamp's counts (mp3_wpair)
+        ldi s8, #8
         lde e7, #MP_YO
         ldy s10, e7
         x17.mve e7, s10         ; the first sample's address
@@ -3279,14 +3279,14 @@ yslot:  lde e7, #MP_HCH
         x17.mve e6, s13         ; sample 31's address
         pkf(s4, A8, s0, s0, s0, 0, s0, s0, 0, 0, 2, R3) ; D0 of sample 0
         mp3_win0()
-        x18.max s1, s1, s8
-        x18.min s3, s1, s9
+        alu s3, s9, s1, #ASRRS
+        alu s3, s8, s3, #ASR
         x17.stys e7, #3, #0, e7, R7 ; sample 0, then + nch
         mp3_wpair()
         x02.aa A8, A8, R5, #2, A0, A0 ; sample 16's second D
         mp3_win16()
-        x18.max s1, s1, s8
-        x18.min s3, s1, s9
+        alu s3, s9, s1, #ASRRS
+        alu s3, s8, s3, #ASR
         x17.stys e7, #3, #0, e7, R7 ; sample 16
         lde e7, #MH_NCH
         ldy s11, e7

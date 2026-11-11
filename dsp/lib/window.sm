@@ -177,13 +177,15 @@ done:
         nop()                   ; (delay slot)
 }
 
-; PCM = clamp(rshr(OVL + B[0 .. 1023], 5)); OVL = B[1024 .. 2047].
+; PCM = clamp(rshr(OVL + B[0 .. 1023], 5)); OVL = B[1024 .. 2047]. The clamp to 16 bits is the
+; head ALU's asrrs by -8, saturating at 24 bits, then asr by 8 (fact 774): x18.min / x18.max
+; return b when b is 0x7FFF or -0x8000 on silicon (fact 950).
 .macro win_out(B) {
         aimm_e(2, B)
         win_a8ovl()
         win_pcm()
-        ldi s9, #32767
-        ldi s10, #-32768
+        ldi s9, #-8             ; the clamp's counts
+        ldi s10, #8
         yld(s12, WIN_OVL)
         ldi s13, #1024
         alu s12, s12, s13, #OP_ADD
@@ -191,10 +193,10 @@ done:
         pk(s5, A4, s0, s0, s0, 0, s0, s0, 0, 0)
 wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
         pkn(s5, A4, s0, s0, s0, 7, s5, s6, 0, 4, 5) ; the next; rshr(b + overlap, 5)
-        x18.min s7, s7, s9
+        alu s7, s9, s7, #ASRRS  ; v << 8, saturated at 24 bits
         pcond p3, R4, A8, #30
         jmp #3, #3, wo
-        x18.max s7, s7, s10     ; (delay slot)
+        alu s7, s10, s7, #ASR   ; (delay slot) >> 8: clamp(v)
         x17.stys e7, #7, #0, e7, R6 ; (delay slot)
         ldi s5, #B + 1024       ; the second half to the overlap
         ldi s6, #1024
