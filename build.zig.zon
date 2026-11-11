@@ -4,10 +4,10 @@
     .version = "0.0.0",
     .minimum_zig_version = "0.17.0",
     .dependencies = .{
-        // the sm1 assembler and emulator, x17 master: the stream read (facts 783, 784), no x19.ldn (793), asrc writes A1 (795), x16 operand checks (E0029), facts 800, 801, st.wr to x19.ld gap (804), rop pass-through sign extension (810), calls at the arm base (911, 928)
+        // the sm1 assembler and emulator, x17 x18-signsel (master + x18.min/max sign select, 951): the stream read (facts 783, 784), no x19.ldn (793), asrc writes A1 (795), x16 operand checks (E0029), facts 800, 801, st.wr to x19.ld gap (804), rop pass-through sign extension (810), calls at the arm base (911, 928)
         .x17 = .{
-            .url = "git+https://github.com/manz/x17#850d5cb5cc4fa725bac9836e5e44440725397180",
-            .hash = "x17-0.0.0-vrV6NBT-FQBqUe0blYfAcADzHOCNIYcVtsqBmrrmgzwy",
+            .url = "git+https://github.com/manz/x17#cb8086674b32876ca44abd2f3dda44fe7a286686",
+            .hash = "x17-0.0.0-vrV6NNgjFgCDfoPac-ZGRY8pY48bnuTjo1fEGXUn704P",
         },
     },
     .paths = .{
