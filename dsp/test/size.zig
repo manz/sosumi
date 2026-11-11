@@ -20,9 +20,11 @@ test "aac_packet fits program memory" {
         \\.include "lib/window.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
+        \\dsp_entry:
         \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
+        \\.include "lib/winsubs.sm"
         \\
     );
     defer gpa.free(prog);

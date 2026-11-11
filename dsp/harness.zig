@@ -20,6 +20,7 @@ pub const libs = [_]struct { path: []const u8, text: []const u8 }{
     .{ .path = "lib/tns.sm", .text = @embedFile("lib/tns.sm") },
     .{ .path = "lib/imdct.sm", .text = @embedFile("lib/imdct.sm") },
     .{ .path = "lib/window.sm", .text = @embedFile("lib/window.sm") },
+    .{ .path = "lib/winsubs.sm", .text = @embedFile("lib/winsubs.sm") },
     .{ .path = "lib/aac.sm", .text = @embedFile("lib/aac.sm") },
     .{ .path = "lib/rice.sm", .text = @embedFile("lib/rice.sm") },
     .{ .path = "lib/predictor.sm", .text = @embedFile("lib/predictor.sm") },

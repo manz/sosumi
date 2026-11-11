@@ -38,9 +38,11 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
         \\.include "lib/window.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/aac.sm"
+        \\dsp_entry:
         \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
+        \\.include "lib/winsubs.sm"
         \\
     , sites);
 }
@@ -203,9 +205,11 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "ring", "aac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll(
+        \\dsp_entry:
         \\        bits_init()
         \\        aac_packet()
         \\        x17.halt
         \\
     );
+    try w.print(".include \"{s}/winsubs.sm\"\n", .{lib});
 }

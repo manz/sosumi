@@ -1,0 +1,7 @@
+; window.sm's win_mulr shapes as subroutines (window.sm win_call, mem.sm call): included once,
+; after the program's last halt, so that only calls reach them.
+wm_lr:  win_sub(1024, WIN_R, 1, 0)
+wm_lf:  win_sub(1024, WIN_F, 1, 1)
+wm_sr:  win_sub(128, WIN_R, 0, 0)
+wm_sf:  win_sub(128, WIN_F, 0, 1)
+wm_ss:  win_sub(128, WIN_S, 0, 0)

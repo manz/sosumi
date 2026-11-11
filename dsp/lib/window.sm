@@ -64,12 +64,8 @@
 
 ; X[T .. T + COUNT) = rnd(X[..] * w / 2^23) in place, w the half's w / 4 in Q23: the shape in
 ; Y:[SLOT] (0 sine, 1 KBD), LONG 1 for 1024 words (else 128), FALL 1 for the falling side (the
-; table read backwards). The start address is s9 (win_mulr) or a constant (win_mul). Uses s1,
-; s3 .. s7, s9, s12, s13, e6, R4, R7, A4, A6, A8, p3 (amov_e and win_rset take s13).
-.macro win_mul(T, COUNT, SLOT, LONG, FALL) {
-        ldi s9, #T
-        win_mulr(COUNT, SLOT, LONG, FALL)
-}
+; table read backwards). The start address is s9. Uses s1, s3 .. s7, s9, s12, s13, e6, R4, R7,
+; A4, A6, A8, p3 (amov_e and win_rset take s13).
 
 .macro win_mulr(COUNT, SLOT, LONG, FALL) {
         amov_e(2, s9)
@@ -136,6 +132,19 @@ kl:     ldy s3, e6
         pk(s0, A0, s5, s7, s6, 0, s0, s0, 0, 0)
         pks(5, A8, 0, s0, s0, 0)
 done:
+}
+
+; win_mulr at T through its subroutine L, one of winsubs.sm's five shapes. Uses win_mulr's registers.
+.macro win_call(T, L) {
+        ldi s9, #T
+        call(L)
+}
+
+; win_mulr's five shapes as subroutines: winsubs.sm, which the program includes once after its
+; last halt (labels a macro defines stay local to its expansion), its entry marked dsp_entry.
+.macro win_sub(COUNT, SLOT, LONG, FALL) {
+        win_mulr(COUNT, SLOT, LONG, FALL)
+        ret()
 }
 
 ; B.. = rshr(T.., 2) over COUNT >= 2 words: the stretches where the window is 1, on x03's
@@ -213,16 +222,16 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 
 ; only_long: both halves long.
 .macro win_long(T) {
-        win_mul(T, 1024, WIN_R, 1, 0)
-        win_mul(T + 1024, 1024, WIN_F, 1, 1)
+        win_call(T, wm_lr)
+        win_call(T + 1024, wm_lf)
         win_out(T)
 }
 
 ; long_start: the previous long shape rising, the current short one falling.
 .macro win_start(T) {
-        win_mul(T, 1024, WIN_R, 1, 0)
+        win_call(T, wm_lr)
         win_quarter(448, T + 1024, T + 1024)
-        win_mul(T + 1472, 128, WIN_F, 0, 1)
+        win_call(T + 1472, wm_sf)
         win_zero(448, T + 1600)
         win_out(T)
 }
@@ -230,9 +239,9 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 ; long_stop: the previous short shape rising, the current long one falling.
 .macro win_stop(T) {
         win_zero(448, T)
-        win_mul(T + 448, 128, WIN_R, 0, 0)
+        win_call(T + 448, wm_sr)
         win_quarter(448, T + 576, T + 576)
-        win_mul(T + 1024, 1024, WIN_F, 1, 1)
+        win_call(T + 1024, wm_lf)
         win_out(T)
 }
 
@@ -252,10 +261,8 @@ wo:     pk(s6, A8, s0, s0, s0, 0, s0, s0, 0, 0)
 ; One window: T in place, then B[o .. o + 128) += T[0 .. 128), B[o + 128 .. o + 256) =
 ; T[128 .. 256), o = Y:[WIN_OUT] (then + 128). Uses win_mul's registers and s6, s7, A10.
 .macro win_sone(T) {
-        ldi s9, #T
-        win_mulr(128, WIN_S, 0, 0)
-        ldi s9, #T + 128
-        win_mulr(128, WIN_F, 0, 1)
+        win_call(T, wm_ss)
+        win_call(T + 128, wm_sf)
         yld(s3, WIN_F)
         yst(WIN_S)
         aimm_e(2, T)

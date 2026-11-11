@@ -7,6 +7,23 @@
 ; `x12.aset`, `x03.agu`). They use s13, e6, R7 and A14, and
 ; x03.agu's X read slot loads s7 (from X:[A0]), so s7 does not survive them.
 
+; Subroutines (x17 reference.md `x00.ctl`; facts 888, 911, 926, 928): ctl 4 calls L, its field
+; L's distance from the arm's entry, which the program marks with the label dsp_entry; two
+; delay bundles run before the callee, and ctl 5 returns to the bundle after them, two more
+; bundles running in the callee first. One level only, never inside x03.rep or a jump's delay
+; window. The return address is not a register: the callee may use any.
+.macro call(L) {
+        x00.ctl #(L - dsp_entry), #4
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+}
+
+.macro ret() {
+        x00.ctl #0, #5
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+}
+
 ; e6 = addr: one lde (reference.md `lde`, own-entry: k = 2, 3, 5..15 load e<k> <- #imm16).
 .macro yat(addr) {
         lde e6, #addr

@@ -53,6 +53,7 @@ fn checkFrom(gpa: std.mem.Allocator, state: *h.emu.State, prog: []const u32, sta
         state.cur_lane = 0;
         const k = state.getY(map.at("AK_OSL")) orelse 0;
         try state.y_mem.put(gpa, map.at("HOST_ST"), 0x8000);
+        state.call_base = start; // calls land at the arm's entry (928), as emu.arm sets it
         _ = try h.emu.runFrom(gpa, state, prog, start, 1 << 30);
         try testing.expect(!state.stream_starved); // never past its own access unit (784)
         try testing.expect(state.halted);
