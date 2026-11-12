@@ -103,7 +103,8 @@ mv:     alu s12, s2, s0, #OP_ADD
         jmp #3, #3, done
         nop()
         nop()
-        x19.ld s3, #4, e8, #2
+        ldy s3, e8
+        x18.eagu e8, e8, #2      ; +1 (AGU_INC; no x19.ld: specs/questions.md Q21)
         x17.styi e7, #3, #0, e7
         alu s2, s2, s14, #OP_SUB
         jmp #ALWAYS, #0, mv
@@ -632,7 +633,8 @@ part:   ldi s12, #4
         nop()
         nop()
         ; reused: copy granule 0's
-rcopy:  x19.ld s7, #2, e4, #2
+rcopy:  ldy s7, e4
+        x18.eagu e4, e4, #2      ; +1 (AGU_INC; no x19.ld: specs/questions.md Q21)
         x17.styi e5, #7, #0, e5
         alu s2, s2, s14, #OP_SUB
         alu s12, s2, s0, #OP_ADD
@@ -666,7 +668,7 @@ ent:    alu s12, s3, s0, #OP_ADD
         ldi s13, #MP_ILL
         alu s7, s7, s13, #OP_ADD
 put0:   x17.styi e5, #7, #0, e5
-        x19.ld s12, #2, e4, #2  ; keep e4 in step with e5
+        x18.eagu e4, e4, #2      ; keep e4 in step with e5 (AGU_INC; no x19.ld: specs/questions.md Q21)
         alu s2, s2, s14, #OP_SUB
         alu s12, s2, s0, #OP_ADD
         ptst p3, s0, #EQ12, #PTST
@@ -849,13 +851,15 @@ odd:    alu s13, s14, s3, #ASR  ; the first byte's word
         lde e7, #MP_RB / 2
         alu s1, s1, s14, #OP_ADD
         alu s1, s14, s1, #ASR   ; words: ceil(n / 2)
-        x19.ld s2, #4, e8, #2   ; w
+        ldy s2, e8              ; w
+        x18.eagu e8, e8, #2      ; +1 (AGU_INC; no x19.ld: specs/questions.md Q21)
 jn:     alu s12, s1, s0, #OP_ADD
         ptst p3, s0, #LE12, #PTST
         jmp #3, #3, done
         nop()
         nop()
-        x19.ld s13, #4, e8, #2  ; w'
+        ldy s13, e8             ; w'
+        x18.eagu e8, e8, #2      ; +1 (AGU_INC; no x19.ld: specs/questions.md Q21)
         ldi s12, #-8
         alu s3, s12, s2, #ASR   ; w << 8 (fact 774)
         alu s2, s13, s0, #OP_ADD
