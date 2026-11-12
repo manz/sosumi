@@ -120,7 +120,9 @@ then the plan needs: main data in the free slot's second half, two bytes a word,
 granule 1's Huffman decode, with only the reservoir's last 511 bytes kept (256 words); the band
 lists two to a word; frame lengths computed. X needs about 2.3K cut: the V history (done), a
 fast IMDCT-36 and DCT-32 (ISO/IEC 11172-3 leaves the algorithm free), and one channel's lines
-at a time. **OPEN** until Q33.
+at a time. Q33 (VERDICT on the replacement host): a one-slot ring plays gapless, slot 0 at
+Y:0x80, the program waiting on its owned flag; the stock host with one slot is unmeasured.
+The mode-1 layout takes one slot.
 
 ## Decoding stages
 
