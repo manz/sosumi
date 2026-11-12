@@ -33,8 +33,7 @@ two LSB of ffmpeg and afconvert on the test fixtures.
                  program in x17's emulator (--check, --profile=N); compare/ checks the models
                  against ffmpeg and afconvert PCM (tools/compare/gen.sh, then
                  zig-out/bin/compare in.aac|in.mp3 ref.s16); alacdec/ decodes an .m4a to raw
-                 PCM for a byte-exact cmp (tools/alacdec/gen.sh); provenance/ checks tracked
-                 files against the clean-room rules
+                 PCM for a byte-exact cmp (tools/alacdec/gen.sh)
     specs/       one spec per codec: target scope, what the device is known to do, what is open
       aac.md
       mp3.md

@@ -25,7 +25,7 @@ A file moves only when every point holds:
 3. **Citations.** ISA facts cite x17's `docs/sm1/reference.md` entry and the probe that gates
    them (`own-*`), not the line-numbered `fact N` citations.
 4. **Clean text.** It has no host addresses, host symbol names and no mention of the device's
-   own programs. `tools/provenance/check.sh` passes on it.
+   own programs.
 5. **Tests.** Its `lib_test` cases come over with it, compare against the `ref/dsp` twin (not a
    copy of the .sm's own arithmetic), and pass.
 6. **Provenance line.** Its header says: audited from x17 at commit C, twin, ISO clause, date.
