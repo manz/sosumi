@@ -72,6 +72,7 @@ test "the ALAC x17 image's init pass, then its decoder at q256, decode as the tw
     defer gpa.free(bytes);
     var img = try image.parse(gpa, bytes);
     defer img.deinit(gpa);
+    try testing.expectEqual(@as(?u8, 3), img.mode());
     const p = try gpa.alloc(u32, 0x4000);
     defer gpa.free(p);
     var state = h.emu.State{};
@@ -82,6 +83,7 @@ test "the ALAC x17 image's init pass, then its decoder at q256, decode as the tw
             .p => image.placeRows(p, sec),
             .x => for (sec.words, 0..) |w, k| try state.x_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
             .y, .param => for (sec.words, 0..) |w, k| try state.y_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
+            .mode => {}, // the configure mode (fact 960), no words
         };
         if (pass == 0) {
             _ = try h.emu.runFrom(gpa, &state, p, 0, 1 << 10);

@@ -126,6 +126,7 @@ test "the x17 image's init pass, then its decoder at q256, decode as the twin" {
             .p => image.placeRows(p, sec),
             .x => for (sec.words, 0..) |w, k| try state.x_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
             .y, .param => for (sec.words, 0..) |w, k| try state.y_mem.put(gpa, sec.addr + @as(u32, @intCast(k)), w),
+            .mode => {}, // the configure mode (fact 960), no words
         };
         if (pass == 0) {
             _ = try h.emu.runFrom(gpa, &state, p, 0, 1 << 10);

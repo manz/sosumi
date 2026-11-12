@@ -131,7 +131,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !
     defer st.deinit(gpa);
     try h.stageRing(&st, gpa, 1, 0x2000);
     try w.writeAll("; alac_packet's image (dsp/player.zig imageSource)\n");
-    try aac.initPass(gpa, w, &st, 1, map.at("ALAC_ON"));
+    try aac.initPass(gpa, w, &st, 1, map.at("ALAC_ON"), 3);
     for ([_][]const u8{ "bits", "rice", "predictor", "unmix", "mem", "ring", "alac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll("        bits_init_at(ALAC_ON)\n        alac_packet()\n        x17.halt\n");
