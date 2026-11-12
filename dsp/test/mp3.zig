@@ -456,7 +456,7 @@ test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Deco
         try h.stageRing(&state, gpa, 1, map.at("MP_RSL"));
         const zeros: [2048]i24 = @splat(0);
         try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
-        try h.putAllX(&state, gpa, map.at("MP_XOV"), zeros[0..1152]);
+        try h.putAllX(&state, gpa, map.at("MP_XOV"), zeros[0..576]);
         inline for (.{ "MP_YP", "MP_RLEN" }) |name| try h.putY(&state, gpa, map.at(name), 0);
         try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);
         var dec: ref.dsp.mp3.decoder.Decoder = .{};

@@ -237,6 +237,31 @@ pub const band_lists: BandLists = blk: {
     break :blk b;
 };
 
+/// X:MP_XHT, mp3_imdct36 / mp3_imdct12's tables (dsp/lib/mp3.sm), from the twin's constants:
+/// k9 in dct9's use order; per long step i [tw(9 + i), -+tw(i), tw(i), -+tw(9 + i)], odd i's
+/// signs (the negated odd si) folded in; the same for the 3 short steps (si[1] negated); the
+/// short window [tw3(2 - i), tw3(5 - i)]; cos(pi/6), 1/2; the normal and stop windows [w(i), w(9 + i)].
+pub fn hybridTable() [100]i24 {
+    const H = ref.dsp.mp3.hybrid;
+    var t: [100]i24 = undefined;
+    @memcpy(t[0..8], &H.k9);
+    for (0..9) |i| {
+        const sg: i24 = if (i & 1 == 1) -1 else 1;
+        t[8 + 4 * i ..][0..4].* = .{ H.tw9[9 + i], sg * H.tw9[i], H.tw9[i], sg * H.tw9[9 + i] };
+    }
+    for (0..3) |i| {
+        const sg: i24 = if (i == 1) -1 else 1;
+        t[44 + 4 * i ..][0..4].* = .{ H.tw3[3 + i], sg * H.tw3[i], H.tw3[i], sg * H.tw3[3 + i] };
+        t[56 + 2 * i ..][0..2].* = .{ H.tw3[2 - i], H.tw3[5 - i] };
+    }
+    t[62] = H.c30;
+    t[63] = H.k9[0];
+    for (0..2) |w| for (0..9) |i| {
+        t[64 + 18 * w + 2 * i ..][0..2].* = .{ H.win[w][i], H.win[w][9 + i] };
+    };
+    return t;
+}
+
 /// Every table at its Y address (`at` maps a .const name to its address).
 pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []const u8) u32) !void {
     for (flen, 0..) |v, i| try st.y_mem.put(gpa, at("MP_FLEN") + @as(u32, @intCast(i)), v);
@@ -276,9 +301,7 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
     for (S.quarter, 0..) |v, i| try st.x_mem.put(gpa, at("MP_XST") + 14 + @as(u32, @intCast(i)), @as(u24, @bitCast(v)));
     try st.x_mem.put(gpa, at("MP_XST") + 18, @as(u24, @bitCast(S.inv_sqrt2)));
     const H = ref.dsp.mp3.hybrid;
-    for (H.cos36, 0..) |rw, r| for (rw, 0..) |v, k| try st.x_mem.put(gpa, at("MP_XC36") + @as(u32, @intCast(18 * r + k)), @as(u24, @bitCast(v)));
-    for (H.cos12, 0..) |rw, r| for (rw, 0..) |v, k| try st.x_mem.put(gpa, at("MP_XC12") + @as(u32, @intCast(6 * r + k)), @as(u24, @bitCast(v)));
-    for (H.windows, 0..) |w, j| for (w, 0..) |v, i| try st.x_mem.put(gpa, at("MP_XWIN") + @as(u32, @intCast(36 * j + i)), @as(u24, @bitCast(v)));
+    for (hybridTable(), 0..) |v, i| try st.x_mem.put(gpa, at("MP_XHT") + @as(u32, @intCast(i)), @as(u24, @bitCast(v)));
     for (H.cs, H.ca, 0..) |c, a, i| {
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i)), @as(u24, @bitCast(c)));
         try st.x_mem.put(gpa, at("MP_XAL") + @as(u32, @intCast(3 * i + 1)), @as(u24, @bitCast(a)));

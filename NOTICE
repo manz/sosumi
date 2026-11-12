@@ -15,7 +15,9 @@ ref/aac/tables/swb.zig, ref/aac/huffman.zig and ref/aac/ics.zig. Its TNS_MAX_BAN
 minimp3 (third_party/minimp3), by lieff, dedicated to the public domain under CC0 1.0. Its Layer
 III Huffman codebooks are rebuilt in canonical form into ref/mp3/tables/huffman.zig; its scale
 factor band widths and MPEG-2 scale factor partitions are copied into ref/mp3/bands.zig and
-ref/mp3/scalefactors.zig.
+ref/mp3/scalefactors.zig. Its L3_imdct36, L3_dct3_9, L3_imdct12 and L3_imdct_short structure (the
+fold, the 9- and 3-point DCTs, the rotation into 9 overlap words) is followed by
+ref/dsp/mp3/hybrid.zig and dsp/lib/mp3.sm's mp3_imdct36 / mp3_imdct12.
 
 PDMP3 (third_party/pdmp3), by Krister Lagerstrom, public domain (Unlicense). Its copy of the
 ISO/IEC 11172-3 synthesis window is converted into ref/mp3/tables/synth_window.zig.
