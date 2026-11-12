@@ -93,6 +93,35 @@ fault; LAME writes it with empty main data.
   cross-talk (**MEASURED**, fact 798: c streamed, x[k] loaded into sB every 4 taps, 4 pairs,
   36 taps, exact in 3 of 3 runs).
 
+### Mode 1's data budget
+
+Fact 961 (**MEASURED**): mode 1 maps X 0..0x11FF (4608 words) and Y 0..0x187F plus the host
+block 0xFD80..0xFDFF; 0x1780..0x187F holds DSP stores but no init-pass data. The image before
+this budget (fede476a) touches X 6840 words and Y about 6.0K words outside the ring
+(measured in x17 over the five corpus fixtures). The largest parts:
+
+| memory | part | words |
+|---|---|---|
+| X | granule lines, 2 x 576 | 1152 |
+| X | IMDCT overlap, 2 x 576 | 1152 |
+| X | V history (now 2 x 544, from 2 x 1024) | 1088 |
+| X | synthesis window, doubled for the ring's wrap | 1024 |
+| X | IMDCT-36 rows, windows, IMDCT-12 rows | 504 |
+| X | matrixing rows | 384 |
+| X | requantisation tables, scratch, stereo, alias | ~570 |
+| Y | Huffman trees (lib/huffman.sm format, smallest roots) | 2832 |
+| Y | reservoir and main data, a byte per word | 1952 |
+| Y | band width lists | 696 |
+| Y | headers, side information, frame lengths, scale factors, slots | ~620 |
+
+Beside a two-slot ring of 0x900 at Y:0x80, Y keeps 0x1280..0x187F and 0x09..0x7F, about 1.65K
+words: the trees alone do not fit. A one-slot ring (Q33) keeps 0x980..0x187F, about 3.96K. Even
+then the plan needs: main data in the free slot's second half, two bytes a word, until
+granule 1's Huffman decode, with only the reservoir's last 511 bytes kept (256 words); the band
+lists two to a word; frame lengths computed. X needs about 2.3K cut: the V history (done), a
+fast IMDCT-36 and DCT-32 (ISO/IEC 11172-3 leaves the algorithm free), and one channel's lines
+at a time. **OPEN** until Q33.
+
 ## Decoding stages
 
 ISO/IEC 11172-3 is normative; the `ffmpeg` binary's PCM is the first reference output.
