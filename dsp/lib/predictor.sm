@@ -114,7 +114,7 @@ done:
 }
 
 ; The sample loop, unrolled per G = (order + 3) / 4 (pv1 .. pv8; unpredict picks one per lane).
-; Registers it keeps: s1 = -23, s6 = -15 (sgn's shift counts), s10 = -ds, s11 = 24 - chan_bits,
+; Registers it keeps: s1 = -23 (sg's count), s6 = 256 (sgn's scale), s10 = ds, s11 = 24 - chan_bits,
 ; s15 = chan_bits - 24, s14 = 1, s7 = top; A8 = top's pointer out[j - order - 1], A10 = the
 ; reversed coefficients (2^8 c), A2 the residuals, A3 the output; R4 = the output's end,
 ; R6 = A10 + order, R7 = M + 3 (M = 4 G).
@@ -181,7 +181,11 @@ done:
 ; ceil(|dd| / 2^ds) with K = 2^ds - 1 - h (res < 0, X:[A5]), h = rshr(2^ds - 1, 1). Each
 ; coefficient step is branch-free: c moves by 2^8 sgn(dd) (down for res > 0, up for res < 0)
 ; and wraps at 24 bits, the reference's int16 store times 2^8; D -= w m. The loop ends at
-; D <= 0 or with A11 at R6. dd for the next out is formed in the last delay slot.
+; D <= 0 or with A11 at R6. Packed x02 bundles (pk, mem.sm) carry the step: sg =
+; asrrs(dd << 23) is 0x7FFFFF, 0 or -0x800000, so the rnd product slot gives |dd| =
+; rnd(dd sg / 2^23) (exact while |dd| < 2^22) and 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); m is
+; the code-7 slot's rshr by s10 = ds. The next step's out, sg, |dd| and dd run one step
+; ahead, in the back edge's delay slots.
 .macro pred_tail(SMP) {
         pk(s12, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; 23
         pk(s9, A13, s0, s0, s0, 0, s0, s0, 0, 0) ; ds - 15
@@ -211,44 +215,41 @@ adp:    x19.xrd s9, #12         ; K for res > 0
         pk(s3, A9, s0, s0, s0, 5, s14, s0, 0, 0) ; out, A9 + 1; w = 1
         x19.xrd s13, #11        ; c
         alu s3, s7, s3, #OP_SUB ; dd = top - out
-pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
-        x19.alu s12, s12, s6, #SHIFT ; rshr by 15: 2^8 sgn(dd)
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; next out, A9 + 1; sg = asrrs(dd << 23)
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; |dd| = rnd(dd sg / 2^23) (exact, |dd| < 2^22); next dd
+pstep:  pk(s0, A0, s12, s12, s6, 2, s2, s9, 0, 0) ; 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); |dd| + K
+        pk(s0, A0, s0, s0, s0, 8, s10, s2, 0, 7) ; m = rshr(|dd| + K, ds) (code 7, 730)
+        x18.mpy s2, s0, s5, s8  ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
         alu s13, s13, s12, #OP_SUB ; c -= sgn(dd), wrapping at 24 bits
-        alu s2, s2, s9, #OP_ADD ; |dd| + K
-        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
-        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
-        alu s4, s4, s12, #OP_SUB
+        pks(13, A11, 4, s4, s2, 5) ; c stored, A11 + 1; D -= w m
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
-        pk(s3, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) next out, A9 + 1
+        pkf(s13, A11, s0, s0, s0, 5, s5, s14, 0, 0, 2, R13) ; (delay slot) next c (R13 = 0); w += 1
         pcond p3, R6, A11, #30  ; (delay slot) coefficients left: A11 != R6 (adone ignores p3)
         jmp #3, #3, pstep
-        x19.xrd s13, #11        ; (delay slot) next c
-        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; (delay slot) next out, A9 + 1; next sg
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; (delay slot) next |dd|; the dd after
         jmp #ALWAYS, #0, adone
         nop()
         nop()
-adn:    pk(s3, A9, s0, s0, s0, 5, s14, s0, 0, 0) ; out, A9 + 1; w = 1
+adn:
+        pk(s3, A9, s0, s0, s0, 5, s14, s0, 0, 0) ; out, A9 + 1; w = 1
         x19.xrd s13, #11        ; c
         alu s3, s7, s3, #OP_SUB ; dd = top - out
-nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        alu s12, s1, s3, #ASRRS ; dd << 23, saturated (fact 774)
-        x19.alu s12, s12, s6, #SHIFT ; rshr by 15: 2^8 sgn(dd)
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; next out, A9 + 1; sg = asrrs(dd << 23)
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; |dd| = rnd(dd sg / 2^23) (exact, |dd| < 2^22); next dd
+nstep:  pk(s0, A0, s12, s12, s6, 2, s2, s9, 0, 0) ; 2^8 sgn(dd) = rnd(sg 2^8 / 2^23); |dd| + K
+        pk(s0, A0, s0, s0, s0, 8, s10, s2, 0, 7) ; m = rshr(|dd| + K, ds) (code 7, 730)
+        x18.mpy s2, s0, s5, s8  ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
         alu s13, s13, s12, #OP_ADD ; c += sgn(dd), wrapping at 24 bits
-        alu s2, s2, s9, #OP_ADD ; |dd| + K
-        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        x18.mpy s12, s0, s5, s3 ; w m
-        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
-        alu s4, s4, s12, #OP_SUB
+        pks(13, A11, 4, s4, s2, 5) ; c stored, A11 + 1; D -= w m
         ptst p3, s0, #LE4, #PTST ; D <= 0: stop
         jmp #3, #3, adone
-        pk(s3, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) next out, A9 + 1
-        pcond p3, R6, A11, #30  ; (delay slot) coefficients left
+        pkf(s13, A11, s0, s0, s0, 5, s5, s14, 0, 0, 2, R13) ; (delay slot) next c (R13 = 0); w += 1
+        pcond p3, R6, A11, #30  ; (delay slot) coefficients left: A11 != R6 (adone ignores p3)
         jmp #3, #3, nstep
-        x19.xrd s13, #11        ; (delay slot) next c
-        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
+        pk(s8, A9, s0, s0, s0, 12, s1, s3, 0, 7) ; (delay slot) next out, A9 + 1; next sg
+        pk(s0, A0, s2, s3, s12, 3, s7, s8, 5, 0) ; (delay slot) next |dd|; the dd after
 adone:  jmp #ALWAYS, #0, SMP
         x02.ainc #8, #8         ; (delay slot) advance
         x19.aagu A11, A10, #5, #0 ; (delay slot) the coefficients from the start
@@ -466,8 +467,10 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         ldy s12, e12
         rset_k(R6, s12, COEF)   ; COEF + order
         x19.aagu A11, A10, #5, #0
-        ldi s1, #-23            ; sgn's shift counts (x18.min / max select on sign, 951)
-        ldi s6, #-15
+        ldi s1, #-23            ; sg's shift count (x18.min / max select on sign, 951)
+        ldi s6, #256            ; sgn(dd)'s scale
+        alu s10, s0, s10, #OP_SUB ; ds, m's shift
+        rset_k(R13, s0, 0)      ; R13 = 0: the c load's step
         ; G = (order + 3) / 4 groups of four taps: one unrolled sample loop per G
         ldy s13, e12
         ldi s12, #3
