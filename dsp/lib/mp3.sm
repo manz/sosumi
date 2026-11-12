@@ -2948,7 +2948,7 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         x03.tapa s5, #10, s4, s2, s3, #3, R2 ; + 2 V14 D14; V15
         x03.tapa s4, #8, s0, s2, s3, #3, R1 ; D15
         x02.aa A11, A11, R3, #8, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
-        x02.aa A11, A11, R0, #0, A8, A12, #1 ; + 1: pair 1's D
+        x02.aa A11, A11, R0, #0, A8, A12 ; + 1: pair 1's D (never wraps)
         x03.tap s4, #8, s5, s2, s3 ; + 2 D15 V15; pair 1's first D
         alu s13, s7, s3, #ASR   ; -1 when lo < 0 (mp3_rd24)
         alu s1, s2, s13, #OP_SUB
