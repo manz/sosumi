@@ -365,7 +365,7 @@ test "mp3_synth matches ref/dsp/mp3/synth.zig over random granules" {
     defer state.deinit(gpa);
     try tables.put(&state, gpa, map.at);
     const zeros: [2048]i24 = @splat(0);
-    try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
+    try h.putAllX(&state, gpa, map.at("MP_XV"), zeros[0 .. 2 * map.at("MP_VC")]);
     try h.putY(&state, gpa, map.at("MP_YP"), 0);
     try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);
     try h.putY(&state, gpa, map.at("MH_NCH"), 2);
@@ -455,7 +455,7 @@ test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Deco
         try h.stageDequantAt(&state, gpa, h.mp3Dequant());
         try h.stageRing(&state, gpa, 1, map.at("MP_RSL"));
         const zeros: [2048]i24 = @splat(0);
-        try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
+        try h.putAllX(&state, gpa, map.at("MP_XV"), zeros[0 .. 2 * map.at("MP_VC")]);
         try h.putAllX(&state, gpa, map.at("MP_XOV"), zeros[0..576]);
         inline for (.{ "MP_YP", "MP_RLEN" }) |name| try h.putY(&state, gpa, map.at(name), 0);
         try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);

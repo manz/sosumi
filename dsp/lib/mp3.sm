@@ -726,7 +726,7 @@ done:
 .const MP_SPOS = MP_Q + 57      ; 40 words: the right channel's positions, bit 8 illegal
 .const MP_SSH  = MP_Q + 97      ; MPEG-2: scalefac_compress & 1
 .const MP_SLP  = MP_Q + 98      ; list pointer
-.const MP_XST  = 0x1B70         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
+.const MP_XST  = 0x10FB         ; X: pan[7][2] (MPEG-1 kl, kr), quarter[4] (MPEG-2), Q22; 1/sqrt 2 Q23
 .const MP_XDUM = 0x0000         ; X: the taps' unused loads walk from here (any readable X)
 .const MP_HCH  = MP_Q + 100     ; hybrid: the channel
 .const MP_HSH  = MP_Q + 101     ; 1: short block
@@ -741,24 +741,24 @@ done:
 .const MP_OUT  = MP_Q + 112     ; the frame's PCM: its first sample's Y address
 .const MP_RSL  = 0x900          ; the ring's one slot: 1152 stereo frames (specs/mp3.md, Q33)
 .const MP_XOV  = 0x0480         ; X: overlap, [ch][sb][9]
-.const MP_XV   = 0x0900         ; X: synthesis history, [ch][half][block][17] (mp3_synth)
+.const MP_XV   = 0x06C0         ; X: synthesis history, [ch][half][block][17] (mp3_synth)
 .const MP_VB   = 17             ; words per V block's half: V[32 h + m], m = 0..16
 .const MP_VH   = 16 * MP_VB     ; words per half
 .const MP_VC   = 2 * MP_VH      ; words per channel
-.const MP_XN   = 0x13C0         ; X: synthesis rows (mp3_synth's groups), Q23, 384 words
-.const MP_XD   = 0x1540         ; X: the synthesis window paired per age (mp3_wpair), Q17, 512 words
-.const MP_XZ   = 0x1100         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
+.const MP_XN   = 0x0D00         ; X: synthesis rows (mp3_synth's groups), Q23, 384 words
+.const MP_XD   = 0x0B00         ; X: the synthesis window paired per age (mp3_wpair), Q17, 512 words
+.const MP_XZ   = 0x0E80         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
                                 ; reorder's band triple at +0 (<= 198)
-.const MP_XHT  = 0x11C8         ; X: the IMDCTs' tables, Q23, 100 words (dsp/mp3/tables.zig)
-.const MP_XAL  = 0x1BA8         ; X: alias butterflies [8][cs, ca, -ca], Q23
+.const MP_XHT  = 0x0F48         ; X: the IMDCTs' tables, Q23, 100 words (dsp/mp3/tables.zig)
+.const MP_XAL  = 0x110E         ; X: alias butterflies [8][cs, ca, -ca], Q23
 ; Mode 1's Y (fact 961; specs/mp3.md): the ring's one slot at 0x80..0x97F, tables and state
 ; from 0x980 below the DSP-only window 0x1780..0x187F, which holds the reservoir (MP_RB).
 .const MP_IE   = 0x1146         ; lib/dequant.sm's DQ_IE, here (dq_mant_at)
 .const MP_ON   = 0x114F         ; the stream enable's flag (stream_on_at); YB_PTR at 0x114E
 .const MP_IR   = 0x1684         ; lib/dequant.sm's DQ_IR
-.const MP_XDQ  = 0x1A02         ; X: lib/dequant.sm's tables where MP3 keeps them (dq_mant_at)
-.const MP_XIT  = MP_XDQ + 0x110
-.const MP_XG   = MP_XDQ + 0x160
+.const MP_XDQ  = 0x0FAC         ; X: lib/dequant.sm's tables where MP3 keeps them (dq_mant_at)
+.const MP_XIT  = MP_XDQ + 258
+.const MP_XG   = MP_XIT + 65
 .const MP_HUFF = 0x0980         ; the trees (lib/huffman.sm format), up to MP_IE
 
 .const MP_RE   = 0x12A1         ; the three regions' ends, in coefficients (576 the last)

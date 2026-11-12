@@ -79,6 +79,9 @@ test "the MP3 x17 image's init pass, then its decoder at q256, decode as the twi
     defer gpa.free(bytes);
     var img = try image.parse(gpa, bytes);
     defer img.deinit(gpa);
+    try testing.expectEqual(@as(?u8, 1), img.mode());
+    // mode 1's maps (specs/mp3.md, fact 961): no init data in the DSP-only window 0x1780..0x187F
+    for (img.sections) |sec| if (sec.kind == .y) try testing.expect(sec.addr + sec.words.len <= 0x1780 or sec.addr >= 0x1880);
     const p = try gpa.alloc(u32, 0x4000);
     defer gpa.free(p);
     var state = h.emu.State{};
@@ -115,4 +118,16 @@ test "the MP3 x17 image's init pass, then its decoder at q256, decode as the twi
         try state.y_mem.put(gpa, map.at("RING_E") + 2 * k, 0);
     }
     try testing.expectEqual(want.len, at);
+    // mode 1's maps: Y 0..0x187F and the host's FD80..FDFF, X 0..0x11FF
+    var ys = state.y_mem.keyIterator();
+    while (ys.next()) |a| {
+        const ok = a.* < 0x1880 or (a.* >= 0xFD80 and a.* < 0xFE00);
+        if (!ok) std.debug.print("Y:0x{X} outside mode 1's map\n", .{a.*});
+        try testing.expect(ok);
+    }
+    var xs = state.x_mem.keyIterator();
+    while (xs.next()) |a| {
+        if (a.* >= 0x1200) std.debug.print("X:0x{X} outside mode 1's map\n", .{a.*});
+        try testing.expect(a.* < 0x1200);
+    }
 }

@@ -124,6 +124,12 @@ at a time. Q33 (VERDICT on the replacement host): a one-slot ring plays gapless,
 Y:0x80, the program waiting on its owned flag; the stock host with one slot is unmeasured.
 The mode-1 layout takes one slot.
 
+The mode-1 image (`.mode 1`) now fits: X ends at 0x1125 (4390 words) with the IMDCTs run as 9-
+and 3-point DCTs into 9 overlap words per subband (minimp3's structure, 576 words, its tables
+100) and the synthesis window stored once (512 words), its offset wrapped modulo 512 by x02.aa
+(facts 566-568, 626). Y keeps its init data below 0x1780. The image test checks both maps in
+x17. Worst corpus frame 510,854 bundles (48 kHz budget 642K). Unmeasured on silicon.
+
 ## Decoding stages
 
 ISO/IEC 11172-3 is normative; the `ffmpeg` binary's PCM is the first reference output.
