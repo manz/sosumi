@@ -130,8 +130,7 @@ done:
         alu s5, s14, s0, #OP_ADD ; w = 1
         alu s3, s7, s3, #OP_SUB ; dd = top - out
         ldi s1, #-23            ; sgn's shift counts (x18.min / max select on sign, 951)
-        ldi s6, #-8
-        ldi s11, #8
+        ldi s6, #-15
 }
 
 
@@ -184,26 +183,25 @@ done:
 }
 
 .macro pred_tail(SMP) {
-        ; acc = 2 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed). ALAC's
-        ; pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 1), the shifter's half-up
-        ; right shift; with H = hi + [L < 0], rshr(acc, ds + 1) = H 2^(23-ds) + rshr(L, ds + 1),
-        ; and only its low chan_bits <= 23 bits count, so H 2^(23-ds) may wrap at 24 bits.
-        ldy s10, e13            ; ds
-        ldi s12, #23
+        ; acc = 2 2^8 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed), the
+        ; coefficients being 2^8 c. ALAC's pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc,
+        ; ds + 9), the shifter's half-up right shift; with H = hi + [L < 0], that is
+        ; H 2^(15-ds) + rshr(L, ds + 9), and only its low chan_bits <= 23 bits count, so
+        ; H 2^(15-ds) may wrap at 24 bits. The counts are the window's, X:[A18], [A19], [A20].
+        x19.xrd s12, #20        ; 23
+        x19.xrd s10, #18        ; ds - 15
         alu s13, s12, s3, #ASR  ; L >> 23: -1 when L < 0 (alu code 6, fact 774)
         alu s2, s2, s13, #OP_SUB ; H = hi + [L < 0]
-        ldi s11, #-23
-        alu s12, s10, s11, #OP_ADD ; ds - 23
-        alu s2, s12, s2, #ASR   ; H << (23 - ds), wrapping at 24 bits: only the low chan_bits count
-        ldi s11, #-1
-        alu s11, s11, s10, #OP_SUB ; -(ds + 1)
-        x19.alu s3, s3, s11, #SHIFT ; rshr(L, ds + 1)
-        alu s4, s2, s3, #OP_ADD ; pred
+        x19.xrd s12, #19        ; -(ds + 9)
+        alu s2, s10, s2, #ASR   ; H << (15 - ds), wrapping
+        x19.alu s3, s3, s12, #SHIFT ; rshr(L, ds + 9)
         x19.xrd s1, #2          ; res
         x02.ainc #2, #2
-        alu s3, s1, s7, #OP_ADD
-        alu s3, s3, s4, #OP_ADD
-        sxcb(s3)
+        alu s3, s2, s3, #OP_ADD ; pred
+        alu s3, s3, s1, #OP_ADD
+        alu s3, s3, s7, #OP_ADD ; res + top + pred
+        alu s3, s15, s3, #ASR   ; up by 24 - chan_bits (s15 = chan_bits - 24), wrapping
+        alu s3, s11, s3, #ASR   ; down: sign-extended from chan_bits
         stx A3, s3              ; out[j]
         x02.ainc #3, #3
         alu s12, s1, s14, #OP_SUB
@@ -229,12 +227,10 @@ done:
 adp:    adapt_init(12)
 pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
-        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
-        alu s13, s13, s12, #OP_SUB ; c -/+= sgn(dd)
+        x19.alu s12, s12, s6, #SHIFT ; rshr by 15: 2^8 sgn(dd)
+        alu s13, s13, s12, #OP_SUB ; c -/+= sgn(dd), wrapping at 24 bits: int16's wrap times 2^8
         alu s2, s2, s9, #OP_ADD ; |dd| + K
-        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
         x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
         x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
         pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
         alu s4, s4, s12, #OP_SUB
@@ -251,12 +247,10 @@ pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
 adn:    adapt_init(5)
 nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
         alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
-        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
-        alu s13, s13, s12, #OP_ADD ; c -/+= sgn(dd)
+        x19.alu s12, s12, s6, #SHIFT ; rshr by 15: 2^8 sgn(dd)
+        alu s13, s13, s12, #OP_ADD ; c -/+= sgn(dd), wrapping at 24 bits: int16's wrap times 2^8
         alu s2, s2, s9, #OP_ADD ; |dd| + K
-        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
         x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
         x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
         pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
         alu s4, s4, s12, #OP_SUB
@@ -446,6 +440,22 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         alu s9, s0, s2, #OP_SUB ; -h: K for res > 0
         stx A12, s9
         stx A13, s10
+        ; the rounding's counts, X:[A10 + 45], +46, +47 through A18, A19, A20: ds - 15,
+        ; -(ds + 9), 23; and the sign extension's, s11 = 24 - chan_bits, s15 = chan_bits - 24,
+        ; which the taps and the adaptation leave alone
+        x03.agu A18, A10, #45, #0, A0
+        x03.agu A19, A10, #46, #0, A0
+        x03.agu A20, A10, #47, #0, A0
+        ldi s12, #-15
+        alu s12, s12, s10, #OP_SUB ; ds - 15 (s10 = -ds)
+        stx A18, s12
+        ldi s12, #-9
+        alu s12, s12, s10, #OP_ADD ; -(ds + 9)
+        stx A19, s12
+        ldi s12, #23
+        stx A20, s12
+        ldy s11, e14
+        alu s15, s0, s11, #OP_SUB
         ; G = (order + 3) / 4 groups of four taps: one unrolled sample loop per G
         ldy s13, e12
         ldi s12, #3
@@ -508,7 +518,8 @@ v5:     pv5(finish)
 v6:     pv6(finish)
 v7:     pv7(finish)
 v8:     pv8(finish)
-finish: x03.agu A5, A10, #40, #0, A0 ; the bit reader back
+finish: ldi s15, #16
+        x03.agu A5, A10, #40, #0, A0 ; the bit reader back
         x19.xrd s9, #5
         x02.ainc #5, #5
         x19.xrd s10, #5
