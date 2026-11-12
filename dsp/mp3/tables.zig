@@ -82,18 +82,121 @@ fn pairValue(comptime w: usize) fn (usize) u16 {
     }.f;
 }
 
-/// The distinct pair codes (ISO/IEC 11172-3 Table B.7) and each one's root width, the smallest
-/// tree's (lib/huffman.sm's format); count1 A and B after them.
+/// The distinct pair codes (ISO/IEC 11172-3 Table B.7); count1 A and B after them.
 pub const codes = [_]u8{ 1, 2, 3, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 24 };
-const roots = [_]u4{ 3, 4, 4, 4, 4, 5, 5, 5, 6, 6, 5, 5, 6, 3, 7, 4, 4 };
 
-/// Leaf values: x * 16 + y for a pair, vwxy for a quadruple.
-pub const trees: [codes.len + 2]tree.Table = blk: {
-    var t: [codes.len + 2]tree.Table = undefined;
-    for (codes, 0..) |c, i| t[i] = tree.makeTable(ht.pair[c].?, roots[i], pairValue(ht.width[c]));
-    t[codes.len] = tree.makeTable(&ht.count1_a, roots[codes.len], ident);
-    t[codes.len + 1] = tree.makeTable(&ht.count1_b, roots[codes.len + 1], ident);
-    break :blk t;
+/// Leaf values: x * 16 + y for a pair, vwxy for a quadruple. Laid out once, at run time (the
+/// width search overflows the compiler's comptime stack).
+pub fn trees() *const [codes.len + 2]tree.Table {
+    if (!built) {
+        inline for (codes, 0..) |c, i| tabs[i] = smallest(&lays[i], ht.pair[c].?, pairValue(ht.width[c]));
+        tabs[codes.len] = smallest(&lays[codes.len], &ht.count1_a, ident);
+        tabs[codes.len + 1] = smallest(&lays[codes.len + 1], &ht.count1_b, ident);
+        built = true;
+    }
+    return &tabs;
+}
+
+var lays: [codes.len + 2]Lay = undefined;
+var tabs: [codes.len + 2]tree.Table = undefined;
+var built = false;
+
+/// A code in lib/huffman.sm's format (ref/dsp/huffman.zig), every table's width (root and
+/// subtables, 1..8) the one that makes its subtree smallest: mode 1's Y (specs/mp3.md).
+fn smallest(lay: *Lay, cs: []const ref.huffman.Code, value: fn (usize) u16) tree.Table {
+    var syms: [300]Sym = undefined;
+    for (cs, 0..) |c, i| syms[i] = .{ .code = c.code, .len = c.len, .v = value(i) };
+    lay.* = .{};
+    memo.clearRetainingCapacity();
+    const root = best(syms[0..cs.len], 0).w;
+    _ = lay.build(syms[0..cs.len], 0, root);
+    return .{ .words = lay.t[0..lay.n], .root = root };
+}
+
+const Sym = struct { code: u32, len: u5, v: u16 };
+
+/// The syms below prefix p of a w-wide table at depth, and the longest remainder past it.
+fn group(syms: []const Sym, depth: u5, w: u4, p: usize, out: []Sym) struct { n: usize, rem: u5 } {
+    var n: usize = 0;
+    var rem: u5 = 0;
+    for (syms) |s| {
+        const r = s.len - depth;
+        if (r <= w) continue;
+        if ((s.code & ((@as(u32, 1) << r) - 1)) >> @intCast(r - w) != p) continue;
+        out[n] = s;
+        n += 1;
+        rem = @max(rem, r - w);
+    }
+    return .{ .n = n, .rem = rem };
+}
+
+/// The width (1..8, at most the longest remainder) with the least words + step_cost x the
+/// expected lookups (a codeword of length l taken as 2^-l likely): each table a codeword
+/// passes through is one huff_decode step. At 100 the trees take 1990 words (2832 with the
+/// smallest root and full-depth subtables), the worst corpus frame 5K bundles more.
+const step_cost: f64 = 100;
+const Best = struct { w: u4, cost: f64 };
+var memo: std.AutoHashMapUnmanaged(u64, Best) = .empty;
+
+/// Memoised by (depth, the prefix the syms share): the search revisits every subtree per width.
+fn best(syms: []const Sym, depth: u5) Best {
+    const key = (@as(u64, depth) << 32) | (syms[0].code >> @intCast(syms[0].len - depth));
+    if (memo.get(key)) |b| return b;
+    const b = search(syms, depth);
+    memo.put(std.heap.page_allocator, key, b) catch {};
+    return b;
+}
+
+fn search(syms: []const Sym, depth: u5) Best {
+    var top: u5 = 0;
+    var mass: f64 = 0;
+    for (syms) |s| {
+        top = @max(top, s.len - depth);
+        mass += std.math.pow(f64, 2, -@as(f64, @floatFromInt(s.len)));
+    }
+    var r: Best = .{ .w = 1, .cost = std.math.inf(f64) };
+    var w: u4 = 1;
+    while (w <= @min(top, tree.max_width)) : (w += 1) {
+        var cost: f64 = @floatFromInt(@as(usize, 1) << w);
+        cost += step_cost * mass;
+        for (0..@as(usize, 1) << w) |p| {
+            var g: [300]Sym = undefined;
+            const k = group(syms, depth, w, p, &g);
+            if (k.n > 0) cost += best(g[0..k.n], depth + w).cost;
+        }
+        if (cost < r.cost) r = .{ .w = w, .cost = cost };
+        if (w == tree.max_width) break;
+    }
+    return r;
+}
+
+/// ref/dsp/huffman.zig's layout with `best`'s widths.
+const Lay = struct {
+    t: [4096]u16 = undefined,
+    n: usize = 0,
+
+    fn build(self: *Lay, syms: []const Sym, depth: u5, width: u4) usize {
+        const base = self.n;
+        const size = @as(usize, 1) << width;
+        self.n += size;
+        @memset(self.t[base..][0..size], 0);
+        for (syms) |s| {
+            const r = s.len - depth;
+            if (r > width) continue;
+            const start = @as(usize, s.code & ((@as(u32, 1) << r) - 1)) << @intCast(width - r);
+            for (0..@as(usize, 1) << @intCast(width - r)) |j| self.t[base + start + j] = (s.v << tree.field_shift) + r;
+        }
+        for (0..size) |p| {
+            var g: [300]Sym = undefined;
+            const k = group(syms, depth, width, p, &g);
+            if (k.n == 0) continue;
+            const w2 = best(g[0..k.n], depth + width).w;
+            const sub = self.build(g[0..k.n], depth + width, w2);
+            std.debug.assert(sub < 1 << (16 - tree.field_shift));
+            self.t[base + p] = @intCast((sub << tree.field_shift) + tree.ptr_flag + w2);
+        }
+        return base;
+    }
 };
 
 const bands = ref.mp3.bands;
@@ -147,7 +250,7 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
     var addr: u32 = at("MP_HUFF");
     var base: [34]u32 = @splat(0);
     var root: [34]u32 = @splat(0);
-    for (trees, 0..) |tr, i| {
+    for (trees(), 0..) |tr, i| {
         for (tr.words, 0..) |w, j| try st.y_mem.put(gpa, addr + @as(u32, @intCast(j)), w);
         if (i < codes.len) {
             for (0..32) |s| if (ht.pair[s] != null and ht.pair[s].?.ptr == ht.pair[codes[i]].?.ptr) {
@@ -220,7 +323,8 @@ pub const synth_rows = [_]usize{
 test "the band lists and trees fit their Y" {
     const map = @import("../map.zig");
     var n: usize = 0;
-    for (trees) |tr| n += tr.words.len;
+    for (trees()) |tr| n += tr.words.len;
     try std.testing.expect(map.at("MP_BW") + band_lists.n <= map.at("MP_HUFF"));
     try std.testing.expect(map.at("MP_HUFF") + n <= map.at("MP_YEND"));
 }
+
