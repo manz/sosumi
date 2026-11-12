@@ -2434,9 +2434,8 @@ hnext:  lde e7, #MP_HSB
 ; samples j and 32 - j share V[j] and V[32 + j], since V[32 - m] = -V[m] and V[64 - m] =
 ; V[32 + m] (twin). A sample reads block b's half h = (b - p) & 1
 ; through two A streams of step 34 (even b, odd b), and D at age (b - p) mod 16 from the window
-; X:MP_XD, stored once in 32-word blocks per column pair, [age][2]: the offset A11 runs from
-; 2 ((16 - p) mod 16) in steps of 2, wrapped mod 32 by x02.aa (R3; facts 566-568: no wrap at a
-; modulus of 0x200 on silicon), and A8 = A11 + A12 (the block) unwrapped (626).
+; X:MP_XD, stored once: its offset A11 runs from 32 ((16 - p) mod 16) + j in steps of 32, wrapped
+; mod 512 by x02.aa (R1; facts 566-568), and A8 = A11 + A12 (MP_XD) unwrapped (626).
 ; Matrixing: the 32 distinct rows of N, split per the twin (h1, h2, g2 at X:MP_XZ + 0, 16, 24;
 ; g1 at + 32), in seven groups of like rows, the rows' words packed at X:MP_XN in group order.
 
@@ -2847,52 +2846,52 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
 
 ; One output sample (twin `slot`'s window): 16 products of V (A9 even blocks, A10 odd, step R4 = 34)
 ; by D (A8, step R3 = 32), s4 = D0 on entry; the last loads of each stream step back to the
-; next sample's (R2 = 237 for V; D's steps are x02.aa's, mod R3 = 32), the last tap loads its D0. rshr(acc, 24) in
+; next sample's (R2 = 237 for V; D's steps are x02.aa's, mod R1 = 512), the last tap loads its D0. rshr(acc, 24) in
 ; s1 (s7 = 23). Uses s1..s5, s13.
 .macro mp3_win16() {
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V0
         x03.tap0a s5, #10, s4, s2, s3, #2, R4 ; 2 V0 D0; V1
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D1
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V1 D1; V2
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D2
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V2 D2; V3
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D3
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V3 D3; V4
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D4
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V4 D4; V5
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D5
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V5 D5; V6
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D6
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V6 D6; V7
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D7
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V7 D7; V8
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D8
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V8 D8; V9
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D9
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V9 D9; V10
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D10
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V10 D10; V11
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D11
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V11 D11; V12
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D12
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V12 D12; V13
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D13
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #3, R2 ; + 2 V13 D13; V14
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D14
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #3, R2 ; + 2 V14 D14; V15
         x03.tapa s4, #8, s0, s2, s3, #3, R1 ; D15
         x03.tapa s4, #8, s5, s2, s3, #2, R3 ; + 2 D15 V15; the next D0
@@ -2905,50 +2904,50 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V0
         x03.tap0a s5, #10, s4, s2, s3, #2, R4 ; 2 V0 D0; V1
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D1
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V1 D1; V2
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D2
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V2 D2; V3
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D3
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V3 D3; V4
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D4
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V4 D4; V5
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D5
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V5 D5; V6
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D6
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V6 D6; V7
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D7
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V7 D7; V8
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D8
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V8 D8; V9
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D9
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V9 D9; V10
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D10
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V10 D10; V11
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D11
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #2, R4 ; + 2 V11 D11; V12
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D12
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #2, R4 ; + 2 V12 D12; V13
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D13
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #9, s4, s2, s3, #3, R2 ; + 2 V13 D13; V14
         x03.tapa s4, #8, s0, s2, s3, #2, R3 ; D14
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tapa s5, #10, s4, s2, s3, #3, R2 ; + 2 V14 D14; V15
         x03.tapa s4, #8, s0, s2, s3, #3, R1 ; D15
-        x02.aa A12, A12, R1, #3, A0, A0 ; D: pair 1's block (- 481)
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
+        x02.aa A11, A11, R0, #0, A8, A12, #1 ; + 1: pair 1's D
         x03.tap s4, #8, s5, s2, s3 ; + 2 D15 V15; pair 1's first D
         alu s13, s7, s3, #ASR   ; -1 when lo < 0 (mp3_rd24)
         alu s1, s2, s13, #OP_SUB
@@ -2957,7 +2956,7 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
 ; Samples j and 32 - j, j = 1..15 (twin `slot`'s window): each V word read once into s5 (A9 / A10
 ; as mp3_win16), two taps by D's paired table (X:MP_XD, dsp/mp3/tables.zig: per age,
 ; d[j], then -+d[32 - j], the sign of V[32 - j] against V[j] folded in), the D stream
-; stepping 2 (x02.aa R5, wrapped mod R3 = 32) then 1, the next pair's block + 32. Samples to Y at e7 (+ nch,
+; stepping 32 (x02.aa, wrapped mod R1 = 512) then 1, the next pair 34 (R5). Samples to Y at e7 (+ nch,
 ; R7) and e6 (- nch, R6), saturated to 16 bits by asrrs by s9 = -8 (24-bit saturation), then asr
 ; by s8 = 8 (fact 774; x18.min / max return b when b is 0x7FFF or -0x8000, fact 950). s4 holds the first D on entry and sample
 ; 16's on exit (one column short: A8 + 31). Uses s1..s13, p3.
@@ -2965,68 +2964,67 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         ldi s12, #15
 yp:     pkf(s5, A9, s0, s0, s0, 12, s12, s14, 5, 0, 2, R4) ; V0; one pair less
         x03.tap0a s4, #8, s5, s2, s3, #2, R5 ; j: 2 V0 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap0 s4, #8, s5, s10, s11 ; 32 - j: 2 V0 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V1
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V1 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V1 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V2
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V2 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V2 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V3
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V3 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V3 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V4
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V4 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V4 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V5
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V5 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V5 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V6
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V6 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V6 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V7
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V7 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V7 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V8
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V8 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V8 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V9
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V9 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V9 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V10
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V10 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V10 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V11
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V11 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V11 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V12
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V12 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V12 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V13
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V13 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V13 D'; the next D
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 3, R2) ; V14
         x03.tapa s4, #8, s5, s2, s3, #2, R5 ; j: + 2 V14 D; D'
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V14 D'; the next D
         pkf(s5, A10, s0, s0, s0, 0, s0, s0, 0, 0, 3, R2) ; V15
         x03.tapa s4, #8, s5, s2, s3, #3, R1 ; j: + 2 V15 D; D'
-        x02.aa A12, A12, R3, #2, A0, A0 ; D: the next pair's block (+ 32)
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        x02.aa A11, A11, R5, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 34: the next pair's D)
         x03.tap s4, #8, s5, s10, s11 ; 32 - j: + 2 V15 D'; the next D
         pk(s0, A0, s0, s0, s0, 6, s7, s3, 0, 6) ; rshr(acc, 24) = hi + [lo < 0] (mp3_rd24)
         pk(s0, A0, s0, s0, s0, 1, s2, s6, 5, 0)
@@ -3228,39 +3226,40 @@ yslot:  lde e7, #MP_HCH
         alu s1, s0, s1, #OP_SUB
         ldi s12, #15
         x18.and s1, s1, s12
-        alu s1, s1, s1, #OP_ADD
-        amov(A11, s1)           ; D's offset in its block: 2 age, 0..30
-        ldi s12, #MP_XD + 481
+        ldi s12, #32
+        x18.mpy s1, s0, s1, s12
+        amov(A11, s1)           ; D's offset, 0..511
+        ldi s12, #MP_XD
         alu s1, s1, s12, #OP_ADD
         amov(A8, s1)
-        aimm_e(6, MP_XD + 481)  ; A12: sample 0's column (block 15, odd words)
+        aimm_e(6, MP_XD)        ; A12
         lde e7, #MH_NCH
         ldy s11, e7
         amov_e(3, s11)          ; R7 = A6 path: R7 = nch (A6 unused here)
         rimm R4, #2 * MP_VB
         rimm R3, #32
         rimm R2, #14 * MP_VB - 1
-        rimm R1, #481           ; D: block 15's odd word to block 0
+        rimm R1, #512           ; D's modulus (x02.aa #1, facts 566-568, 626)
         ldi s7, #23
         ldi s9, #-8             ; the 16-bit clamp's counts (mp3_wpair)
         ldi s8, #8
         lde e7, #MP_YO
         ldy s10, e7
         x17.mve e7, s10         ; the first sample's address
-        rimm R5, #2             ; D: the next age
+        rimm R5, #34            ; D: the next pair (x02.aa)
         x18.una s0, s0, #1, R6, s11 ; R6 = -nch (x17 own-x18alu011)
         ldi s12, #31
         x18.mpy s13, s0, s11, s12
         alu s13, s13, s10, #OP_ADD
         x17.mve e6, s13         ; sample 31's address
-        pk(s4, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; D0 of sample 0
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32)
+        pkf(s4, A8, s0, s0, s0, 0, s0, s0, 0, 0, 2, R3) ; D0 of sample 0
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32)
         mp3_win0()
         alu s3, s9, s1, #ASRRS
         alu s3, s8, s3, #ASR
         x17.stys e7, #3, #0, e7, R7 ; sample 0, then + nch
         mp3_wpair()
-        x02.aa A11, A11, R5, #2, A8, A12, #3 ; D: the next age (+ 2 mod 32): sample 16's second D
+        x02.aa A11, A11, R3, #2, A8, A12, #1 ; D: the next age, mod 512 (+ 32: sample 16's second D)
         mp3_win16()
         alu s3, s9, s1, #ASRRS
         alu s3, s8, s3, #ASR

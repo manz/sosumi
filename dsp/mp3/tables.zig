@@ -320,17 +320,15 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
         };
     }
     std.debug.assert(xn == at("MP_XN") + 384);
-    // D for mp3_wpair in 32-word blocks, one per column pair, [age a][2] so that a step of age
-    // is + 2 mod 32 (mp3_synth): block j - 1 (j = 1..15) holds d[32a + j], then d[32a + 32 - j]
-    // negated for even a (V[32 - j] = -V[j] there, V[64 - j] = V[32 + j] odd); block 15 holds
-    // d[32a + 16], then d[32a]
+    // D paired for mp3_wpair, per age a: d[32a], then for j = 1..15 d[32a + j] and
+    // d[32a + 32 - j] negated for even a (V[32 - j] = -V[j] there, V[64 - j] = V[32 + j] odd),
+    // then d[32a + 16]
     for (0..512) |i| {
-        const blk = i / 32;
-        const a = (i % 32) / 2;
-        const second = i & 1 == 1;
-        const v: i24 = if (blk == 15) (if (second) Y.d[32 * a] else Y.d[32 * a + 16]) else if (!second)
-            Y.d[32 * a + blk + 1]
-        else if (a & 1 == 0) -Y.d[32 * a + 31 - blk] else Y.d[32 * a + 31 - blk];
+        const a = i / 32;
+        const c = i % 32;
+        const v: i24 = if (c == 0) Y.d[32 * a] else if (c == 31) Y.d[32 * a + 16] else if (c & 1 == 1)
+            Y.d[32 * a + (c + 1) / 2]
+        else if (a & 1 == 0) -Y.d[32 * a + 32 - c / 2] else Y.d[32 * a + 32 - c / 2];
         try st.x_mem.put(gpa, at("MP_XD") + @as(u32, @intCast(i)), @as(u24, @bitCast(v)));
     }
 }
