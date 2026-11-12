@@ -2,6 +2,11 @@
 zig-out/
 zig-pkg/
 testdata/*
+!testdata/clicks.vbr.mp3
+!testdata/mono.cbr.mp3
+!testdata/clicks.m2.mp3
+!testdata/clicks.m25_8k.mp3
+!testdata/heavy.cbr.mp3
 !testdata/aac/
 testdata/aac/*
 !testdata/aac/*.pkts
