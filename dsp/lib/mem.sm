@@ -125,6 +125,17 @@
         x02.vc LD, LA, LA, A0, LA, MD, MA, MB, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #CODE, #FN, R
 }
 
+; ldw(LD, LA, X, R, D2, ADD, K): LD <- X:[LA]; X <- X + R wrapped by R<K>, D2 <- that + ADD
+;   (x02.vc fn 8, fact 964: the vc A slot wraps like x02.aa's, 963). The other slots write s0.
+; ldwx: ldw beside the third slot's adder, s<XD> <- XA op XB (pk's CODE 0).
+.macro ldw(LD, LA, X, R, D2, ADD, K) {
+        x02.vc LD, LA, X, D2, X, s0, s0, s0, s0, #1, #0, #0, s0, s0, #0, #0, #0, #8, R, ADD, #K
+}
+
+.macro ldwx(LD, LA, X, R, D2, ADD, K, XD, XA, XB, OP) {
+        x02.vc LD, LA, X, D2, X, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #0, #8, R, ADD, #K
+}
+
 .macro pksf(SN, SA, XD, XA, XB, OP, FN, R) {
         x02.vs s0, SA, SA, A0, SA, s0, s0, s0, s0, #1, #(XD >> 2), #(XD & 3), XA, XB, #OP, #0, #(SN & 7), #(SN >> 3), #FN, R
 }
