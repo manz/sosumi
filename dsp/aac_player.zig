@@ -168,9 +168,10 @@ pub fn emitData(w: *std.Io.Writer, gpa: std.mem.Allocator, dir: []const u8, mem:
 
 /// An image's init pass (x17 ASSEMBLY.md "Placement and layout"): `st`'s words as .xdata and
 /// .ydata, with the ring's `slots` entries cleared (owned 0, length 0), then code that clears
-/// BITS_ON (lib/stream.sm), whose DSP-only Y no .ydata reaches: the first packet after the
-/// load enables the stream. Then the decoder pass's header.
-pub fn initPass(gpa: std.mem.Allocator, w: *std.Io.Writer, st: *h.emu.State, slots: u32) !void {
+/// the stream enable's flag at Y:`on` (lib/stream.sm: BITS_ON, or the image's own), which no
+/// .ydata reaches: the first packet after the load enables the stream. Then the decoder
+/// pass's header.
+pub fn initPass(gpa: std.mem.Allocator, w: *std.Io.Writer, st: *h.emu.State, slots: u32, on: u32) !void {
     for (0..2 * slots) |k| try st.y_mem.put(gpa, map.at("RING_E") + @as(u32, @intCast(k)), 0);
     try w.writeAll(".pass init\n");
     try emitData(w, gpa, ".xdata", &st.x_mem, 0xFFFFFF);
@@ -178,12 +179,12 @@ pub fn initPass(gpa: std.mem.Allocator, w: *std.Io.Writer, st: *h.emu.State, slo
     try w.print(
         \\        ldi s3, #0
         \\        lde e6, #0x{X}
-        \\        x17.sty e6, #3, #0      ; BITS_ON = 0
+        \\        x17.sty e6, #3, #0      ; the stream enable's flag = 0
         \\        x17.halt
         \\
         \\.pass decoder
         \\
-    , .{map.at("BITS_ON")});
+    , .{on});
 }
 
 /// aac_packet's x17 image source: one init pass carrying, as .xdata and .ydata, every word the
@@ -201,7 +202,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8, f
     for (0..2) |c| try st.y_mem.put(gpa, map.at("AK_SHP") + @as(u32, @intCast(c)), 0);
     try st.y_mem.put(gpa, map.at("AK_OSL"), 0);
     try w.print("; aac_packet's image (dsp/aac_player.zig imageSource: freq_index {d}, {d} channels)\n", .{ fi, nch });
-    try initPass(gpa, w, &st, 2);
+    try initPass(gpa, w, &st, 2, map.at("BITS_ON"));
     for ([_][]const u8{ "bits", "mem", "huffman", "sections", "dequant", "stereo", "pns", "tns", "imdct", "window", "ring", "aac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll(

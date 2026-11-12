@@ -5,14 +5,14 @@ const std = @import("std");
 const ref = @import("ref");
 const host = @import("host");
 const h = @import("harness.zig");
+const map = @import("map.zig");
 
 pub const emu = h.emu;
 pub const aac = @import("aac_player.zig");
 pub const mp3 = @import("mp3_player.zig");
 
-const pk = 0x2E00;
-const pk_n = pk + 6;
-const pk_status = pk + 7;
+const pk_n = map.at("PK_N");
+const pk_status = map.at("PK_ST");
 
 pub const Error = error{ Unsupported, Status, Starved, MonoCopy } || host.Error || std.mem.Allocator.Error;
 
@@ -33,7 +33,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(Site)) ![]u32
         \\.include "lib/mem.sm"
         \\.include "lib/ring.sm"
         \\.include "lib/alac.sm"
-        \\        bits_init()
+        \\        bits_init_at(ALAC_ON)
         \\        alac_packet()
         \\        x17.halt
         \\
@@ -131,8 +131,8 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !
     defer st.deinit(gpa);
     try h.stageRing(&st, gpa, 1, 0x2000);
     try w.writeAll("; alac_packet's image (dsp/player.zig imageSource)\n");
-    try aac.initPass(gpa, w, &st, 1);
+    try aac.initPass(gpa, w, &st, 1, map.at("ALAC_ON"));
     for ([_][]const u8{ "bits", "rice", "predictor", "unmix", "mem", "ring", "alac" }) |f|
         try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
-    try w.writeAll("        bits_init()\n        alac_packet()\n        x17.halt\n");
+    try w.writeAll("        bits_init_at(ALAC_ON)\n        alac_packet()\n        x17.halt\n");
 }

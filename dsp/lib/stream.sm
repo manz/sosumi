@@ -4,9 +4,15 @@
 .const BITS_ON = 0x2EFE         ; DSP-only Y: the stream is enabled; 0 until the first packet
 
 ; The enable, once per stream (783: it survives re-arms, a second one misbehaves); s14 is left
-; 4, so the caller sets its constants after. Uses s3, s12, e6, A13, p3.
+; 4, so the caller sets its constants after. Uses s3, s12, e6, A13, p3. stream_on_at keeps the
+; flag at Y:ON, for a mode whose Y map lacks BITS_ON (specs/alac.md, fact 960): it must be Y
+; that holds a store, or every packet enables again.
 .macro stream_on() {
-        lde e6, #BITS_ON
+        stream_on_at(BITS_ON)
+}
+
+.macro stream_on_at(ON) {
+        lde e6, #ON
         ldy s12, e6
         ptst p3, s0, #EQ12, #PTST ; p3 = not yet enabled
         jmp #IF_NOT, #3, on
@@ -16,7 +22,7 @@
         ldi s14, #4
         ld0e.sen #0, #3         ; the enable: s12 = 1, s14 = 4 (783); A13 <- 0
         ldi s3, #1
-        x17.sty e6, #3, #0      ; BITS_ON = 1
+        x17.sty e6, #3, #0      ; Y:ON = 1
 on:
 }
 

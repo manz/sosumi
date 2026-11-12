@@ -88,7 +88,7 @@ test "the ALAC x17 image's init pass, then its decoder at q256, decode as the tw
             try testing.expect(state.halted);
         }
     }
-    const dump = @embedFile("tone.at.pkts");
+    const dump = @embedFile("clicks.o30.ff.pkts");
     const nch = le32(dump, 24);
     // the per-track configure words the host writes (specs/alac.md)
     for ([_][2]u32{ .{ 0xFD80, 0x1F }, .{ 0xFD82, le32(dump, 8) }, .{ 0xFD83, le32(dump, 12) }, .{ 0xFD84, le32(dump, 20) }, .{ 0xFD85, le32(dump, 16) } }) |q|
@@ -114,4 +114,14 @@ test "the ALAC x17 image's init pass, then its decoder at q256, decode as the tw
         }
     }
     try testing.expectEqual(dump.len, at);
+    // mode 3's maps (specs/alac.md, fact 960): Y stores outside 0..0x227F, the window
+    // 0x2400..0x267F and the host's FD80..FDFF are dropped on silicon; X kept below 0x2000
+    var ys = state.y_mem.keyIterator();
+    while (ys.next()) |a| {
+        const ok = a.* < 0x2280 or (a.* >= 0x2400 and a.* < 0x2680) or (a.* >= 0xFD80 and a.* < 0xFE00);
+        if (!ok) std.debug.print("Y:0x{X} outside mode 3's map\n", .{a.*});
+        try testing.expect(ok);
+    }
+    var xs = state.x_mem.keyIterator();
+    while (xs.next()) |a| try testing.expect(a.* < 0x2000);
 }

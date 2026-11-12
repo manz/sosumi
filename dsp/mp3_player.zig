@@ -83,7 +83,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !
     defer st.deinit(gpa);
     try stageInit(&st, gpa);
     try w.writeAll("; mp3_packet's image (dsp/mp3_player.zig imageSource)\n");
-    try @import("aac_player.zig").initPass(gpa, w, &st, 2);
+    try @import("aac_player.zig").initPass(gpa, w, &st, 2, map.at("BITS_ON"));
     for (libs) |f| try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll("        mp3_packet()\n        x17.halt\n");
 }

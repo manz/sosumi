@@ -24,10 +24,14 @@
 
 .include "stream.sm"
 
-; Each packet: an empty cache and the constants, the stream enabled once (stream.sm).
-; Uses s3, s12, e6, A13, p2, p3.
+; Each packet: an empty cache and the constants, the stream enabled once (stream.sm; bits_init_at
+; keeps the enable's flag at Y:ON). Uses s3, s12, e6, A13, p2, p3.
 .macro bits_init() {
-        stream_on()
+        bits_init_at(BITS_ON)
+}
+
+.macro bits_init_at(ON) {
+        stream_on_at(ON)
         ldi s9, #0
         ldi s10, #0
         ldi s14, #1

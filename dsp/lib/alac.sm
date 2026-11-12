@@ -9,8 +9,9 @@
 ; only: the reference's other header checks (the 12 zero bits, n <= frame length) are not
 ; repeated. The status slot reports what stops it.
 ;
-; Everything lives in the mode-0 windows (X 0..0x1BFF, Y 0..0x2E7F), for frames up to 4096
-; samples and two channels. X holds one lane at a time:
+; Everything lives inside mode 3's maps (specs/alac.md, fact 960: Y 0..0x227F, the rest of Y
+; drops stores and reads 0 but for the host's FD80..FDFF; X kept below 0x2000), for frames up
+; to 4096 samples and two channels. X holds one lane at a time:
 ;   X MIX          the lane being decoded, 4096 words: Rice writes the residuals there and the
 ;                  predictor runs in place.
 ;   X CSCR         the lane's coefficients times 2^8, zero to +35 (unpredict parks the bit
@@ -42,13 +43,15 @@
 .const CSCR  = 0x1000
 .const RING  = OUTY
 .const ALAC_FL = 4096          ; frame length: the ring's slot holds 4096 stereo frames
-.const UY    = 0x1D00           ; 4096 words, up to COEFY
-.const COEFY = 0x2D00
-.const RICE  = 0x2DA0
-.const PREDY = 0x2DC0
-.const UNMIX = 0x2DE0
+.const UY    = 0x1080           ; 4096 words, up to COEFY; the ring's writes (OUTY + 2 i + 1 at
+                                ; frame i) stay below UY + i + 1 while i < UY - OUTY = 0x1000
+.const COEFY = 0x2080
+.const RICE  = 0x20C0
+.const PREDY = 0x20E0
+.const UNMIX = 0x2100
+.const ALAC_ON = 0x2160         ; the stream enable's flag (stream.sm), 0 after the init pass
 
-.const PK     = 0x2E00
+.const PK     = 0x2120
 .const PK_DEP = 0xFD82
 .const PK_PB  = 0xFD83
 .const PK_KB  = 0xFD84
