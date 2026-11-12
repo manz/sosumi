@@ -84,9 +84,10 @@ The context order is not the cookie order: kb lands at +8 and mb at +0xa.
   block is SRAM).
 - Memory map (fact 960, MEASURED on silicon; modelled in x17 `play --mode 3`): mode 3's DSP Y
   is 0..0x227F (16-bit), the window 0x2400..0x267F (16 bits through DSP stores; no .ydata
-  there) and the host's 0xFD80..0xFDFF. Elsewhere a store is dropped and `ldy` reads 0. X:
-  0..0x1FFF assumed (**INFERRED**; 0x2000..0x20FF via entry 3). A Y flag kept outside the map
-  reads 0 every packet, so state such as the stream enable's flag must sit inside it.
+  there) and the host's 0xFD80..0xFDFF. Elsewhere a store is dropped and `ldy` reads 0. A Y
+  flag kept outside the map reads 0 every packet, so state such as the stream enable's flag
+  must sit inside it. X is 0..0x20FF (fact 961, MEASURED). alac.x17i 23a9ec5c, laid out this way, decodes on silicon
+  (VERDICT, 2026-11-12: 8 packets bit-exact with x17).
 - The EQ is a CPU-side filter in the output stage, shared by every codec: no part of an sm1
   image (MEASURED).
 - Whether all of ALAC runs on sm1 or the ARM shares the work: **OPEN**. Mode 3 has an sm1 codec
