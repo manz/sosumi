@@ -128,7 +128,11 @@ The mode-1 image (`.mode 1`) now fits: X ends at 0x1125 (4390 words) with the IM
 and 3-point DCTs into 9 overlap words per subband (minimp3's structure, 576 words, its tables
 100) and the synthesis window stored once (512 words), its offset wrapped modulo 512 by x02.aa
 (facts 566-568, 626). Y keeps its init data below 0x1780. The image test checks both maps in
-x17. Worst corpus frame 510,854 bundles (48 kHz budget 642K). Unmeasured on silicon.
+x17. Worst corpus frame 511,150 bundles (48 kHz budget 642K). VERDICT (silicon, 2026-11-12): the
+mode-1 image (a1d6021) plays a 256 kbps 44.1 kHz stereo track clean over iAP; a bell-fed frame is
+within 1 LSB of ffmpeg on all 2304 samples. Two silicon-only faults on the way: x19.ld after
+x17.styi wedges (Q21; Y copies are ldy + x18.eagu), and x02.aa wraps only with fn 6..11 (fact
+963; the window's wrap uses fn 8).
 
 ## Decoding stages
 
