@@ -34,7 +34,7 @@ pub fn stageInit(st: *h.emu.State, gpa: std.mem.Allocator) !void {
     try tables.put(st, gpa, map.at);
     try h.stageDequant(st, gpa);
     try h.stageRing(st, gpa, 2, map.at("MP_RSL"));
-    for (0..2048) |k| try st.x_mem.put(gpa, map.at("MP_XV") + @as(u32, @intCast(k)), 0);
+    for (0..2 * map.at("MP_VC")) |k| try st.x_mem.put(gpa, map.at("MP_XV") + @as(u32, @intCast(k)), 0);
     for (0..1152) |k| try st.x_mem.put(gpa, map.at("MP_XOV") + @as(u32, @intCast(k)), 0);
     inline for (.{ "MP_YP", "MP_OSL", "MP_RLEN" }) |name| try st.y_mem.put(gpa, map.at(name), 0);
     try st.y_mem.put(gpa, map.at("MP_YP") + 1, 0);

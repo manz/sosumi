@@ -399,8 +399,9 @@ test "mp3_synth matches ref/dsp/mp3/synth.zig over random granules" {
                         for (0..1024) |i| {
                             const a = i / 64;
                             const m = i % 64;
+                            if (m % 32 > 16) continue; // the mirrors: not stored
                             const b = (p + a) % 16;
-                            const xa = map.at("MP_XV") + 1024 * @as(u32, @intCast(ch)) + 512 * @as(u32, @intFromBool(m >= 32)) + 32 * @as(u32, @intCast(b)) + @as(u32, @intCast(m % 32));
+                            const xa = map.at("MP_XV") + map.at("MP_VC") * @as(u32, @intCast(ch)) + map.at("MP_VH") * @as(u32, @intFromBool(m >= 32)) + map.at("MP_VB") * @as(u32, @intCast(b)) + @as(u32, @intCast(m % 32));
                             const gv: i32 = @as(i24, @bitCast(@as(u24, @truncate(state.getX(xa) orelse 0xDEAD))));
                             if (gv != twin[ch].v[i] and bad < 12) {
                                 std.debug.print("  V age {d} m {d}: want {d} got {d}\n", .{ a, m, twin[ch].v[i], gv });

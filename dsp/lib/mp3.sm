@@ -673,7 +673,10 @@ done:
 .const MP_OSL  = MP_Q + 113     ; the ring slot this frame fills, 0 at start, flipped per frame
 .const MP_RSL  = 0x900          ; words per ring slot: 1152 stereo frames (specs/mp3.md, fact 788)
 .const MP_XOV  = 0x0480         ; X: overlap, [ch][sb][18]
-.const MP_XV   = 0x0900         ; X: synthesis history, [ch][1024]
+.const MP_XV   = 0x0900         ; X: synthesis history, [ch][half][block][17] (mp3_synth)
+.const MP_VB   = 17             ; words per V block's half: V[32 h + m], m = 0..16
+.const MP_VH   = 16 * MP_VB     ; words per half
+.const MP_VC   = 2 * MP_VH      ; words per channel
 .const MP_XN   = 0x13C0         ; X: synthesis rows (mp3_synth's groups), Q23, 384 words
 .const MP_XD   = 0x1540         ; X: the synthesis window paired per age (mp3_wpair), twice over, Q17, 1024 words
 .const MP_XZ   = 0x1100         ; X: scratch: y[36] at +0, y12 at +36, a window's x at +48;
@@ -2481,9 +2484,11 @@ hol:    lde e7, #MP_HSB
 ; Polyphase synthesis (twin: ref/dsp/mp3/synth.zig; ISO/IEC 11172-3 2.4.3.2 and Annex A): the
 ; 18 time slots of channel MP_HCH's subband samples (X:MP_XS + 576 ch, sb * 18 + t) to PCM at
 ; Y[MP_OUT] + (576 gr + 32 t + j) nch + ch. V is a ring of 16 blocks per channel, X:MP_XV +
-; 1024 ch + 512 h + 32 b + m holding V[32 h + m] of the block b (MP_YP[ch] the newest, the
-; next older at b + 1 mod 16), so nothing shifts: a sample reads block b's half h = (b - p) & 1
-; through two A streams of step 64 (even b, odd b), and D at (b - p) mod 16 from the doubled
+; MP_VC ch + MP_VH h + 17 b + m holding V[32 h + m], m = 0..16, of the block b (MP_YP[ch] the
+; newest, the next older at b + 1 mod 16), so nothing shifts. The window reads no other V word:
+; samples j and 32 - j share V[j] and V[32 + j], since V[32 - m] = -V[m] and V[64 - m] =
+; V[32 + m] (twin). A sample reads block b's half h = (b - p) & 1
+; through two A streams of step 34 (even b, odd b), and D at (b - p) mod 16 from the doubled
 ; window X:MP_XD, which then runs straight from 32 ((16 - p) mod 16) + j in steps of 32.
 ; Matrixing: the 32 distinct rows of N, split per the twin (h1, h2, g2 at X:MP_XZ + 0, 16, 24;
 ; g1 at + 32), in seven groups of like rows, the rows' words packed at X:MP_XN in group order.
@@ -2491,122 +2496,12 @@ hol:    lde e7, #MP_HSB
 ; mp3_mgrp16 / 8, n / p / z: BLOCKS blocks of 4 rows of 16 / 8 coefficients over the split words
 ; at X:MP_XZ + SRC, the coefficients from A8 on, column by column (dsp/mp3/tables.zig): x[k] held
 ; in s11 while four x03.tap sums (s2:s3, s4:s5, s6:s7, s8:s9) take the 4 rows' c[k] from A8,
-; 1.25 bundles a product. Row q's value to D1 + q STEP and (n, z: negated) to D2 - q STEP,
-; offsets from the new block's half 0 in A11 (half 1 at + 512); z: row 0's negation to + 512.
+; 1.25 bundles a product. Row q's value to D1 + q STEP (its mirror, V[32 - r] or V[64 - m], is not kept),
+; offsets from the new block's half 0 in A11 (half 1 at + MP_VH); z: row 0's negation to + MP_VH.
 ; s10 holds the first c on entry and the next group's on exit. Uses s1..s13, A9, A12..A14, R5, R6.
-.macro mp3_mgrp16n(SRC, D1, D2, STEP, BLOCKS) {
+.macro mp3_mgrp16n(SRC, D1, STEP, BLOCKS) {
         rimm R5, #D1
         x02.aa A12, A11, R5, #2, A0, A0
-        rimm R5, #D2
-        x02.aa A13, A11, R5, #2, A0, A0
-        rimm R6, #STEP
-        ldi s12, #BLOCKS
-        ldi s1, #23
-blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
-        pk(s11, A9, s0, s0, s0, 12, s12, s14, 5, 0) ; x0; one block less (s10 holds c[0][0]: the last tap loads it)
-        x03.tap0 s10, #8, s11, s2, s3 ; row 0: + 2 x0 c0; the next c
-        x03.tap0 s10, #8, s11, s4, s5 ; row 1: + 2 x0 c0; the next c
-        x03.tap0 s10, #8, s11, s6, s7 ; row 2: + 2 x0 c0; the next c
-        x03.tap0 s10, #8, s11, s8, s9 ; row 3: + 2 x0 c0; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x1
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x1 c1; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x1 c1; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x1 c1; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x1 c1; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x2
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x2 c2; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x2 c2; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x2 c2; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x2 c2; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x3
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x3 c3; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x3 c3; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x3 c3; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x3 c3; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x4
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x4 c4; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x4 c4; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x4 c4; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x4 c4; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x5
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x5 c5; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x5 c5; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x5 c5; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x5 c5; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x6
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x6 c6; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x6 c6; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x6 c6; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x6 c6; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x7
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x7 c7; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x7 c7; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x7 c7; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x7 c7; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x8
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x8 c8; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x8 c8; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x8 c8; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x8 c8; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x9
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x9 c9; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x9 c9; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x9 c9; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x9 c9; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x10
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x10 c10; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x10 c10; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x10 c10; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x10 c10; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x11
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x11 c11; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x11 c11; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x11 c11; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x11 c11; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x12
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x12 c12; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x12 c12; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x12 c12; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x12 c12; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x13
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x13 c13; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x13 c13; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x13 c13; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x13 c13; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x14
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x14 c14; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x14 c14; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x14 c14; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x14 c14; the next c
-        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x15
-        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x15 c15; the next c
-        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x15 c15; the next c
-        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x15 c15; the next c
-        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x15 c15; the next c
-        pk(s0, A0, s0, s0, s0, 13, s1, s3, 0, 6) ; row 0: lo >> 23 (mp3_rd24)
-        pk(s0, A0, s0, s0, s0, 2, s2, s13, 5, 0) ; hi + [lo < 0]
-        pk(s0, A0, s0, s0, s0, 13, s1, s5, 0, 6) ; row 1: lo >> 23 (mp3_rd24)
-        pk(s0, A0, s0, s0, s0, 4, s4, s13, 5, 0) ; hi + [lo < 0]
-        pk(s0, A0, s0, s0, s0, 13, s1, s7, 0, 6) ; row 2: lo >> 23 (mp3_rd24)
-        pk(s0, A0, s0, s0, s0, 6, s6, s13, 5, 0) ; hi + [lo < 0]
-        pk(s0, A0, s0, s0, s0, 13, s1, s9, 0, 6) ; row 3: lo >> 23 (mp3_rd24)
-        pk(s0, A0, s0, s0, s0, 8, s8, s13, 5, 0) ; hi + [lo < 0]
-        ptst p3, s0, #EQ12, #PTST
-        pksf(2, A12, 3, s0, s2, 5, 2, R6) ; and its negation
-        pksf(3, A13, 0, s0, s0, 0, 3, R6)
-        pksf(4, A12, 5, s0, s4, 5, 2, R6) ; and its negation
-        pksf(5, A13, 0, s0, s0, 0, 3, R6)
-        pksf(6, A12, 7, s0, s6, 5, 2, R6) ; and its negation
-        pksf(7, A13, 0, s0, s0, 0, 3, R6)
-        jmp #IF_NOT, #3, blk
-        pksf(8, A12, 9, s0, s8, 5, 2, R6) ; and its negation ; (delay slot)
-        pksf(9, A13, 0, s0, s0, 0, 3, R6) ; (delay slot)
-}
-.macro mp3_mgrp16p(SRC, D1, D2, STEP, BLOCKS) {
-        rimm R5, #D1
-        x02.aa A12, A11, R5, #2, A0, A0
-        rimm R5, #D2
-        x02.aa A13, A11, R5, #2, A0, A0
         rimm R6, #STEP
         ldi s12, #BLOCKS
         ldi s1, #23
@@ -2701,20 +2596,15 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         pk(s0, A0, s0, s0, s0, 8, s8, s13, 5, 0) ; hi + [lo < 0]
         ptst p3, s0, #EQ12, #PTST
         pksf(2, A12, 0, s0, s0, 0, 2, R6)
-        pksf(2, A13, 0, s0, s0, 0, 3, R6)
         pksf(4, A12, 0, s0, s0, 0, 2, R6)
-        pksf(4, A13, 0, s0, s0, 0, 3, R6)
         pksf(6, A12, 0, s0, s0, 0, 2, R6)
-        pksf(6, A13, 0, s0, s0, 0, 3, R6)
         jmp #IF_NOT, #3, blk
         pksf(8, A12, 0, s0, s0, 0, 2, R6) ; (delay slot)
-        pksf(8, A13, 0, s0, s0, 0, 3, R6) ; (delay slot)
+        nop()                   ; (delay slot)
 }
-.macro mp3_mgrp8n(SRC, D1, D2, STEP, BLOCKS) {
+.macro mp3_mgrp16p(SRC, D1, STEP, BLOCKS) {
         rimm R5, #D1
         x02.aa A12, A11, R5, #2, A0, A0
-        rimm R5, #D2
-        x02.aa A13, A11, R5, #2, A0, A0
         rimm R6, #STEP
         ldi s12, #BLOCKS
         ldi s1, #23
@@ -2759,6 +2649,46 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x7 c7; the next c
         x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x7 c7; the next c
         x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x7 c7; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x8
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x8 c8; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x8 c8; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x8 c8; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x8 c8; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x9
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x9 c9; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x9 c9; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x9 c9; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x9 c9; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x10
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x10 c10; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x10 c10; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x10 c10; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x10 c10; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x11
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x11 c11; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x11 c11; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x11 c11; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x11 c11; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x12
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x12 c12; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x12 c12; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x12 c12; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x12 c12; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x13
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x13 c13; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x13 c13; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x13 c13; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x13 c13; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x14
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x14 c14; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x14 c14; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x14 c14; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x14 c14; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x15
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x15 c15; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x15 c15; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x15 c15; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x15 c15; the next c
         pk(s0, A0, s0, s0, s0, 13, s1, s3, 0, 6) ; row 0: lo >> 23 (mp3_rd24)
         pk(s0, A0, s0, s0, s0, 2, s2, s13, 5, 0) ; hi + [lo < 0]
         pk(s0, A0, s0, s0, s0, 13, s1, s5, 0, 6) ; row 1: lo >> 23 (mp3_rd24)
@@ -2768,21 +2698,16 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         pk(s0, A0, s0, s0, s0, 13, s1, s9, 0, 6) ; row 3: lo >> 23 (mp3_rd24)
         pk(s0, A0, s0, s0, s0, 8, s8, s13, 5, 0) ; hi + [lo < 0]
         ptst p3, s0, #EQ12, #PTST
-        pksf(2, A12, 3, s0, s2, 5, 2, R6) ; and its negation
-        pksf(3, A13, 0, s0, s0, 0, 3, R6)
-        pksf(4, A12, 5, s0, s4, 5, 2, R6) ; and its negation
-        pksf(5, A13, 0, s0, s0, 0, 3, R6)
-        pksf(6, A12, 7, s0, s6, 5, 2, R6) ; and its negation
-        pksf(7, A13, 0, s0, s0, 0, 3, R6)
+        pksf(2, A12, 0, s0, s0, 0, 2, R6)
+        pksf(4, A12, 0, s0, s0, 0, 2, R6)
+        pksf(6, A12, 0, s0, s0, 0, 2, R6)
         jmp #IF_NOT, #3, blk
-        pksf(8, A12, 9, s0, s8, 5, 2, R6) ; and its negation ; (delay slot)
-        pksf(9, A13, 0, s0, s0, 0, 3, R6) ; (delay slot)
+        pksf(8, A12, 0, s0, s0, 0, 2, R6) ; (delay slot)
+        nop()                   ; (delay slot)
 }
-.macro mp3_mgrp8p(SRC, D1, D2, STEP, BLOCKS) {
+.macro mp3_mgrp8n(SRC, D1, STEP, BLOCKS) {
         rimm R5, #D1
         x02.aa A12, A11, R5, #2, A0, A0
-        rimm R5, #D2
-        x02.aa A13, A11, R5, #2, A0, A0
         rimm R6, #STEP
         ldi s12, #BLOCKS
         ldi s1, #23
@@ -2837,21 +2762,79 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         pk(s0, A0, s0, s0, s0, 8, s8, s13, 5, 0) ; hi + [lo < 0]
         ptst p3, s0, #EQ12, #PTST
         pksf(2, A12, 0, s0, s0, 0, 2, R6)
-        pksf(2, A13, 0, s0, s0, 0, 3, R6)
         pksf(4, A12, 0, s0, s0, 0, 2, R6)
-        pksf(4, A13, 0, s0, s0, 0, 3, R6)
         pksf(6, A12, 0, s0, s0, 0, 2, R6)
-        pksf(6, A13, 0, s0, s0, 0, 3, R6)
         jmp #IF_NOT, #3, blk
         pksf(8, A12, 0, s0, s0, 0, 2, R6) ; (delay slot)
-        pksf(8, A13, 0, s0, s0, 0, 3, R6) ; (delay slot)
+        nop()                   ; (delay slot)
 }
-.macro mp3_mgrp8z(SRC, D1, D2, STEP, BLOCKS) {
+.macro mp3_mgrp8p(SRC, D1, STEP, BLOCKS) {
         rimm R5, #D1
         x02.aa A12, A11, R5, #2, A0, A0
-        rimm R5, #D2
-        x02.aa A13, A11, R5, #2, A0, A0
-        rimm R5, #512
+        rimm R6, #STEP
+        ldi s12, #BLOCKS
+        ldi s1, #23
+blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
+        pk(s11, A9, s0, s0, s0, 12, s12, s14, 5, 0) ; x0; one block less (s10 holds c[0][0]: the last tap loads it)
+        x03.tap0 s10, #8, s11, s2, s3 ; row 0: + 2 x0 c0; the next c
+        x03.tap0 s10, #8, s11, s4, s5 ; row 1: + 2 x0 c0; the next c
+        x03.tap0 s10, #8, s11, s6, s7 ; row 2: + 2 x0 c0; the next c
+        x03.tap0 s10, #8, s11, s8, s9 ; row 3: + 2 x0 c0; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x1
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x1 c1; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x1 c1; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x1 c1; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x1 c1; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x2
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x2 c2; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x2 c2; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x2 c2; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x2 c2; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x3
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x3 c3; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x3 c3; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x3 c3; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x3 c3; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x4
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x4 c4; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x4 c4; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x4 c4; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x4 c4; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x5
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x5 c5; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x5 c5; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x5 c5; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x5 c5; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x6
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x6 c6; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x6 c6; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x6 c6; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x6 c6; the next c
+        pk(s11, A9, s0, s0, s0, 0, s0, s0, 0, 0) ; x7
+        x03.tap s10, #8, s11, s2, s3 ; row 0: + 2 x7 c7; the next c
+        x03.tap s10, #8, s11, s4, s5 ; row 1: + 2 x7 c7; the next c
+        x03.tap s10, #8, s11, s6, s7 ; row 2: + 2 x7 c7; the next c
+        x03.tap s10, #8, s11, s8, s9 ; row 3: + 2 x7 c7; the next c
+        pk(s0, A0, s0, s0, s0, 13, s1, s3, 0, 6) ; row 0: lo >> 23 (mp3_rd24)
+        pk(s0, A0, s0, s0, s0, 2, s2, s13, 5, 0) ; hi + [lo < 0]
+        pk(s0, A0, s0, s0, s0, 13, s1, s5, 0, 6) ; row 1: lo >> 23 (mp3_rd24)
+        pk(s0, A0, s0, s0, s0, 4, s4, s13, 5, 0) ; hi + [lo < 0]
+        pk(s0, A0, s0, s0, s0, 13, s1, s7, 0, 6) ; row 2: lo >> 23 (mp3_rd24)
+        pk(s0, A0, s0, s0, s0, 6, s6, s13, 5, 0) ; hi + [lo < 0]
+        pk(s0, A0, s0, s0, s0, 13, s1, s9, 0, 6) ; row 3: lo >> 23 (mp3_rd24)
+        pk(s0, A0, s0, s0, s0, 8, s8, s13, 5, 0) ; hi + [lo < 0]
+        ptst p3, s0, #EQ12, #PTST
+        pksf(2, A12, 0, s0, s0, 0, 2, R6)
+        pksf(4, A12, 0, s0, s0, 0, 2, R6)
+        pksf(6, A12, 0, s0, s0, 0, 2, R6)
+        jmp #IF_NOT, #3, blk
+        pksf(8, A12, 0, s0, s0, 0, 2, R6) ; (delay slot)
+        nop()                   ; (delay slot)
+}
+.macro mp3_mgrp8z(SRC, D1, STEP, BLOCKS) {
+        rimm R5, #D1
+        x02.aa A12, A11, R5, #2, A0, A0
+        rimm R5, #MP_VH
         x02.aa A14, A11, R5, #2, A0, A0
         rimm R6, #STEP
         ldi s12, #BLOCKS
@@ -2908,18 +2891,16 @@ blk:    aimm_o(4, MP_XZ + SRC) ; A9: the split words
         ptst p3, s0, #EQ12, #PTST
         pksf(2, A12, 3, s0, s2, 5, 2, R6) ; and its negation
         pks(3, A14, 0, s0, s0, 0) ; row 0: V[32]
-        pksf(4, A12, 5, s0, s4, 5, 2, R6) ; and its negation
-        pksf(5, A13, 0, s0, s0, 0, 3, R6)
-        pksf(6, A12, 7, s0, s6, 5, 2, R6) ; and its negation
-        pksf(7, A13, 0, s0, s0, 0, 3, R6)
+        pksf(4, A12, 0, s0, s0, 0, 2, R6)
+        pksf(6, A12, 0, s0, s0, 0, 2, R6)
         jmp #IF_NOT, #3, blk
-        pksf(8, A12, 9, s0, s8, 5, 2, R6) ; and its negation ; (delay slot)
-        pksf(9, A13, 0, s0, s0, 0, 3, R6) ; (delay slot)
+        pksf(8, A12, 0, s0, s0, 0, 2, R6) ; (delay slot)
+        nop()                   ; (delay slot)
 }
 
-; One output sample (twin `slot`'s window): 16 products of V (A9 even blocks, A10 odd, step R4 = 64)
+; One output sample (twin `slot`'s window): 16 products of V (A9 even blocks, A10 odd, step R4 = 34)
 ; by D (A8, step R3 = 32), s4 = D0 on entry; the last loads of each stream step back to the
-; next sample's (R2 = 447 for V, R1 = 479 for D), the last tap loads its D0. rshr(acc, 24) in
+; next sample's (R2 = 237 for V, R1 = 479 for D), the last tap loads its D0. rshr(acc, 24) in
 ; s1 (s7 = 23). Uses s1..s5, s13.
 .macro mp3_win16() {
         pkf(s5, A9, s0, s0, s0, 0, s0, s0, 0, 0, 2, R4) ; V0
@@ -3093,9 +3074,9 @@ yslot:  lde e7, #MP_HCH
         ldi s12, #15
         x18.and s1, s1, s12     ; the new block: p - 1 mod 16
         x17.sty e7, #1, #0
-        ldi s12, #1024
+        ldi s12, #MP_VC
         x18.mpy s10, s0, s2, s12
-        ldi s12, #32
+        ldi s12, #MP_VB
         x18.mpy s3, s0, s1, s12
         alu s10, s10, s3, #OP_ADD
         ldi s12, #MP_XV
@@ -3222,12 +3203,12 @@ yslot:  lde e7, #MP_HCH
         ; the 32 rows: V[r], -V[32 - r] (r = 16 + n < 32), V[33 + i], V[63 - i] (n = 15 - i)
         aimm_e(4, MP_XN)
         pk(s10, A8, s0, s0, s0, 0, s0, s0, 0, 0) ; the first c
-        mp3_mgrp16n(0, 1, 31, 2, 2)          ; r = 1, 3, .., 15 (h1)
-        mp3_mgrp16p(0, 513, 543, 2, 2)       ; i = 0, 2, .., 14 (h1)
-        mp3_mgrp8n(16, 2, 30, 4, 1)          ; r = 2, 6, 10, 14 (h2)
-        mp3_mgrp8p(16, 514, 542, 4, 1)       ; i = 1, 5, 9, 13 (h2)
-        mp3_mgrp8z(24, 0, 28, 4, 1)          ; r = 0, 4, 8, 12 (g2): V[0], V[32], ..
-        mp3_mgrp8p(24, 516, 540, 4, 1)       ; i = 3, 7, 11, 15 (g2)
+        mp3_mgrp16n(0, 1, 2, 2)              ; r = 1, 3, .., 15 (h1)
+        mp3_mgrp16p(0, MP_VH + 1, 2, 2)      ; i = 0, 2, .., 14 (h1)
+        mp3_mgrp8n(16, 2, 4, 1)              ; r = 2, 6, 10, 14 (h2)
+        mp3_mgrp8p(16, MP_VH + 2, 4, 1)      ; i = 1, 5, 9, 13 (h2)
+        mp3_mgrp8z(24, 0, 4, 1)              ; r = 0, 4, 8, 12 (g2): V[0], V[32], ..
+        mp3_mgrp8p(24, MP_VH + 4, 4, 1)      ; i = 3, 7, 11, 15 (g2)
         rimm R5, #16
         x02.aa A12, A11, R5, #2, A0, A0
         ldi s1, #0
@@ -3236,18 +3217,18 @@ yslot:  lde e7, #MP_HCH
         lde e7, #MP_HCH
         ldy s2, e7
         yidx(s1, MP_YP, s2)
-        ldi s12, #1024
+        ldi s12, #MP_VC
         x18.mpy s2, s0, s2, s12
         ldi s12, #MP_XV
         alu s2, s2, s12, #OP_ADD
         x18.and s3, s1, s14
-        ldi s12, #512
+        ldi s12, #MP_VH
         x18.mpy s3, s0, s3, s12
         alu s4, s2, s3, #OP_ADD
         amov(A9, s4)
         alu s4, s2, s12, #OP_ADD
         alu s4, s4, s3, #OP_SUB
-        ldi s12, #32
+        ldi s12, #MP_VB
         alu s4, s4, s12, #OP_ADD
         amov(A10, s4)
         alu s1, s0, s1, #OP_SUB
@@ -3261,9 +3242,9 @@ yslot:  lde e7, #MP_HCH
         lde e7, #MH_NCH
         ldy s11, e7
         amov_e(3, s11)          ; R7 = A6 path: R7 = nch (A6 unused here)
-        rimm R4, #64
+        rimm R4, #2 * MP_VB
         rimm R3, #32
-        rimm R2, #447
+        rimm R2, #14 * MP_VB - 1
         rimm R1, #479
         ldi s7, #23
         ldi s9, #-8             ; the 16-bit clamp's counts (mp3_wpair)
