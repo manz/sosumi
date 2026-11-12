@@ -8,3 +8,4 @@ testdata/aac/*
 !testdata/alac/
 testdata/alac/*
 !testdata/alac/*.pkts
+specs/questions.md
