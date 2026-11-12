@@ -553,24 +553,25 @@ alac_fail:
 alac_done:
 }
 
-; A pair's lane 0, X:[MIX..MIX + n), to Y:[UY..UY + n): the low 16 bits of each word. Uses A2,
-; e13, s1, s3, s12.
+; A pair's lane 0, X:[MIX..MIX + n), to Y:[UY..UY + n): the low 16 bits of each word, while
+; A2 != R4 = MIX + n (rset_k); each word is loaded one pass ahead, in the back edge's delay
+; slot (the last load reads past the lane, unused). Uses A2, R4, e6, e13, s1, s3, s12, s13.
 .macro alac_touy() {
         aimm_e(1, MIX)
         lde e13, #UY
         yld(s1, PK_N)
-ty:     alu s12, s1, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST
+        alu s12, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; n == 0
         jmp #3, #3, tydone
         nop()
         nop()
-        x19.xrd s3, #2
-        x02.ainc #2, #2
-        x17.styi e13, #3, #0, e13
-        alu s1, s1, s14, #OP_SUB
-        jmp #ALWAYS, #0, ty
-        nop()
-        nop()
+        rset_k(R4, s1, MIX)
+        pk(s3, A2, s0, s0, s0, 0, s0, s0, 0, 0) ; the first word, A2 + 1
+ty:     x17.styi e13, #3, #0, e13
+        pcond p3, R4, A2, #30   ; more: A2 != MIX + n
+        jmp #3, #3, ty
+        pk(s3, A2, s0, s0, s0, 0, s0, s0, 0, 0) ; (delay slot) the next word, A2 + 1
+        nop()                   ; (delay slot)
 tydone:
 }
 
