@@ -234,12 +234,14 @@ skip:   alu s12, s3, s14, #OP_SUB
 finish:
 }
 
-; unmix_y for depth 16 (emit_y16). A pair with mix_res != 0, mix_bits <= 7 and no gap takes
-; a loop of its own: only the low 16 bits of l and r are stored, and they need
-; floor(a v / 2^s) only modulo 2^16, i.e. bits s .. s + 15 of a v. x02.x3's 2 a v mod 2^24
-; holds bits 0 .. 22 of a v exactly, so for s <= 7 one arithmetic shift by s + 1 (alu code 6,
-; fact 774) gives them. The loop runs while A3 (v) != R4 = A3 + n. Also uses s1, s2, s5, s6,
-; e6, R4, R7.
+; unmix_y for depth 16 (emit_y16). A pair with no gap takes a loop of its own: only the low
+; 16 bits of l and r are stored, so floor(a v / 2^s) is needed only modulo 2^16, i.e. bits
+; s .. s + 15 of a v (mix_res = 0 stores u and v as they are: ipair). With s <= 7, x02.x3's 2 a v mod 2^24 holds bits 0 .. 22 of a v
+; exactly, and one arithmetic shift by s + 1 (alu code 6, fact 774) gives them (fpair). With
+; s >= 8, a << (24 - s) fits in 24 bits and x18.mpy's high product of it and v is
+; floor(a v / 2^s) itself (wpair); v has 17 bits at depth 16, so |a v| <= 2^23 and every
+; s >= 24 floors to the sign alone, as s = 24 does. The loops run while A3 (v) != R4 = A3 + n. Also uses s1,
+; s2, s5, s6, e6, R4, R7.
 .macro unmix_y16() {
         ldy s3, e8
         ldi s4, #2
@@ -247,30 +249,56 @@ finish:
         ptst p3, s0, #EQ4, #PTST ; a pair
         jmp #IF_NOT, #3, gen
         ldy s4, e10             ; (delay slot) gap
-        nop()                   ; (delay slot)
+        ldy s1, e3              ; (delay slot) a's 8 bits
         ptst p3, s0, #EQ4, #PTST ; no gap
         jmp #IF_NOT, #3, gen
-        ldy s4, e3              ; (delay slot) mix_res
-        nop()                   ; (delay slot)
-        ptst p3, s0, #EQ4, #PTST ; mix_res == 0: the general loop
-        jmp #3, #3, gen
-        ldy s3, e12             ; (delay slot) s = mix_bits
-        ldi s4, #7              ; (delay slot)
-        alu s4, s4, s3, #OP_SUB
-        ptst p3, s0, #LT4, #PTST ; s > 7
-        jmp #3, #3, gen
-        alu s6, s3, s14, #OP_ADD ; (delay slot) s + 1
-        ldy s1, e3              ; (delay slot) a's 8 bits
-        ldi s4, #-16
-        alu s1, s4, s1, #ASR    ; << 16, wrapping
-        ldi s4, #16
-        alu s1, s4, s1, #ASR    ; a, sign-extended from 8 bits
-        ldy s13, e1
-        ldi s12, #-2
+        ldy s13, e1             ; (delay slot) n
+        ldi s12, #-2            ; (delay slot)
         alu s13, s12, s13, #OP_SUB
         x17.mve e6, s13         ; e6 = -n - 1 (x17.mve adds 1)
         x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -n
         ragu R4, A3, R7, #29    ; A3 + n
+        ldi s4, #-16
+        alu s1, s4, s1, #ASR    ; << 16, wrapping
+        ldi s4, #16
+        alu s1, s4, s1, #ASR    ; a, sign-extended from 8 bits
+        alu s4, s1, s0, #OP_ADD
+        ptst p3, s0, #EQ4, #PTST ; mix_res == 0: l = u, r = v (ipair)
+        jmp #3, #3, ipair
+        ldy s3, e12             ; (delay slot) s = mix_bits
+        ldi s4, #7              ; (delay slot)
+        alu s4, s4, s3, #OP_SUB
+        ptst p3, s0, #LT4, #PTST ; s > 7
+        jmp #IF_NOT, #3, fpair
+        alu s6, s3, s14, #OP_ADD ; (delay slot) s + 1
+        ldi s4, #24             ; (delay slot)
+        alu s4, s3, s4, #OP_SUB ; s - 24
+        x18.min s4, s4, s0      ; min(s, 24) - 24 (fact 951)
+        alu s1, s4, s1, #ASR    ; a << (24 - min(s, 24)): |a| <= 2^7, so it fits for s >= 8
+wpair:  pcond p3, R4, A3, #30   ; more: A3 != R4
+        jmp #IF_NOT, #3, finish
+        ldy s7, e13             ; (delay slot) u
+        x18.eagu e13, e13, #AGU_INC ; (delay slot)
+        x19.xrd s8, #3          ; v
+        x02.ainc #3, #3
+        x18.mpy s0, s5, s1, s8  ; floor(a v / 2^s), the high product (x17 reference.md x18.mpy)
+        alu s7, s7, s8, #OP_ADD
+        alu s7, s7, s5, #OP_SUB ; l
+        alu s8, s7, s8, #OP_SUB ; r = l - v
+        x17.styi e11, #7, #0, e11
+        jmp #ALWAYS, #0, wpair
+        alu s3, s8, s0, #OP_ADD ; (delay slot)
+        x17.styi e11, #3, #0, e11 ; (delay slot)
+ipair:  pcond p3, R4, A3, #30   ; more: A3 != R4
+        jmp #IF_NOT, #3, finish
+        ldy s3, e13             ; (delay slot) u
+        x18.eagu e13, e13, #AGU_INC ; (delay slot)
+        x19.xrd s8, #3          ; v
+        x02.ainc #3, #3
+        x17.styi e11, #3, #0, e11
+        jmp #ALWAYS, #0, ipair
+        alu s3, s8, s0, #OP_ADD ; (delay slot)
+        x17.styi e11, #3, #0, e11 ; (delay slot)
 fpair:  pcond p3, R4, A3, #30   ; more: A3 != R4
         jmp #IF_NOT, #3, finish
         ldy s7, e13             ; (delay slot) u
