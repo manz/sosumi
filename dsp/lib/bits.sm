@@ -53,19 +53,18 @@
 need:   alu s12, s10, s11, #OP_SUB ; sh = avail - k
         ptst p3, s0, #LT12, #PTST ; p3 = avail < k
         jmp #IF_NOT, #3, have
-        ldi s13, #-8            ; (delay slot)
-        nop()                   ; (delay slot)
+        alu s6, s0, s12, #OP_SUB ; (delay slot) -sh
+        alu dst, s12, s9, #ASR  ; (delay slot) dst = floor(c / 2^sh), redone after a refill
         x16.getb #7, #7         ; a byte at a time (refill's steps): k may pass 8
+        ldi s13, #-8
         alu s9, s13, s9, #ASR   ; cache << 8
-        ldi s12, #8
         x02.asrc s13, A15       ; the byte + 1, two bundles after the read
+        ldi s12, #8
         alu s13, s13, s14, #OP_SUB
         jmp #ALWAYS, #0, need
         alu s9, s9, s13, #OP_ADD ; (delay slot)
         alu s10, s10, s12, #OP_ADD ; (delay slot) avail += 8
-have:   alu dst, s12, s9, #ASR  ; dst = floor(c / 2^sh)
-        alu s6, s0, s12, #OP_SUB ; -sh
-        alu s6, s6, dst, #ASR   ; dst << sh
+have:   alu s6, s6, dst, #ASR   ; dst << sh
         alu s9, s9, s6, #OP_SUB ; the cache keeps the low sh bits
         alu s10, s12, s0, #OP_ADD ; avail = sh
 }
