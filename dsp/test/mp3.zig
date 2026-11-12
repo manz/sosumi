@@ -19,6 +19,12 @@ fn y(st: *h.emu.State, addr: u32) u32 {
     return st.getY(addr) orelse 0xDEAD;
 }
 
+/// The byte at byte address a: Y word a / 2, high byte first (lib/ybits.sm).
+fn ybyte(st: *h.emu.State, a: u32) u32 {
+    const w = y(st, a / 2) & 0xFFFF;
+    return if (a & 1 == 0) w >> 8 else w & 0xFF;
+}
+
 test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
     const gpa = testing.allocator;
     const prog = try h.assemble(gpa,
@@ -52,7 +58,7 @@ test "mp3_header and mp3_sideinfo read every fixture frame as ref/mp3 does" {
             try testing.expectEqual(@as(u32, hd.channels()), y(&state, map.at("MH_NCH")));
             try testing.expectEqual(@as(u32, @intCast(hd.mainDataOffset() - 4)), y(&state, map.at("MH_SIDE")));
             const main = frame[hd.mainDataOffset()..];
-            for (main, 0..) |b, i| try testing.expectEqual(@as(u32, b), y(&state, map.at("MP_MAIN") + @as(u32, @intCast(i))));
+            for (main, 0..) |b, i| try testing.expectEqual(@as(u32, b), ybyte(&state, map.at("MP_MB") + @as(u32, @intCast(i))));
             var r = ref.bits.BitReader.init(frame[4 + @as(usize, if (hd.crc) 2 else 0) .. hd.mainDataOffset()]);
             const si = try ref.mp3.sideinfo.read(&r, hd);
             try testing.expectEqual(@as(u32, si.main_data_begin), y(&state, map.at("MP_SI")));
@@ -94,8 +100,11 @@ test "mp3_granules decodes each granule to subband samples through the reservoir
         \\        nop()
         \\        nop()
         \\        mp3_granules()
+        \\        jmp #ALWAYS, #0, done
+        \\        nop()
+        \\        nop()
         \\keep:   mp3_keep()
-        \\        x17.halt
+        \\done:   x17.halt
         \\
     );
     defer gpa.free(prog);

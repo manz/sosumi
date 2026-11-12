@@ -1,14 +1,16 @@
 ; Twin: ref/dsp/bits.zig; ISO/IEC 11172-3 bit order (bslbf, MSB first).
-; MSB-first bit reader over bytes held one per Y word (0..255): the MP3 program's frame and bit
-; reservoir, copied there from the input stream. Same registers and macros as lib/bits.sm
-; (lib/bitcore.sm); the byte pointer lives in a Y slot so the bit position can be read back.
+; MSB-first bit reader over bytes packed two per Y word, the first in the high byte: the MP3
+; program's frame and bit reservoir, copied there from the input stream. A byte's address is
+; 2 w + i for byte i (0, 1) of Y word w. Same registers and macros as lib/bits.sm
+; (lib/bitcore.sm); the byte address lives in a Y slot so the bit position can be read back.
 ;
-;   e11  -> YB_PTR, holding q = the next byte's address - 1 (x17.mve e, s sets e = s + 1)
-;   e10  the byte being read (scratch)
+;   e11  -> YB_PTR, holding q = the next byte's address
+;   e10  the word being read (scratch)
 ;
 ; ybits_init(): e11 and the constants, empty cache. ybits_at(r): continue at the byte whose
-; address is in r (not s13), empty cache. ybits_pos(dst): the bit position, 8 * (next byte) -
-; avail, in bits from Y:0 (dst not s13). refill(): one byte from Y, the pointer stepped.
+; address is in r (not s13), empty cache. ybits_pos(dst): the bit position, 8 q - avail (dst not
+; s13). refill(): one byte, the pointer stepped; it uses s6, s12 and s13, which getbits_s and
+; huff_decode, its only callers, recompute after it.
 
 .include "bitcore.sm"
 
@@ -25,15 +27,14 @@
 }
 
 .macro ybits_at(r) {
-        alu s13, r, s14, #OP_SUB
-        x17.sty e11, #5, #1     ; q = r - 1 (s13)
+        alu s13, r, s0, #OP_ADD
+        x17.sty e11, #5, #1     ; q = r (s13)
         ldi s9, #0
         ldi s10, #0
 }
 
 .macro ybits_pos(dst) {
         ldy dst, e11
-        alu dst, dst, s14, #OP_ADD ; next byte
         ldi s13, #-3
         alu dst, s13, dst, #ASR ; * 8 (fact 774)
         alu dst, dst, s10, #OP_SUB
@@ -42,11 +43,20 @@
 .macro refill() {
         ldi s13, #-8
         alu s9, s13, s9, #ASR   ; cache << 8 (fact 774)
-        ldy s13, e11
-        x17.mve e10, s13        ; e10 = q + 1, the byte's address
-        alu s13, s13, s14, #OP_ADD
+        ldy s6, e11             ; q
+        alu s12, s14, s6, #ASR  ; its word
+        alu s12, s12, s14, #OP_SUB
+        x17.mve e10, s12        ; e10 = the word's address
+        alu s13, s6, s14, #OP_ADD
         x17.sty e11, #5, #1     ; q + 1 (s13)
-        ldy s13, e10            ; the byte, 0..255
+        ldy s13, e10            ; the word, sign-extended
+        x18.and s6, s6, s14     ; i
+        alu s6, s14, s6, #OP_SUB
+        ldi s12, #-3
+        alu s6, s12, s6, #ASR   ; 8 (1 - i)
+        alu s13, s6, s13, #ASR  ; the byte in bits 0..7
+        ldi s12, #0xFF
+        x18.and s13, s13, s12
         alu s9, s9, s13, #OP_ADD
         ldi s13, #8
         alu s10, s10, s13, #OP_ADD ; avail += 8

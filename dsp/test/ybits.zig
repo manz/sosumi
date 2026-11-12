@@ -1,10 +1,11 @@
-//! dsp/lib/ybits.sm against ref/dsp/bits.zig: the same reads over bytes held one per Y word.
+//! dsp/lib/ybits.sm against ref/dsp/bits.zig: the same reads over bytes packed two per Y word,
+//! the first high, at byte addresses 2 w + i.
 const std = @import("std");
 const ref = @import("ref");
 const h = @import("../harness.zig");
 
 const testing = std.testing;
-const base: u32 = 0x1400;
+const base: u32 = 2 * 0x1400; // byte address of Y word 0x1400's high byte
 
 test "ybits reads, seeks and reports its position as the Reader does" {
     const gpa = testing.allocator;
@@ -28,7 +29,7 @@ test "ybits reads, seeks and reports its position as the Reader does" {
 
         var state = h.emu.State{};
         defer state.deinit(gpa);
-        for (data, 0..) |b, i| try state.y_mem.put(gpa, base + @as(u32, @intCast(i)), b);
+        for (0..data.len / 2) |i| try state.y_mem.put(gpa, base / 2 + @as(u32, @intCast(i)), @as(u32, data[2 * i]) << 8 | data[2 * i + 1]);
         _ = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 16);
         try testing.expect(state.halted);
 

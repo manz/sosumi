@@ -4,8 +4,10 @@
 ;
 ; Each packet is one whole frame (specs/mp3.md). mp3_header reads its 4 header bytes, takes the
 ; frame length from MP_FLEN (the host's rule: 144 or 72 x kbps x 1000 / rate, free format as
-; 128 kbps), then copies the CRC and side information to MP_SIDE + 4 and the main data to
-; MP_MAIN, right after the reservoir's bytes (one byte per Y word, as ybits reads them).
+; 128 kbps), then copies the CRC and side information to MP_SIDE + 4, the reservoir's bytes to
+; MP_MB and the main data right after them: bytes two to a Y word, as ybits reads them, in the
+; ring slot's second half, which the frame's PCM reaches only in its last granule's synthesis
+; (mp3_keep runs first). Byte addresses are 2 w + i (lib/ybits.sm).
 
 .const MP_HDR  = 0x1280         ; header fields, then what follows from them (MH_*)
 .const MH_VER  = MP_HDR + 1     ; version bits: 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
@@ -24,27 +26,87 @@
 .const MP_GR0  = MP_SI + 3      ; granule (gr, ch) at MP_GR0 + (2 gr + ch) MP_GR
 .const MP_GR   = 18
 .const MP_FLEN = 0x1300         ; 135 words: [MPEG-1, 2, 2.5][sr_index][bitrate_index]
-.const MP_SIDE = 0x1390         ; the header, CRC and side information bytes (<= 38)
-.const MP_RES  = 0x1400         ; the reservoir: up to 511 bytes ending at MP_MAIN - 1
-.const MP_MAIN = 0x1600         ; this frame's main data (<= 1440 bytes)
+.const MP_SIDE = 2 * 0x500     ; byte address: the header, CRC and side information (<= 38
+                                ; bytes) at the ring slot's word 0x480 (OUTY + MP_RSL / 2)
+.const MP_MB   = MP_SIDE + 40   ; byte address: the reservoir's bytes, then this frame's main
+                                ; data (<= 512 + 1440 bytes, below the slot's end)
+.const MP_RB   = 2 * 0x1780     ; byte address: the reservoir between frames, 512 bytes at Y
+                                ; 0x1780..0x187F (mode 1's DSP-only window, fact 961)
 
 ; A granule record, word by word (ref/mp3/sideinfo.zig Granule): part2_3_length, big_values,
 ; global_gain, scalefac_compress, window_switching, block_type, mixed, table_select[3],
 ; subblock_gain[3], region0_count, region1_count, preflag, scalefac_scale, count1_table_b.
 
-; Y[s1 ..] <- the next s2 stream bytes. Uses s2, s3, s12, s13, e7, A1, A15.
+; Bytes at byte address s1 on <- the next s2 stream bytes, two to a word (lib/ybits.sm). Uses
+; s1..s3, s12, s13, e7, A1, A15.
 .macro mp3_copy() {
-        alu s13, s1, s14, #OP_SUB
-        x17.mve e7, s13         ; e7 = s1
-more:   alu s12, s2, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; nothing left
+        alu s13, s14, s1, #ASR  ; s1's word
+        alu s13, s13, s14, #OP_SUB
+        x17.mve e7, s13
+        x18.and s12, s1, s14
+        ptst p3, s0, #EQ12, #PTST ; even: whole words
+        jmp #3, #3, pairs
+        nop()
+        nop()
+        alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST ; odd and nothing to copy
+        jmp #3, #3, done
+        nop()
+        nop()
+        sbyte(s3)               ; the word's low byte
+        ldy s13, e7
+        alu s3, s13, s3, #OP_ADD ; its high byte kept, this one low
+        x17.styi e7, #3, #0, e7
+        alu s2, s2, s14, #OP_SUB
+pairs:  ldi s12, #2
+        alu s12, s2, s12, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; under two left
+        jmp #3, #3, tail
+        nop()
+        nop()
+        sbyte(s3)
+        sbyte(s13)
+        ldi s12, #-8
+        alu s3, s12, s3, #ASR   ; the first byte high (fact 774)
+        alu s3, s3, s13, #OP_ADD
+        x17.styi e7, #3, #0, e7
+        ldi s12, #2
+        alu s2, s2, s12, #OP_SUB
+        jmp #ALWAYS, #0, pairs
+        nop()
+        nop()
+tail:   alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #EQ12, #PTST
         jmp #3, #3, done
         nop()
         nop()
         sbyte(s3)
+        ldi s12, #-8
+        alu s3, s12, s3, #ASR
+        x17.sty e7, #3, #0
+done:
+}
+
+; Words from byte address s1 (even) <- s2 bytes at byte address s3 (even). Uses s1..s3, s12,
+; s13, e7, e8.
+.macro mp3_wcopy() {
+        alu s13, s14, s1, #ASR
+        alu s13, s13, s14, #OP_SUB
+        x17.mve e7, s13
+        alu s13, s14, s3, #ASR
+        alu s13, s13, s14, #OP_SUB
+        x17.mve e8, s13
+        alu s2, s2, s14, #OP_ADD
+        alu s2, s14, s2, #ASR   ; words: ceil(bytes / 2)
+mv:     alu s12, s2, s0, #OP_ADD
+        ptst p3, s0, #LE12, #PTST
+        jmp #3, #3, done
+        nop()
+        nop()
+        x19.ld s3, #4, e8, #2
         x17.styi e7, #3, #0, e7
         alu s2, s2, s14, #OP_SUB
-        jmp #ALWAYS, #0, more
+        jmp #ALWAYS, #0, mv
         nop()
         nop()
 done:
@@ -146,9 +208,17 @@ nocrc:  mp3_put(MH_SIDE, 7)
         ldi s1, #MP_SIDE + 4
         alu s2, s7, s0, #OP_ADD
         mp3_copy()
+        lde e7, #MP_RLEN
+        ldy s2, e7
+        ldi s1, #MP_MB
+        ldi s3, #MP_RB
+        mp3_wcopy()
+        lde e7, #MP_RLEN
+        ldy s1, e7
+        ldi s12, #MP_MB
+        alu s1, s1, s12, #OP_ADD
         lde e7, #MH_MAIN
         ldy s2, e7
-        ldi s1, #MP_MAIN
         mp3_copy()
 }
 
@@ -623,8 +693,8 @@ done:
 
 ; ---------------------------------------------------------------------------
 ; The bit reservoir (ref/mp3/decoder.zig Parser; ISO/IEC 11172-3 2.4.3.4.4): the last 512
-; bytes of main data end at MP_MAIN - 1, so a frame's main data, copied to MP_MAIN, continues
-; them, and its granules start at bit 8 (MP_MAIN - main_data_begin - MP_PB) from Y:MP_PB.
+; bytes of main data, kept at MP_RB, are copied to MP_MB and the frame's main data after them, so
+; its granules start at bit 8 (MP_RLEN - main_data_begin) from byte MP_MB.
 
 ; Huffman decoding and band tables, staged by dsp/mp3/tables.zig (Y words below 0x8000: ldy
 ; sign-extends).
@@ -690,7 +760,7 @@ done:
 .const MP_RE   = 0x1D51         ; the three regions' ends, in coefficients (576 the last)
 .const MP_BIG  = 0x1D54         ; 2 big_values
 .const MP_I    = 0x1D55         ; coefficients decoded
-.const MP_LIM  = 0x1D56         ; the granule's last bit + 1, from Y:MP_PB
+.const MP_LIM  = 0x1D56         ; the granule's last bit + 1, from byte MP_MB
 .const MP_TB   = 0x1D57         ; the region's tree, 0 none
 .const MP_TR   = 0x1D58         ; its root width
 .const MP_TL   = 0x1D59         ; its linbits
@@ -700,9 +770,7 @@ done:
 
 .const MP_RLEN = 0x1D4E         ; reservoir bytes, 0..512 (0 at the stream's start)
 .const MP_OK   = 0x1D4F         ; 1: main_data_begin within the reservoir, the frame decodes
-.const MP_P    = 0x1D50         ; the granule at hand's first bit, in bits from Y:MP_PB
-.const MP_PB   = 0x1000         ; MP_P's origin: Y words load sign-extended from 16 bits, so a
-                                ; bit address from Y:0 would turn negative past Y:0x1000
+.const MP_P    = 0x1D50         ; the granule at hand's first bit, in bits from byte MP_MB
 
 ; MP_OK and MP_P for this frame. Uses s1, s2, s12, e7.
 .macro mp3_main() {
@@ -710,7 +778,8 @@ done:
         ldy s1, e7              ; main_data_begin
         lde e7, #MP_RLEN
         ldy s2, e7
-        alu s12, s2, s1, #OP_SUB
+        alu s1, s2, s1, #OP_SUB ; the first byte: MP_RLEN - main_data_begin
+        alu s12, s1, s0, #OP_ADD
         ptst p3, s0, #LT12, #PTST ; reaches past the reservoir
         ldi s2, #0
         jmp #3, #3, ok
@@ -718,63 +787,82 @@ done:
         nop()
         ldi s2, #1
 ok:     mp3_put(MP_OK, 2)
-        ldi s12, #MP_MAIN - MP_PB
-        alu s1, s12, s1, #OP_SUB
         ldi s12, #-3
         alu s1, s12, s1, #ASR   ; * 8 (fact 774)
         mp3_put(MP_P, 1)
 }
 
-; The reader at bit s1 from Y:MP_PB (s1 not s13). Uses s1, s2, the reader's registers.
+; The reader at bit s1 from byte MP_MB (s1 not s13). Uses s1, s2, the reader's registers.
 .macro mp3_seek() {
         ldi s12, #3
-        alu s2, s12, s1, #ASR   ; the byte from MP_PB
+        alu s2, s12, s1, #ASR   ; the byte from MP_MB
         ldi s12, #-3
         alu s12, s12, s2, #ASR
         alu s1, s1, s12, #OP_SUB ; the bits into it
-        ldi s12, #MP_PB
+        ldi s12, #MP_MB
         alu s2, s2, s12, #OP_ADD
         ybits_at(s2)
         alu s11, s1, s0, #OP_ADD
         getbits_s(s1)
 }
 
-; The reservoir after the frame: its last min(512, MP_RLEN + MH_MAIN) bytes moved to end at
-; MP_MAIN - 1. Uses s1..s3, s12, s13, e7, e8.
+; The reservoir after the frame: the last n = min(512, MP_RLEN + MH_MAIN) bytes of MP_MB's to
+; MP_RB, before anything writes the slot's second half. Their first byte is odd when
+; MP_RLEN + MH_MAIN - n is: each word then joins two (w << 8 | w' >> 8). Uses s1..s3, s12, s13,
+; e7, e8.
 .macro mp3_keep() {
         lde e7, #MP_RLEN
         ldy s1, e7
         lde e7, #MH_MAIN
         ldy s2, e7
-        alu s1, s1, s2, #OP_ADD
+        alu s2, s1, s2, #OP_ADD ; bytes at MP_MB
         ldi s12, #512
-        alu s12, s1, s12, #OP_SUB
+        alu s12, s2, s12, #OP_SUB
         ptst p3, s0, #LT12, #PTST ; under 512
+        alu s1, s2, s0, #OP_ADD
         jmp #3, #3, fits
         nop()
         nop()
         ldi s1, #512
 fits:   mp3_put(MP_RLEN, 1)
-        ldi s12, #MP_MAIN - 1
-        alu s13, s12, s2, #OP_ADD
-        alu s13, s13, s1, #OP_SUB ; source - 1: MP_MAIN + main - n - 1
+        alu s2, s2, s1, #OP_SUB ; the first kept byte, from MP_MB
+        ldi s12, #MP_MB
+        alu s3, s2, s12, #OP_ADD
+        x18.and s12, s2, s14
+        ptst p3, s0, #EQ12, #PTST ; even: whole words
+        alu s2, s1, s0, #OP_ADD
+        jmp #IF_NOT, #3, odd
+        nop()
+        nop()
+        ldi s1, #MP_RB
+        mp3_wcopy()
+        jmp #ALWAYS, #0, done
+        nop()
+        nop()
+odd:    alu s13, s14, s3, #ASR  ; the first byte's word
+        alu s13, s13, s14, #OP_SUB
         x17.mve e8, s13
-        alu s13, s12, s1, #OP_SUB ; destination - 1: MP_MAIN - n - 1
-        x17.mve e7, s13
-        alu s12, s2, s0, #OP_ADD
-        ptst p3, s0, #EQ12, #PTST ; no new bytes: nothing moves
-        jmp #3, #3, done
-        nop()
-        nop()
-mv:     alu s12, s1, s0, #OP_ADD
+        lde e7, #MP_RB / 2
+        alu s1, s1, s14, #OP_ADD
+        alu s1, s14, s1, #ASR   ; words: ceil(n / 2)
+        x19.ld s2, #4, e8, #2   ; w
+jn:     alu s12, s1, s0, #OP_ADD
         ptst p3, s0, #LE12, #PTST
         jmp #3, #3, done
         nop()
         nop()
-        x19.ld s3, #4, e8, #2
+        x19.ld s13, #4, e8, #2  ; w'
+        ldi s12, #-8
+        alu s3, s12, s2, #ASR   ; w << 8 (fact 774)
+        alu s2, s13, s0, #OP_ADD
+        ldi s12, #8
+        alu s13, s12, s13, #ASR
+        ldi s12, #0xFF
+        x18.and s13, s13, s12   ; w' >> 8
+        alu s3, s3, s13, #OP_ADD
         x17.styi e7, #3, #0, e7
         alu s1, s1, s14, #OP_SUB
-        jmp #ALWAYS, #0, mv
+        jmp #ALWAYS, #0, jn
         nop()
         nop()
 done:
@@ -839,7 +927,15 @@ next:   lde e7, #MP_CK
         nop()
         nop()
         mp3_put(MP_SGR, 1)
-        mp3_grdone()
+        lde e7, #MH_MP1
+        ldy s12, e7
+        alu s12, s1, s12, #OP_SUB
+        ptst p3, s0, #EQ12, #PTST ; the last granule: its synthesis reaches the main data
+        jmp #IF_NOT, #3, syn
+        nop()
+        nop()
+        mp3_keep()
+syn:    mp3_grdone()
 inc:    lde e7, #MP_CK
         ldy s1, e7
         alu s1, s1, s14, #OP_ADD
@@ -910,12 +1006,10 @@ done:
         spec_put(s2)
 }
 
-; s<dst> = the reader's position in bits from Y:MP_PB. Uses s13.
+; s<dst> = the reader's position in bits from byte MP_MB. Uses s13.
 .macro mp3_pos(dst) {
         ybits_pos(dst)
-        ldi s13, #MP_PB
-        alu dst, dst, s13, #OP_SUB
-        ldi s13, #MP_PB * 8 - MP_PB
+        ldi s13, #MP_MB * 8
         alu dst, dst, s13, #OP_SUB
 }
 
@@ -3313,11 +3407,12 @@ yslot:  lde e7, #MP_HCH
         jmp #3, #3, mute
         nop()
         nop()
-        mp3_granules()
-        jmp #ALWAYS, #0, keep
+        mp3_granules()          ; mp3_keep within
+        jmp #ALWAYS, #0, pub
         nop()
         nop()
-mute:   mp3_plen(s6)
+mute:   mp3_keep()
+        mp3_plen(s6)
         lde e7, #MP_OUT
         ldy s1, e7
         alu s1, s1, s14, #OP_SUB
@@ -3330,8 +3425,7 @@ zero:   x17.styi e7, #3, #0, e7
         jmp #IF_NOT, #3, zero
         nop()
         nop()
-keep:   mp3_keep()
-        mp3_plen(s7)
+pub:    mp3_plen(s7)
         ring_publish1()
         jmp #ALWAYS, #0, done
         nop()
