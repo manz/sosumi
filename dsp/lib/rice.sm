@@ -3,7 +3,7 @@
 ; ALAC's adaptive Golomb-Rice codeword: the twin of `get` in
 ; ref/dsp/alac/rice.zig. Needs lib/bits.sm included first.
 ;
-; One codeword (rice_cw): k (1..15) in s11 is the read width, m = 2^KM - 1 the multiplier.
+; One codeword (rice_hot_a .. rice_cold below): k (1..15) in s11 is the read width, m = 2^KM - 1 the multiplier.
 ;   A prefix of 9 ones is an escape: the next W bits, raw (W in the Y slot ESC, <= 22).
 ;   Otherwise, pre ones then a zero; hi = the next k - 1 bits; with base = pre * m,
 ;   hi == 0 gives base, else base + 2 * hi + bit - 1.
@@ -16,36 +16,66 @@
 
 .const MAX_PREFIX = 9
 
-; n into s8. Keeps s1..s3, s5, s7, s15 and KM. Uses s4, s6, s12, s13 and getbits's.
-.macro rice_cw(KM, ESC) {
-        alu s12, s10, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; the cache is empty
-        jmp #IF_NOT, #3, pfx
-        alu s8, s0, s0, #OP_ADD ; (delay slot) pre = 0
-        ldi s12, #-24           ; (delay slot)
-        refill()                ; the codeword's first bit is in the next byte
+; One codeword in four pieces, n into s8: rice_hot_a, then the caller's label V and rice_hot_b,
+; then the caller's label D; rice_small at the caller's label S and rice_cold at its label C,
+; both out of line (after an unconditional jump). The common codeword (a zero first, v >= 2)
+; falls straight through hot_a and hot_b. Keeps s1..s3, s5, s7, s15 and KM. Uses s4, s6,
+; s12, s13 and getbits's.
+;
+; hot_a: z = the cache's avail bits at the top; z > 0 is a zero first with pre = 0 (base 0).
+; z < 0 (a one first) and z == 0 (an empty cache, or nothing but zeros left) go to C.
+.macro rice_hot_a(C) {
         ldi s12, #-24
-pfx:    alu s12, s10, s12, #OP_ADD ; avail - 24
+        alu s12, s10, s12, #OP_ADD ; avail - 24
         alu s12, s12, s9, #ASR  ; z: the avail bits at the top, wrapping (fact 774)
-        ptst p3, s0, #LT12, #PTST ; a one first
-        jmp #3, #3, ones
+        ptst p3, s0, #LE12, #PTST ; a one first, or z == 0
+        jmp #3, #3, C
         alu s10, s10, s14, #OP_SUB ; (delay slot) a zero: it leaves (its bit is 0)
-        x19.alu s4, s8, KM, #SHIFT ; (delay slot) pre << KM
-        alu s4, s4, s8, #OP_SUB ; base = pre * m
-vread:  getbits_s(s13)          ; v, k bits
+        alu s4, s0, s0, #OP_ADD ; (delay slot) base = 0
+}
+
+; hot_b: v, k bits; v >= 2 gives base + v - 1 here, v < 2 goes to S with v << avail in s6.
+.macro rice_hot_b(S) {
+        getbits_s(s13)          ; v, k bits
         alu s12, s13, s14, #OP_SUB
         alu s12, s12, s14, #OP_SUB
         ptst p3, s0, #LT12, #PTST ; v < 2: hi == 0
-        jmp #IF_NOT, #3, big
+        jmp #3, #3, S
         alu s8, s4, s13, #OP_ADD ; (delay slot) base + v
         x19.alu s6, s13, s10, #SHIFT ; (delay slot) v << avail
+        alu s8, s8, s14, #OP_SUB ; base + v - 1
+}
+
+; v < 2 (hi == 0): base, v's bit handed back to the cache.
+.macro rice_small(D) {
         alu s9, s9, s6, #OP_ADD ; v's bit back on top of the cache
-        alu s10, s10, s14, #OP_ADD
-        jmp #ALWAYS, #0, done
+        jmp #ALWAYS, #0, D
+        alu s10, s10, s14, #OP_ADD ; (delay slot)
         alu s8, s4, s0, #OP_ADD ; (delay slot) base
+}
+
+; The rest, entered from hot_a with z in s12, avail - 1 in s10, base 0 in s4.
+.macro rice_cold(KM, ESC, V, D) {
+        ptst p3, s0, #LT12, #PTST ; a one first (s12 is still z)
+        jmp #3, #3, ones        ; (ones undoes hot_a's step)
+        alu s8, s0, s0, #OP_ADD ; (delay slot) pre = 0
         nop()                   ; (delay slot)
-big:    jmp #ALWAYS, #0, done
-        alu s8, s8, s14, #OP_SUB ; (delay slot) base + v - 1
+        alu s12, s10, s14, #OP_ADD ; avail
+        ptst p3, s0, #EQ12, #PTST ; the cache is empty
+        jmp #IF_NOT, #3, V      ; else only zeros are left: the first has left, base 0
+        nop()                   ; (delay slot)
+        nop()                   ; (delay slot)
+        alu s10, s0, s0, #OP_ADD ; avail = 0 (hot_a's step undone)
+        refill()                ; the codeword's first bit is in the next byte
+        ldi s12, #-24
+pfx:    alu s12, s10, s12, #OP_ADD ; avail - 24
+        alu s12, s12, s9, #ASR  ; z
+        ptst p3, s0, #LT12, #PTST ; a one first
+        jmp #3, #3, ones
+        alu s10, s10, s14, #OP_SUB ; (delay slot) a zero: it leaves
+        x19.alu s4, s8, KM, #SHIFT ; (delay slot) pre << KM
+        jmp #ALWAYS, #0, V
+        alu s4, s4, s8, #OP_SUB ; (delay slot) base = pre * m
         nop()                   ; (delay slot)
         ; c >= 1 ones at the top: norm(z) = c - 1
 ones:   x01.norm s4, s12
@@ -65,7 +95,7 @@ ones:   x01.norm s4, s12
         x19.alu s12, s14, s12, #SHIFT ; (delay slot) 2^avail
         alu s12, s12, s14, #OP_SUB
         x18.and s9, s9, s12
-        jmp #ALWAYS, #0, vread
+        jmp #ALWAYS, #0, V
         x19.alu s4, s8, KM, #SHIFT ; (delay slot) pre << KM
         alu s4, s4, s8, #OP_SUB ; (delay slot) base
 more:   alu s9, s0, s0, #OP_ADD ; the ones leave: the cache is empty
@@ -93,11 +123,13 @@ esc:    alu s10, s13, s6, #OP_ADD
         alu s11, s4, s11, #OP_ADD ; W - 8, kept by getbits_s
         getbits_s(s13)
         x19.alu s8, s8, s11, #SHIFT ; top << (W - 8) < 2^23
-        jmp #ALWAYS, #0, done
+        jmp #ALWAYS, #0, D
         alu s8, s8, s13, #OP_ADD ; (delay slot)
         nop()                   ; (delay slot)
 esc1:   getbits_s(s8)
-done:
+        jmp #ALWAYS, #0, D
+        nop()
+        nop()
 }
 
 .macro rice_slots(base) {
@@ -154,8 +186,9 @@ done:
         alu s4, s5, s4, #OP_SUB ; (delay slot) lg - kb
         x01.selneg s4, s4, #0   ; min(lg - kb, 0)
         alu s11, s3, s4, #OP_ADD ; k
-        rice_cw(s11, e9)
-        alu s6, s8, ZMR, #OP_ADD ; nd = n + zmode
+        rice_hot_a(cc)
+cv:     rice_hot_b(cs)
+cd:     alu s6, s8, ZMR, #OP_ADD ; nd = n + zmode
         ; the residual floor((nd + 1) / 2), negated when nd is odd: f - b nd, f = floor(nd / 2),
         ; b = nd & 1
         x18.and s12, s6, s14
@@ -190,6 +223,8 @@ done:
         jmp #ALWAYS, #0, ZR
         nop()
         nop()
+cs:     rice_small(cd)
+cc:     rice_cold(s11, e9, cv, cd)
 }
 
 .macro rice_decompress(base) {
@@ -234,8 +269,9 @@ zr:     pcond p3, R4, A6, #30
         alu s4, s3, s11, #OP_SUB
         x01.selneg s4, s4, #0
         alu s1, s11, s4, #OP_ADD ; min(kz, kb), m's exponent (q is reset below)
-        rice_cw(s1, e3)         ; run
-        alu s6, s8, s0, #OP_ADD
+        rice_hot_a(zc)          ; run
+zv:     rice_hot_b(zs)
+zn:     alu s6, s8, s0, #OP_ADD
         alu s12, s6, s0, #OP_ADD
         ptst p3, s0, #EQ12, #PTST ; an empty run
         jmp #3, #3, zd
@@ -262,6 +298,8 @@ zd:     alu s12, s8, s14, #OP_ADD
         jmp #ALWAYS, #0, b0
         nop()
         nop()
+zs:     rice_small(zn)
+zc:     rice_cold(s1, e3, zv, zn)
 b1:     rice_body(s14, fin, b0, zr, cl)
 cl:     ldi s1, #127            ; mb = 0xFFFF
         ldi s2, #511
