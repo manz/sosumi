@@ -91,6 +91,16 @@
         x12.aset #h, R7
 }
 
+; R<RD> = K + the value in `src` (not s13), absolute: s -> e (x17.mve, +1) -> R (x19.a3 AGU10 fn
+; 2, +1), the form AAC's window and TNS bounds run on silicon. Uses s13, e6. Loop bounds take
+; this, not ragu's A - R (unproven on silicon: an ALAC lane's first pcond saw A == R).
+.macro rset_k(RD, src, K) {
+        ldi s13, #K - 2
+        alu s13, src, s13, #OP_ADD
+        x17.mve e6, s13
+        x19.a3 s0, RD, e6, #25, #2, #0
+}
+
 ; Packed x02 bundles (x17 reference.md x02.vc, x02.vs; facts 156-161, 182-185, 513, 549, 627,
 ; 628, 730, all measured together in one bundle). Every slot reads before any slot writes.
 ;

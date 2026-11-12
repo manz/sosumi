@@ -309,7 +309,7 @@ alac_pbok:
         yld(s3, PK_CB)
         x17.sty e9, #3, #0      ; max_bits = chan_bits
         aimm_e(3, MIX)
-        rice_decompress(RICE)
+        rice_decompress(RICE, MIX) ; A6 = MIX
         rice_slots(RICE)
         ldy s3, e10
         alu s4, s3, s14, #OP_SUB
@@ -385,7 +385,7 @@ alac_ccd:
         aimm_e(1, MIX)
         aimm_o(1, MIX)
         aimm_e(5, CSCR)
-        unpredict()
+        unpredict(MIX, CSCR)    ; A3 = MIX, A10 = CSCR
         ; a pair's lane 0 moves to Y UY, freeing X for lane 1
         yld(s3, PK_L)
         alu s4, s3, s0, #OP_ADD
@@ -516,7 +516,7 @@ alac_uok:
         nop()
         nop()
 alac_u16:
-        unmix_y16()
+        unmix_y16(MIX)          ; A3 = MIX
 alac_next:
         yld(s3, PK_CH)
         yld(s4, PK_LN)

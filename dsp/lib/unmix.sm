@@ -242,7 +242,7 @@ finish:
 ; floor(a v / 2^s) itself (wpair); v has 17 bits at depth 16, so |a v| <= 2^23 and every
 ; s >= 24 floors to the sign alone, as s = 24 does. The loops run while A3 (v) != R4 = A3 + n. Also uses s1,
 ; s2, s5, s6, e6, R4, R7.
-.macro unmix_y16() {
+.macro unmix_y16(OUT) {
         ldy s3, e8
         ldi s4, #2
         alu s4, s3, s4, #OP_SUB
@@ -252,12 +252,9 @@ finish:
         ldy s1, e3              ; (delay slot) a's 8 bits
         ptst p3, s0, #EQ4, #PTST ; no gap
         jmp #IF_NOT, #3, gen
-        ldy s13, e1             ; (delay slot) n
-        ldi s12, #-2            ; (delay slot)
-        alu s13, s12, s13, #OP_SUB
-        x17.mve e6, s13         ; e6 = -n - 1 (x17.mve adds 1)
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -n
-        ragu R4, A3, R7, #29    ; A3 + n
+        ldy s12, e1             ; (delay slot) n
+        nop()                   ; (delay slot)
+        rset_k(R4, s12, OUT)    ; R4 = OUT + n, A3's end
         ldi s4, #-16
         alu s1, s4, s1, #ASR    ; << 16, wrapping
         ldi s4, #16

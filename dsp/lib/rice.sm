@@ -227,7 +227,7 @@ cs:     rice_small(cd)
 cc:     rice_cold(s11, e9, cv, cd)
 }
 
-.macro rice_decompress(base) {
+.macro rice_decompress(base, OUT) {
         ldy s2, e12             ; mb
         ldi s12, #9
         alu s1, s12, s2, #ASR   ; q
@@ -242,13 +242,8 @@ cc:     rice_cold(s11, e9, cv, cd)
         x19.alu s7, s15, s7, #SHIFT ; pb << 15
         ldi s4, #16
         x17.sty e3, #4, #0      ; the zero run's escape width
-        ; R4 = A6 + n
-        ldy s13, e4
-        ldi s12, #-2
-        alu s13, s12, s13, #OP_SUB
-        x17.mve e6, s13         ; e6 = -n - 1 (x17.mve adds 1)
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -n
-        ragu R4, A6, R7, #29    ; A6 - R7
+        ldy s12, e4
+        rset_k(R4, s12, OUT)    ; R4 = OUT + n, A6's end
         ldi s4, #3
         alu s4, s1, s4, #OP_ADD ; q + 3
 b0:     rice_body(s0, fin, b0, zr, cl)

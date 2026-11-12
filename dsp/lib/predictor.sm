@@ -362,7 +362,7 @@ smp:    pred_head(FIN)
         pred_tail(smp)
 }
 
-.macro unpredict() {
+.macro unpredict(OUT, COEF) {
         x03.agu A5, A10, #40, #0, A0 ; park the bit reader
         stx A5, s9
         x02.ainc #5, #5
@@ -426,13 +426,9 @@ copy:   ldy s7, e15
 window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         x19.aagu A7, A4, #5, #0
         x02.ainc #7, #7         ; history: out[j - order]
-        ; R4 = A3 + left: the sample loop runs while A3 != R4
-        ldy s13, e15
-        ldi s12, #-2
-        alu s13, s12, s13, #OP_SUB
-        x17.mve e6, s13         ; e6 = -left - 1 (x17.mve adds 1)
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -left
-        ragu R4, A3, R7, #29    ; A3 - R7
+        ; R4 = OUT + n = A3 + left: the sample loop runs while A3 != R4
+        ldy s12, e11
+        rset_k(R4, s12, OUT)
         ; the adaptation's K for each sign of res, once: X:[A10 + 42], +44
         x03.agu A12, A10, #42, #0, A0
         x03.agu A5, A10, #44, #0, A0
@@ -467,12 +463,8 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         ldi s13, #0
         x17.mve e6, s13
         x19.a3 s0, R5, e6, #25, #2, #0
-        ldy s13, e12
-        ldi s12, #-2
-        alu s13, s12, s13, #OP_SUB
-        x17.mve e6, s13         ; e6 = -order - 1
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -order
-        ragu R6, A10, R7, #29   ; A10 - R7
+        ldy s12, e12
+        rset_k(R6, s12, COEF)   ; COEF + order
         x19.aagu A11, A10, #5, #0
         ldi s1, #-23            ; sgn's shift counts (x18.min / max select on sign, 951)
         ldi s6, #-15
