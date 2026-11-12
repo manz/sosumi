@@ -134,6 +134,232 @@ done:
         ldi s11, #8
 }
 
+
+; The sample loop, unrolled per G = (order + 3) / 4 (pv1 .. pv8; unpredict picks one per lane).
+; sum = sum_k c_k (out[j - 1 - k] - top) = sum_k c_k out[j - 1 - k] - top sum_k c_k, on x03.tap's
+; exact running sum {s2:s3} += 2 a b, 24 x 24 into 48 bits (x17 reference.md x03.tap, 672,
+; 701). A tap multiplies the value the bundle before loaded, then loads the next: the history
+; taps load out[] through A9 against a coefficient register; the coefficient loads (A11)
+; multiply the register's old coefficient by -top as they replace it, so every c_k meets -top
+; once. The loads before any coefficient multiply by s0; the padding's zeros end the chain
+; (the coefficients are zero from order to +35, alac.sm).
+.macro pred_head(FIN) {
+        pcond p3, R4, A3, #30   ; more: A3 != R4
+        jmp #IF_NOT, #3, FIN
+        x19.xrd s7, #8          ; (delay slot) top; FIN ignores s7 and A9
+        x19.aagu A9, A7, #5, #0 ; (delay slot)
+        x19.aagu A11, A10, #5, #0
+        alu s4, s0, s7, #OP_SUB ; -top
+        x03.tap0 s1, #9, s0, s2, s3 ; {s2:s3} = 0 (mode 4, 702); s1 = out[j - order]
+        x03.tap s5, #11, s0, s2, s3
+        x03.tap s6, #11, s0, s2, s3
+}
+
+; four coefficients: the first group's s8, s9 hold no coefficient yet
+.macro tg_first() {
+        x03.tap s8, #11, s0, s2, s3
+        x03.tap s9, #11, s0, s2, s3
+        x03.tap s1, #9, s5, s2, s3
+        x03.tap s1, #9, s6, s2, s3
+        x03.tap s1, #9, s8, s2, s3
+        x03.tap s1, #9, s9, s2, s3
+        x03.tap s5, #11, s4, s2, s3
+        x03.tap s6, #11, s4, s2, s3
+}
+
+.macro tg_mid() {
+        x03.tap s8, #11, s4, s2, s3
+        x03.tap s9, #11, s4, s2, s3
+        x03.tap s1, #9, s5, s2, s3
+        x03.tap s1, #9, s6, s2, s3
+        x03.tap s1, #9, s8, s2, s3
+        x03.tap s1, #9, s9, s2, s3
+        x03.tap s5, #11, s4, s2, s3
+        x03.tap s6, #11, s4, s2, s3
+}
+
+.macro tg_end() {
+        x03.tap s8, #11, s4, s2, s3
+        x03.tap s9, #11, s4, s2, s3
+}
+
+.macro pred_tail(SMP) {
+        ; acc = 2 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed). ALAC's
+        ; pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 1), the shifter's half-up
+        ; right shift; with H = hi + [L < 0], rshr(acc, ds + 1) = H 2^(23-ds) + rshr(L, ds + 1),
+        ; and only its low chan_bits <= 23 bits count, so H 2^(23-ds) may wrap at 24 bits.
+        ldy s10, e13            ; ds
+        ldi s12, #23
+        alu s13, s12, s3, #ASR  ; L >> 23: -1 when L < 0 (alu code 6, fact 774)
+        alu s2, s2, s13, #OP_SUB ; H = hi + [L < 0]
+        ldi s11, #-23
+        alu s12, s10, s11, #OP_ADD ; ds - 23
+        alu s2, s12, s2, #ASR   ; H << (23 - ds), wrapping at 24 bits: only the low chan_bits count
+        ldi s11, #-1
+        alu s11, s11, s10, #OP_SUB ; -(ds + 1)
+        x19.alu s3, s3, s11, #SHIFT ; rshr(L, ds + 1)
+        alu s4, s2, s3, #OP_ADD ; pred
+        x19.xrd s1, #2          ; res
+        x02.ainc #2, #2
+        alu s3, s1, s7, #OP_ADD
+        alu s3, s3, s4, #OP_ADD
+        sxcb(s3)
+        stx A3, s3              ; out[j]
+        x02.ainc #3, #3
+        alu s12, s1, s14, #OP_SUB
+        ptst p3, s0, #LT12, #PTST ; res <= 0
+        jmp #IF_NOT, #3, adp    ; res > 0
+        alu s4, s1, s0, #OP_ADD ; (delay slot) D = res
+        alu s12, s1, s0, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST ; res < 0
+        jmp #3, #3, adn
+        alu s4, s0, s1, #OP_SUB ; (delay slot) D = -res
+        nop()
+        jmp #ALWAYS, #0, SMP ; res == 0: no adaptation
+        x02.ainc #7, #7         ; (delay slot) advance
+        x02.ainc #8, #8         ; (delay slot)
+        ; adaptation: i = 0 .. order - 1 (k = order - 1 - i), weight w = i + 1, one loop per
+        ; sign of res. With D = +-del0 both stop at D <= 0:
+        ;   res > 0: dd > 0: c -= 1, D -= w * floor(dd / 2^ds); dd < 0: c += 1, -dd instead
+        ;   res < 0: dd > 0: c += 1, D += w * floor(-dd / 2^ds); dd < 0: c -= 1, dd instead
+        ; Only the direction c moved can leave 16 bits, so each branch tests that one.
+        ; Each coefficient step is branch-free: c moves by sgn(dd) (down for res > 0, up for
+        ; res < 0) and wraps to 16 bits as the reference's int16 store does; D -= w m. dd for
+        ; the next out is formed in the last delay slot, so the loop re-enters past adp/adn.
+adp:    adapt_init(12)
+pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
+        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
+        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
+        alu s13, s13, s12, #OP_SUB ; c -/+= sgn(dd)
+        alu s2, s2, s9, #OP_ADD ; |dd| + K
+        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
+        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
+        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
+        x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
+        alu s4, s4, s12, #OP_SUB
+        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
+        jmp #3, #3, adone
+        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
+        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
+        jmp #IF_NOT, #3, pstep
+        x19.xrd s13, #11        ; (delay slot) next c
+        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
+        jmp #ALWAYS, #0, adone
+        nop()
+        nop()
+adn:    adapt_init(5)
+nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
+        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
+        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
+        alu s13, s13, s12, #OP_ADD ; c -/+= sgn(dd)
+        alu s2, s2, s9, #OP_ADD ; |dd| + K
+        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
+        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
+        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
+        x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
+        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
+        alu s4, s4, s12, #OP_SUB
+        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
+        jmp #3, #3, adone
+        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
+        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
+        jmp #IF_NOT, #3, nstep
+        x19.xrd s13, #11        ; (delay slot) next c
+        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
+        jmp #ALWAYS, #0, adone
+        nop()
+        nop()
+adone:
+advance: jmp #ALWAYS, #0, SMP
+        x02.ainc #7, #7         ; (delay slot)
+        x02.ainc #8, #8         ; (delay slot)
+}
+
+.macro pv1(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv2(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv3(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv4(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv5(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv6(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv7(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
+.macro pv8(FIN) {
+smp:    pred_head(FIN)
+        tg_first()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_mid()
+        tg_end()
+        pred_tail(smp)
+}
+
 .macro unpredict() {
         x03.agu A5, A10, #40, #0, A0 ; park the bit reader
         stx A5, s9
@@ -198,19 +424,6 @@ copy:   ldy s7, e15
 window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         x19.aagu A7, A4, #5, #0
         x02.ainc #7, #7         ; history: out[j - order]
-        ; R6 = A10 + M, M = order rounded up to 4: the taps run in fours over the coefficients,
-        ; zero from order to +35 (alac.sm zeroes the lane's 36 words before copying them in)
-        ldy s13, e12
-        ldi s12, #3
-        alu s13, s13, s12, #OP_ADD
-        ldi s12, #-4
-        x18.and s13, s13, s12   ; M
-        ldi s12, #2
-        alu s13, s0, s13, #OP_SUB
-        alu s13, s13, s12, #OP_SUB
-        x17.mve e6, s13         ; e6 = -M - 1
-        x19.a3 s0, R7, e6, #25, #2, #0 ; R7 = -M
-        ragu R6, A10, R7, #29   ; A10 - R7
         ; R4 = A3 + left: the sample loop runs while A3 != R4
         ldy s13, e15
         ldi s12, #-2
@@ -233,126 +446,68 @@ window: x19.aagu A8, A4, #5, #0 ; top: out[j - order - 1]
         alu s9, s0, s2, #OP_SUB ; -h: K for res > 0
         stx A12, s9
         stx A13, s10
-sample: pcond p3, R4, A3, #30   ; more: A3 != R4
-        jmp #IF_NOT, #3, finish
-        x19.xrd s7, #8          ; (delay slot) top; finish ignores s7 and A9
-        x19.aagu A9, A7, #5, #0 ; (delay slot)
-        ; sum = sum_k c_k (out[j - 1 - k] - top) = sum_k c_k out[j - 1 - k] - top sum_k c_k, on
-        ; x03.tap's exact running sum {s2:s3} += 2 a b, 24 x 24 into 48 bits (x17 reference.md
-        ; x03.tap, 672, 701). A tap multiplies the value the bundle before loaded, then loads
-        ; the next: the history taps load out[] through A9 against a coefficient register; the
-        ; coefficient loads (A11) multiply the register's old coefficient by -top as they
-        ; replace it, so every c_k meets -top once. The first two loads multiply by s0, the
-        ; first L2, L3 a zeroed s8, s9; the padding's zeros end the chain.
-        x19.aagu A11, A10, #5, #0
-        alu s4, s0, s7, #OP_SUB ; -top
-        ldi s8, #0
-        ldi s9, #0
-        x03.tap0 s1, #9, s0, s2, s3 ; {s2:s3} = 0 (mode 4: 2 s1 s0, old sum ignored, 702); s1 = out[j - order]
-        x03.tap s5, #11, s0, s2, s3
-        x03.tap s6, #11, s0, s2, s3
-ptap:   x03.tap s8, #11, s4, s2, s3
-        x03.tap s9, #11, s4, s2, s3
-        x03.tap s1, #9, s5, s2, s3
-        x03.tap s1, #9, s6, s2, s3
-        x03.tap s1, #9, s8, s2, s3
-        x03.tap s1, #9, s9, s2, s3
-        pcond p3, R6, A11, #30  ; four more: A11 != R6
-        jmp #3, #3, ptap
-        x03.tap s5, #11, s4, s2, s3 ; (delay slot)
-        x03.tap s6, #11, s4, s2, s3 ; (delay slot)
-        x03.tap s8, #11, s4, s2, s3
-        x03.tap s9, #11, s4, s2, s3
-        ; acc = 2 sum = hi 2^24 + lo (lo's 24 bits unsigned, L = lo read signed). ALAC's
-        ; pred = floor((sum + 2^(ds-1)) / 2^ds) = rshr(acc, ds + 1), the shifter's half-up
-        ; right shift; with H = hi + [L < 0], rshr(acc, ds + 1) = H 2^(23-ds) + rshr(L, ds + 1),
-        ; and only its low chan_bits <= 23 bits count, so H 2^(23-ds) may wrap at 24 bits.
-        ldy s10, e13            ; ds
-        ldi s12, #23
-        alu s13, s12, s3, #ASR  ; L >> 23: -1 when L < 0 (alu code 6, fact 774)
-        alu s2, s2, s13, #OP_SUB ; H = hi + [L < 0]
-        ldi s11, #-23
-        alu s12, s10, s11, #OP_ADD ; ds - 23
-        alu s2, s12, s2, #ASR   ; H << (23 - ds), wrapping at 24 bits: only the low chan_bits count
-        ldi s11, #-1
-        alu s11, s11, s10, #OP_SUB ; -(ds + 1)
-        x19.alu s3, s3, s11, #SHIFT ; rshr(L, ds + 1)
-        alu s4, s2, s3, #OP_ADD ; pred
-        x19.xrd s1, #2          ; res
-        x02.ainc #2, #2
-        alu s3, s1, s7, #OP_ADD
-        alu s3, s3, s4, #OP_ADD
-        sxcb(s3)
-        stx A3, s3              ; out[j]
-        x02.ainc #3, #3
-        alu s12, s1, s14, #OP_SUB
-        ptst p3, s0, #LT12, #PTST ; res <= 0
-        jmp #IF_NOT, #3, adp    ; res > 0
-        alu s4, s1, s0, #OP_ADD ; (delay slot) D = res
-        alu s12, s1, s0, #OP_ADD ; (delay slot)
-        ptst p3, s0, #LT12, #PTST ; res < 0
-        jmp #3, #3, adn
-        alu s4, s0, s1, #OP_SUB ; (delay slot) D = -res
-        nop()
-        jmp #ALWAYS, #0, sample ; res == 0: no adaptation
-        x02.ainc #7, #7         ; (delay slot) advance
-        x02.ainc #8, #8         ; (delay slot)
-        ; adaptation: i = 0 .. order - 1 (k = order - 1 - i), weight w = i + 1, one loop per
-        ; sign of res. With D = +-del0 both stop at D <= 0:
-        ;   res > 0: dd > 0: c -= 1, D -= w * floor(dd / 2^ds); dd < 0: c += 1, -dd instead
-        ;   res < 0: dd > 0: c += 1, D += w * floor(-dd / 2^ds); dd < 0: c -= 1, dd instead
-        ; Only the direction c moved can leave 16 bits, so each branch tests that one.
-        ; Each coefficient step is branch-free: c moves by sgn(dd) (down for res > 0, up for
-        ; res < 0) and wraps to 16 bits as the reference's int16 store does; D -= w m. dd for
-        ; the next out is formed in the last delay slot, so the loop re-enters past adp/adn.
-adp:    adapt_init(12)
-pstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
-        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
-        alu s13, s13, s12, #OP_SUB ; c -/+= sgn(dd)
-        alu s2, s2, s9, #OP_ADD ; |dd| + K
-        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
-        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
-        x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
-        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
-        alu s4, s4, s12, #OP_SUB
-        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
-        jmp #3, #3, adone
-        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
-        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
-        jmp #IF_NOT, #3, pstep
-        x19.xrd s13, #11        ; (delay slot) next c
-        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
-        jmp #ALWAYS, #0, adone
+        ; G = (order + 3) / 4 groups of four taps: one unrolled sample loop per G
+        ldy s13, e12
+        ldi s12, #3
+        alu s13, s13, s12, #OP_ADD
+        ldi s12, #2
+        alu s13, s12, s13, #ASR ; G, 1..8
+        ldi s12, #-5
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; G <= 4
+        jmp #3, #3, g14
+        ldi s12, #-7            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST ; G <= 6
+        jmp #3, #3, g56
+        ldi s12, #-8            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST ; G == 7
+        jmp #3, #3, v7
         nop()
         nop()
-adn:    adapt_init(5)
-nstep:  x18.una s2, s3, #7, R13, s0 ; |dd| (24-bit abs, 708)
-        alu s12, s1, s3, #ASRRS ; dd << 23, saturated: 0x7FFFFF, 0 or -0x800000 (fact 774)
-        x19.alu s12, s12, s1, #SHIFT ; rshr by 23: sgn(dd)
-        alu s13, s13, s12, #OP_ADD ; c -/+= sgn(dd)
-        alu s2, s2, s9, #OP_ADD ; |dd| + K
-        alu s13, s6, s13, #ASR  ; c << 8, wrapping at 24 bits (fact 774)
-        x19.alu s3, s2, s10, #SHIFT ; m = rshr(|dd| + K, ds)
-        alu s13, s11, s13, #ASR ; back: c sign-extended from 16 bits
-        x18.mpy s12, s0, s5, s3 ; w m, 0 <= w m < 2^23 (x17 reference.md x18.mpy, low product)
-        pks(13, A11, 5, s5, s14, 0) ; c stored, A11 + 1; w += 1
-        alu s4, s4, s12, #OP_SUB
-        ptst p3, s0, #LE4, #PTST ; D <= 0: stop
-        jmp #3, #3, adone
-        pk(s3, A9, s0, s0, s0, 8, s8, s14, 5, 0) ; (delay slot) next out, A9 + 1; s8 -= 1
-        ptst p3, s0, #LE8, #PTST ; (delay slot) every coefficient visited (adone ignores p3)
-        jmp #IF_NOT, #3, nstep
-        x19.xrd s13, #11        ; (delay slot) next c
-        alu s3, s7, s3, #OP_SUB ; (delay slot) next dd
-        jmp #ALWAYS, #0, adone
+        jmp #ALWAYS, #0, v8
         nop()
         nop()
-adone:
-advance: jmp #ALWAYS, #0, sample
-        x02.ainc #7, #7         ; (delay slot)
-        x02.ainc #8, #8         ; (delay slot)
+g56:    ldi s12, #-6
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v5
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v6
+        nop()
+        nop()
+g14:    ldi s12, #-3
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST ; G <= 2
+        jmp #3, #3, g12
+        ldi s12, #-4            ; (delay slot)
+        alu s12, s13, s12, #OP_ADD ; (delay slot)
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v3
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v4
+        nop()
+        nop()
+g12:    ldi s12, #-2
+        alu s12, s13, s12, #OP_ADD
+        ptst p3, s0, #LT12, #PTST
+        jmp #3, #3, v1
+        nop()
+        nop()
+        jmp #ALWAYS, #0, v2
+        nop()
+        nop()
+v1:     pv1(finish)
+v2:     pv2(finish)
+v3:     pv3(finish)
+v4:     pv4(finish)
+v5:     pv5(finish)
+v6:     pv6(finish)
+v7:     pv7(finish)
+v8:     pv8(finish)
 finish: x03.agu A5, A10, #40, #0, A0 ; the bit reader back
         x19.xrd s9, #5
         x02.ainc #5, #5
