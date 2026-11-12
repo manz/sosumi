@@ -320,11 +320,11 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
         };
     }
     std.debug.assert(xn == at("MP_XN") + 384);
-    // D paired for mp3_wpair, per age a (twice over): d[32a], then for j = 1..15 d[32a + j] and
+    // D paired for mp3_wpair, per age a: d[32a], then for j = 1..15 d[32a + j] and
     // d[32a + 32 - j] negated for even a (V[32 - j] = -V[j] there, V[64 - j] = V[32 + j] odd),
     // then d[32a + 16]
-    for (0..1024) |i| {
-        const a = (i / 32) % 16;
+    for (0..512) |i| {
+        const a = i / 32;
         const c = i % 32;
         const v: i24 = if (c == 0) Y.d[32 * a] else if (c == 31) Y.d[32 * a + 16] else if (c & 1 == 1)
             Y.d[32 * a + (c + 1) / 2]
