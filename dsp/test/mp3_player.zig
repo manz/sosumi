@@ -44,31 +44,28 @@ test "the MP3 player's frames come out of the host's ring as the twin decodes th
     }
 }
 
-test "with both slots owned the player stops, FD95 = 0x21, and decodes the frame once released" {
+test "with its one slot owned the player stops, FD95 = 0x21, and decodes the frame once released" {
     const gpa = testing.allocator;
     const prog = try mp3.program(gpa);
     defer gpa.free(prog);
     const fr = try mp3.frames(gpa, @embedFile("clicks.m2.mp3"));
     defer gpa.free(fr);
-    const want = try twinPcm(gpa, fr[0..4]);
+    const want = try twinPcm(gpa, fr[0..2]);
     defer gpa.free(want);
     var p = try mp3.Player.init(gpa, prog, 24000);
     defer p.deinit();
     p.host.cfg.drain_limit = 0; // a host that lags: nothing taken
-    for (fr[0..2]) |frame| try testing.expectEqual(@as(usize, 0), (try p.feed(frame)).len);
-    try testing.expectError(error.RingFull, p.feed(fr[2]));
-    // the host takes both slots, as its drain would, then arms the next frame: the program
-    // reads on from the frame it left
+    try testing.expectEqual(@as(usize, 0), (try p.feed(fr[0])).len);
+    try testing.expectError(error.RingFull, p.feed(fr[1]));
+    // the host takes the slot, as its drain would, then arms the next frame: the program reads
+    // on from the frame it left
     const n = 0x480; // an MPEG-2 stereo frame's words (specs/mp3.md)
     const st = &p.host.state;
-    for (0..2) |k| {
-        const base = map.at("OUTY") + map.at("MP_RSL") * @as(u32, @intCast(k));
-        for (0..n) |i| try testing.expectEqual(want[k * n + i], h.sx16(st.getY(base + @as(u32, @intCast(i)))));
-        try st.y_mem.put(gpa, map.at("RING_E") + 2 * @as(u32, @intCast(k)), 0);
-    }
+    for (0..n) |i| try testing.expectEqual(want[i], h.sx16(st.getY(map.at("OUTY") + @as(u32, @intCast(i)))));
+    try st.y_mem.put(gpa, map.at("RING_E"), 0);
     p.host.idx = 0;
     p.host.cfg.drain_limit = null;
-    try testing.expectEqualSlices(i16, want[2 * n ..][0..n], try p.feed(fr[3]));
+    try testing.expectEqualSlices(i16, want[n..][0..n], try p.feed(fr[2]));
 }
 
 test "the MP3 x17 image's init pass, then its decoder at q256, decode as the twin" {
@@ -105,7 +102,7 @@ test "the MP3 x17 image's init pass, then its decoder at q256, decode as the twi
     defer gpa.free(want);
     var at: usize = 0;
     for (fr[0..24]) |frame| {
-        const k = state.getY(map.at("MP_OSL")).?;
+        const k: u32 = 0; // the one slot
         try h.stagePacket(gpa, &state, frame);
         state.halted = false;
         state.cur_lane = 0;

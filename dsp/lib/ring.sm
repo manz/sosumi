@@ -88,3 +88,12 @@ dup:    ldy s3, e8
         alu s3, s14, s3, #OP_SUB
         yst(OSL)
 }
+
+; Hands a one-slot ring's slot 0 to the host with length s7 (words) and clears HOST_P0: the
+; host releases it and keeps its index at 0 (specs/questions.md Q33). Uses s3..s5, s13, e6.
+.macro ring_publish1() {
+        ldi s5, #0
+        ring_own()
+        ring_ready()
+        yst(HOST_P0)            ; s3 = 0
+}

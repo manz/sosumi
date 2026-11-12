@@ -1,5 +1,5 @@
 //! MP3 frames through x17's host model and dsp/lib/mp3.sm: the host arms each frame on the
-//! input stream, runs mp3_packet to its stop and drains the ring's two slots (specs/mp3.md "The
+//! input stream, runs mp3_packet to its stop and drains the ring's one slot (specs/mp3.md "The
 //! sm1 side"). The tables and the zeroed stream state are the init pass's (`imageSource`).
 const std = @import("std");
 const ref = @import("ref");
@@ -27,16 +27,16 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
     return h.assembleSites(gpa, src.items, sites);
 }
 
-/// Every word the init pass leaves: the tables, the ring's header (two slots of MP_RSL words),
+/// Every word the init pass leaves: the tables, the ring's header (one slot of MP_RSL words, specs/mp3.md),
 /// and the stream state at zero (synthesis history, overlap, each channel's newest V block,
 /// the slot word, the reservoir's length).
 pub fn stageInit(st: *h.emu.State, gpa: std.mem.Allocator) !void {
     try tables.put(st, gpa, map.at);
     try h.stageDequant(st, gpa);
-    try h.stageRing(st, gpa, 2, map.at("MP_RSL"));
+    try h.stageRing(st, gpa, 1, map.at("MP_RSL"));
     for (0..2 * map.at("MP_VC")) |k| try st.x_mem.put(gpa, map.at("MP_XV") + @as(u32, @intCast(k)), 0);
     for (0..1152) |k| try st.x_mem.put(gpa, map.at("MP_XOV") + @as(u32, @intCast(k)), 0);
-    inline for (.{ "MP_YP", "MP_OSL", "MP_RLEN" }) |name| try st.y_mem.put(gpa, map.at(name), 0);
+    inline for (.{ "MP_YP", "MP_RLEN" }) |name| try st.y_mem.put(gpa, map.at(name), 0);
     try st.y_mem.put(gpa, map.at("MP_YP") + 1, 0);
 }
 
@@ -60,7 +60,7 @@ pub const Player = struct {
     }
 
     /// One frame: the PCM the host took, interleaved 16-bit in the stream's own channel count,
-    /// valid until the next call. RingFull: both slots were owned, the frame stays queued.
+    /// valid until the next call. RingFull: the slot was still owned, the frame stays queued.
     pub fn feed(self: *Player, frame: []const u8) Error![]const i16 {
         self.host.pcm.clearRetainingCapacity();
         const r = try self.host.feed(self.prog, frame);

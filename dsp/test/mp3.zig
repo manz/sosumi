@@ -444,16 +444,16 @@ test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Deco
         defer state.deinit(gpa);
         try tables.put(&state, gpa, map.at);
         try h.stageDequant(&state, gpa);
-        try h.stageRing(&state, gpa, 2, map.at("MP_RSL"));
+        try h.stageRing(&state, gpa, 1, map.at("MP_RSL"));
         const zeros: [2048]i24 = @splat(0);
         try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);
         try h.putAllX(&state, gpa, map.at("MP_XOV"), zeros[0..1152]);
-        inline for (.{ "MP_YP", "MP_OSL", "MP_RLEN" }) |name| try h.putY(&state, gpa, map.at(name), 0);
+        inline for (.{ "MP_YP", "MP_RLEN" }) |name| try h.putY(&state, gpa, map.at(name), 0);
         try h.putY(&state, gpa, map.at("MP_YP") + 1, 0);
         var dec: ref.dsp.mp3.decoder.Decoder = .{};
         var want: [2304]i16 = undefined;
         for (fr, 0..) |frame, n| {
-            const slot = y(&state, map.at("MP_OSL"));
+            const slot: u32 = 0; // the one slot
             try h.stagePacket(gpa, &state, frame);
             state.halted = false;
             const nb = try h.emu.runFrom(gpa, &state, prog, 0, 1 << 23);
@@ -465,7 +465,6 @@ test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Deco
             const len: u32 = @as(u32, f.header.samples()) * f.header.channels();
             try testing.expectEqual(@as(u32, 1), y(&state, map.at("RING_E") + 2 * slot));
             try testing.expectEqual(len, y(&state, map.at("RING_E") + 2 * slot + 1));
-            try testing.expectEqual(1 - slot, y(&state, map.at("MP_OSL")));
             const base = map.at("OUTY") + map.at("MP_RSL") * slot;
             for (want[0..len], 0..) |v, i| {
                 const got = h.sx16(state.getY(base + @as(u32, @intCast(i))));
