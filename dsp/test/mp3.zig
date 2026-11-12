@@ -122,7 +122,7 @@ test "mp3_granules decodes each granule to subband samples through the reservoir
         var state = h.emu.State{};
         defer state.deinit(gpa);
         try tables.put(&state, gpa, map.at);
-        try h.stageDequant(&state, gpa);
+        try h.stageDequantAt(&state, gpa, h.mp3Dequant());
         try h.putY(&state, gpa, map.at("MP_OUT"), 0x80);
         var parser: ref.mp3.decoder.Parser = .{};
         var hyb: [2]ref.dsp.mp3.hybrid.State = .{ .{}, .{} };
@@ -452,7 +452,7 @@ test "mp3_packet decodes every fixture frame into the ring as ref/dsp/mp3's Deco
         var state = h.emu.State{};
         defer state.deinit(gpa);
         try tables.put(&state, gpa, map.at);
-        try h.stageDequant(&state, gpa);
+        try h.stageDequantAt(&state, gpa, h.mp3Dequant());
         try h.stageRing(&state, gpa, 1, map.at("MP_RSL"));
         const zeros: [2048]i24 = @splat(0);
         try h.putAllX(&state, gpa, map.at("MP_XV"), &zeros);

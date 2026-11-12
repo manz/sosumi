@@ -123,15 +123,28 @@ pub fn stageSine(st: *emu.State, gpa: std.mem.Allocator, odd: u32, four: u32) !v
 /// (m, em), DQ_IT, DQ_G; Y DQ_IE, DQ_IR (4 rem).
 pub fn stageDequant(st: *emu.State, gpa: std.mem.Allocator) !void {
     const map = @import("map.zig");
+    try stageDequantAt(st, gpa, .{ .d = map.at("DQ_D"), .it = map.at("DQ_IT"), .g = map.at("DQ_G"), .ie = map.at("DQ_IE"), .ir = map.at("DQ_IR") });
+}
+
+/// lib/dequant.sm's tables where a program keeps them (X d, it, g; Y ie, ir).
+pub const DequantAt = struct { d: u32, it: u32, g: u32, ie: u32, ir: u32 };
+
+/// MP3's (lib/mp3.sm MP_XDQ, MP_XIT, MP_XG, MP_IE, MP_IR).
+pub fn mp3Dequant() DequantAt {
+    const map = @import("map.zig");
+    return .{ .d = map.at("MP_XDQ"), .it = map.at("MP_XIT"), .g = map.at("MP_XG"), .ie = map.at("MP_IE"), .ir = map.at("MP_IR") };
+}
+
+pub fn stageDequantAt(st: *emu.State, gpa: std.mem.Allocator, at: DequantAt) !void {
     const D = @import("ref").dsp.aac.dequant;
     for (D.direct_m, D.direct_e, 0..) |m, e, k| {
-        try putX(st, gpa, map.at("DQ_D") + 2 * @as(u32, @intCast(k)), m);
-        try putX(st, gpa, map.at("DQ_D") + 1 + 2 * @as(u32, @intCast(k)), e);
+        try putX(st, gpa, at.d + 2 * @as(u32, @intCast(k)), m);
+        try putX(st, gpa, at.d + 1 + 2 * @as(u32, @intCast(k)), e);
     }
-    try putAllX(st, gpa, map.at("DQ_IT"), &D.interp);
-    try putAllX(st, gpa, map.at("DQ_G"), &D.gain);
+    try putAllX(st, gpa, at.it, &D.interp);
+    try putAllX(st, gpa, at.g, &D.gain);
     for (D.interp_e, D.interp_rem, 0..) |e, r, j| {
-        try putY(st, gpa, map.at("DQ_IE") + @as(u32, @intCast(j)), e);
-        try putY(st, gpa, map.at("DQ_IR") + @as(u32, @intCast(j)), 4 * r);
+        try putY(st, gpa, at.ie + @as(u32, @intCast(j)), e);
+        try putY(st, gpa, at.ir + @as(u32, @intCast(j)), 4 * r);
     }
 }

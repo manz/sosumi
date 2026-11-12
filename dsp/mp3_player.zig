@@ -32,7 +32,7 @@ pub fn programSites(gpa: std.mem.Allocator, sites: ?*std.ArrayList(h.Site)) ![]u
 /// the slot word, the reservoir's length).
 pub fn stageInit(st: *h.emu.State, gpa: std.mem.Allocator) !void {
     try tables.put(st, gpa, map.at);
-    try h.stageDequant(st, gpa);
+    try h.stageDequantAt(st, gpa, h.mp3Dequant());
     try h.stageRing(st, gpa, 1, map.at("MP_RSL"));
     for (0..2 * map.at("MP_VC")) |k| try st.x_mem.put(gpa, map.at("MP_XV") + @as(u32, @intCast(k)), 0);
     for (0..1152) |k| try st.x_mem.put(gpa, map.at("MP_XOV") + @as(u32, @intCast(k)), 0);
@@ -83,7 +83,7 @@ pub fn imageSource(gpa: std.mem.Allocator, w: *std.Io.Writer, lib: []const u8) !
     defer st.deinit(gpa);
     try stageInit(&st, gpa);
     try w.writeAll("; mp3_packet's image (dsp/mp3_player.zig imageSource)\n");
-    try @import("aac_player.zig").initPass(gpa, w, &st, 2, map.at("BITS_ON"), null); // mode 1's map does not hold it yet (specs/questions.md Q32)
+    try @import("aac_player.zig").initPass(gpa, w, &st, 1, map.at("MP_ON"), null); // .mode 1 once X fits too (specs/mp3.md)
     for (libs) |f| try w.print(".include \"{s}/{s}.sm\"\n", .{ lib, f });
     try w.writeAll("        mp3_packet()\n        x17.halt\n");
 }

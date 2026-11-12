@@ -14,7 +14,7 @@
 
 .include "bitcore.sm"
 
-.const YB_PTR = 0x2EFD           ; DSP-only Y
+.const YB_PTR = 0x114E           ; in mode 1's Y (lib/mp3.sm's map)
 
 .macro ybits_init() {
         lde e11, #YB_PTR

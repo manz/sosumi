@@ -263,7 +263,7 @@ pub fn put(st: anytype, gpa: std.mem.Allocator, comptime at: fn (comptime []cons
         }
         addr += @intCast(tr.words.len);
     }
-    std.debug.assert(addr <= at("MP_YEND"));
+    std.debug.assert(addr <= at("MP_IE"));
     for (0..34) |i| {
         try st.y_mem.put(gpa, at("MP_HT") + @as(u32, @intCast(i)), base[i]);
         try st.y_mem.put(gpa, at("MP_HR") + @as(u32, @intCast(i)), root[i]);
@@ -324,7 +324,7 @@ test "the band lists and trees fit their Y" {
     const map = @import("../map.zig");
     var n: usize = 0;
     for (trees()) |tr| n += tr.words.len;
-    try std.testing.expect(map.at("MP_BW") + band_lists.n <= map.at("MP_HUFF"));
-    try std.testing.expect(map.at("MP_HUFF") + n <= map.at("MP_YEND"));
+    try std.testing.expect(map.at("MP_BW") + band_lists.n <= map.at("MP_PRET"));
+    try std.testing.expect(map.at("MP_HUFF") + n <= map.at("MP_IE"));
 }
 

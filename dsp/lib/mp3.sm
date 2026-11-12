@@ -9,7 +9,7 @@
 ; ring slot's second half, which the frame's PCM reaches only in its last granule's synthesis
 ; (mp3_keep runs first). Byte addresses are 2 w + i (lib/ybits.sm).
 
-.const MP_HDR  = 0x1280         ; header fields, then what follows from them (MH_*)
+.const MP_HDR  = 0x1690         ; header fields, then what follows from them (MH_*)
 .const MH_VER  = MP_HDR + 1     ; version bits: 3 MPEG-1, 2 MPEG-2, 0 MPEG-2.5
 .const MH_PROT = MP_HDR + 2     ; protection_bit: 0 = a CRC word follows the header
 .const MH_BR   = MP_HDR + 3
@@ -22,10 +22,10 @@
 .const MH_FLEN = MP_HDR + 10    ; frame bytes
 .const MH_SIDE = MP_HDR + 11    ; CRC and side information bytes
 .const MH_MAIN = MP_HDR + 12    ; main data bytes in this frame
-.const MP_SI   = 0x1290         ; main_data_begin, scfsi[0], scfsi[1], then the granules
+.const MP_SI   = 0x16A0         ; main_data_begin, scfsi[0], scfsi[1], then the granules
 .const MP_GR0  = MP_SI + 3      ; granule (gr, ch) at MP_GR0 + (2 gr + ch) MP_GR
 .const MP_GR   = 18
-.const MP_FLEN = 0x1300         ; 135 words: [MPEG-1, 2, 2.5][sr_index][bitrate_index]
+.const MP_FLEN = 0x16F0         ; 135 words: [MPEG-1, 2, 2.5][sr_index][bitrate_index]
 .const MP_SIDE = 2 * 0x500     ; byte address: the header, CRC and side information (<= 38
                                 ; bytes) at the ring slot's word 0x480 (OUTY + MP_RSL / 2)
 .const MP_MB   = MP_SIDE + 40   ; byte address: the reservoir's bytes, then this frame's main
@@ -387,15 +387,15 @@ done:
 ; band entry, 40 per granule and channel at MP_SF, the rest of the 40 zeroed. MPEG-2 marks an
 ; intensity position at its slen's largest value (no intensity) with MP_ILL added.
 
-.const MP_SLEN = 0x1C00         ; slen1[16], then slen2[16]
-.const MP_PART = 0x1C20         ; partition entry counts [long, mixed, short][28]
-.const MP_GMOD = 0x1C80         ; MPEG-2 partition radices [24]
-.const MP_SF   = 0x1CA0         ; [2 gr + ch][40]
-.const MP_PRE  = 0x1D40         ; MPEG-2's derived preflag, [2 gr + ch]
-.const MP_CK   = 0x1D44         ; the granule and channel at hand: 2 gr + ch
-.const MP_CCH  = 0x1D45         ; its channel
-.const MP_CSZ  = 0x1D46         ; its four partition slens
-.const MP_CCNT = 0x1D4A         ; the address of its four partition counts
+.const MP_SLEN = 0x1150         ; slen1[16], then slen2[16]
+.const MP_PART = 0x1170         ; partition entry counts [long, mixed, short][28]
+.const MP_GMOD = 0x11D0         ; MPEG-2 partition radices [24]
+.const MP_SF   = 0x11F0         ; [2 gr + ch][40]
+.const MP_PRE  = 0x1290         ; MPEG-2's derived preflag, [2 gr + ch]
+.const MP_CK   = 0x1294         ; the granule and channel at hand: 2 gr + ch
+.const MP_CCH  = 0x1295         ; its channel
+.const MP_CSZ  = 0x1296         ; its four partition slens
+.const MP_CCNT = 0x129A         ; the address of its four partition counts
 .const MP_ILL  = 0x100
 
 ; s<dst> = Y[addr + r] (r a register, not s13). Uses e7.
@@ -698,13 +698,13 @@ done:
 
 ; Huffman decoding and band tables, staged by dsp/mp3/tables.zig (Y words below 0x8000: ldy
 ; sign-extends).
-.const MP_HT   = 0x1D60         ; [table_select 0..31, count1 A, count1 B]: the tree's address, 0 none
-.const MP_HR   = 0x1D82         ; the same: the tree's root width
-.const MP_LIN  = 0x1DA4         ; [table_select]: linbits
-.const MP_BP   = 0x1DC4         ; [(version bits * 3 + sr_index) * 3 + long / short / mixed]: widths
-.const MP_BW   = 0x1DE8         ; the band width lists, each ending in a 0
-.const MP_PRET = 0x20A0         ; pretab[22] (ISO/IEC 11172-3 Table B.6)
-.const MP_Q    = 0x20C0         ; requantisation slots (MP_Q*)
+.const MP_HT   = 0x12B0         ; [table_select 0..31, count1 A, count1 B]: the tree's address, 0 none
+.const MP_HR   = 0x12D2         ; the same: the tree's root width
+.const MP_LIN  = 0x12F4         ; [table_select]: linbits
+.const MP_BP   = 0x1314         ; [(version bits * 3 + sr_index) * 3 + long / short / mixed]: widths
+.const MP_BW   = 0x1338         ; the band width lists, each ending in a 0
+.const MP_PRET = 0x15F0         ; pretab[22] (ISO/IEC 11172-3 Table B.6)
+.const MP_Q    = 0x1610         ; requantisation slots (MP_Q*)
 .const MP_QLST = MP_Q + 0       ; the granule's band list (mp3_spec)
 .const MP_QKIND = MP_Q + 1      ; 0 long, 1 short, 2 mixed
 .const MP_QE   = MP_Q + 2       ; the entry at hand's list address
@@ -754,23 +754,30 @@ done:
 .const MP_XWIN = 0x130C         ; X: windows [normal, start, short, stop][36], Q23
 .const MP_XC12 = 0x1B84         ; X: IMDCT-12 rows (6 x 6, Q23)
 .const MP_XAL  = 0x1BA8         ; X: alias butterflies [8][cs, ca, -ca], Q23
-.const MP_HUFF = 0x2300         ; the trees (lib/huffman.sm format), past lib/dequant.sm's Y
-.const MP_YEND = 0x2E80         ; the host writes Y below here
+; Mode 1's Y (fact 961; specs/mp3.md): the ring's one slot at 0x80..0x97F, tables and state
+; from 0x980 below the DSP-only window 0x1780..0x187F, which holds the reservoir (MP_RB).
+.const MP_IE   = 0x1146         ; lib/dequant.sm's DQ_IE, here (dq_mant_at)
+.const MP_ON   = 0x114F         ; the stream enable's flag (stream_on_at); YB_PTR at 0x114E
+.const MP_IR   = 0x1684         ; lib/dequant.sm's DQ_IR
+.const MP_XDQ  = 0x1A02         ; X: lib/dequant.sm's tables where MP3 keeps them (dq_mant_at)
+.const MP_XIT  = MP_XDQ + 0x110
+.const MP_XG   = MP_XDQ + 0x160
+.const MP_HUFF = 0x0980         ; the trees (lib/huffman.sm format), up to MP_IE
 
-.const MP_RE   = 0x1D51         ; the three regions' ends, in coefficients (576 the last)
-.const MP_BIG  = 0x1D54         ; 2 big_values
-.const MP_I    = 0x1D55         ; coefficients decoded
-.const MP_LIM  = 0x1D56         ; the granule's last bit + 1, from byte MP_MB
-.const MP_TB   = 0x1D57         ; the region's tree, 0 none
-.const MP_TR   = 0x1D58         ; its root width
-.const MP_TL   = 0x1D59         ; its linbits
-.const MP_N    = 0x1D5A         ; pairs left in the region
-.const MP_RG   = 0x1D5B         ; the region at hand
+.const MP_RE   = 0x12A1         ; the three regions' ends, in coefficients (576 the last)
+.const MP_BIG  = 0x12A4         ; 2 big_values
+.const MP_I    = 0x12A5         ; coefficients decoded
+.const MP_LIM  = 0x12A6         ; the granule's last bit + 1, from byte MP_MB
+.const MP_TB   = 0x12A7         ; the region's tree, 0 none
+.const MP_TR   = 0x12A8         ; its root width
+.const MP_TL   = 0x12A9         ; its linbits
+.const MP_N    = 0x12AA         ; pairs left in the region
+.const MP_RG   = 0x12AB         ; the region at hand
 .const MP_XS   = 0x0000         ; X: the granule's lines, channel ch at MP_XS + 576 ch
 
-.const MP_RLEN = 0x1D4E         ; reservoir bytes, 0..512 (0 at the stream's start)
-.const MP_OK   = 0x1D4F         ; 1: main_data_begin within the reservoir, the frame decodes
-.const MP_P    = 0x1D50         ; the granule at hand's first bit, in bits from byte MP_MB
+.const MP_RLEN = 0x129E         ; reservoir bytes, 0..512 (0 at the stream's start)
+.const MP_OK   = 0x129F         ; 1: main_data_begin within the reservoir, the frame decodes
+.const MP_P    = 0x12A0         ; the granule at hand's first bit, in bits from byte MP_MB
 
 ; MP_OK and MP_P for this frame. Uses s1, s2, s12, e7.
 .macro mp3_main() {
@@ -1384,7 +1391,7 @@ sf:     lde e7, #MP_QSF
         ldi s12, #-2
         alu s3, s12, s2, #ASR
         alu s3, s10, s3, #OP_SUB ; b
-        ldi s11, #DQ_G
+        ldi s11, #MP_XG
         alu s11, s11, s3, #OP_ADD ; DQ_G + b
         mp3_put(MP_QGB, 11)
         amov_e(4, s11)
@@ -1400,7 +1407,7 @@ sf:     lde e7, #MP_QSF
         alu s12, s9, s0, #OP_ADD
         ldi s7, #128
         ldi s9, #23
-        ldi s13, #-DQ_D
+        ldi s13, #-MP_XDQ
 line:   pk(s1, A10, s0, s0, s0, 12, s12, s14, 5, 0) ; q
         x18.una s2, s1, #7, R13, s0 ; |q| (708; R13 takes it too, unused)
         pk(s0, A0, s0, s0, s0, 8, s7, s2, 5, 0) ; 128 - |q|
@@ -1425,7 +1432,7 @@ lend:   ptst p3, s0, #EQ12, #PTST
 big:    alu s9, s1, s0, #OP_ADD
         mp3_put(MP_QCNT, 12)
         alu s1, s2, s0, #OP_ADD
-        dq_mant()
+        dq_mant_at(MP_XDQ, MP_XIT, MP_IE, MP_IR)
         lde e7, #MP_QGB
         ldy s4, e7
         alu s4, s4, s5, #OP_ADD
@@ -1442,7 +1449,7 @@ big:    alu s9, s1, s0, #OP_ADD
         ldy s12, e7
         ldi s7, #128
         ldi s9, #23
-        ldi s13, #-DQ_D
+        ldi s13, #-MP_XDQ
         jmp #ALWAYS, #0, lend
         nop()
         nop()
@@ -3394,7 +3401,7 @@ yslot:  lde e7, #MP_HCH
         jmp #IF_NOT, #3, full
         nop()
         nop()
-        stream_on()
+        stream_on_at(MP_ON)
         ybits_init()
         mp3_header()
         mp3_sideinfo()

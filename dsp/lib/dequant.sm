@@ -45,11 +45,16 @@
 ; dq_mant(): s1 = mag (1..16383) -> s2 = m, s3 = em, s5 = 4 rem: |q|^(4/3) = m * 2^em * 2^(rem/3).
 ; Uses s4, s6, s7, s8, s12, s13, A8 and amov's registers (amov clobbers s7: f is made after it).
 .macro dq_mant() {
+        dq_mant_at(DQ_D, DQ_IT, DQ_IE, DQ_IR)
+}
+
+; dq_mant with its tables at D, IT (X) and IE, IR (Y), for a program laid out elsewhere (MP3).
+.macro dq_mant_at(D, IT, IE, IR) {
         ldi s12, #128
         alu s12, s12, s1, #OP_SUB
         ptst p3, s0, #LT12, #PTST ; mag > 128
         jmp #3, #3, big
-        ldi s4, #DQ_D           ; (delay slot)
+        ldi s4, #D           ; (delay slot)
         nop()
         alu s4, s4, s1, #OP_ADD
         alu s4, s4, s1, #OP_ADD ; DQ_D + 2 mag
@@ -76,7 +81,7 @@ found:  alu s8, s14, s6, #OP_SUB
         alu s8, s8, s14, #ASRRS ; 2^(s-1)
         alu s8, s1, s8, #OP_SUB
         alu s8, s6, s8, #ASRRS  ; j = floor(mag / 2^s)
-        ldi s4, #DQ_IT - 64
+        ldi s4, #IT - 64
         alu s4, s4, s8, #OP_ADD
         amov_e(4, s4)            ; (clobbers s7)
         alu s12, s0, s6, #OP_SUB
@@ -91,11 +96,11 @@ found:  alu s8, s14, s6, #OP_SUB
         alu s7, s12, s7, #ASRRS ; f 2^(23 - s), below 2^23
         x02.mpy s8, s4, s7      ; round(d f / 2^s)
         alu s2, s3, s8, #OP_ADD ; m
-        ldi s13, #DQ_IE - 1
+        ldi s13, #IE - 1
         alu s13, s13, s6, #OP_ADD
         x17.mve e6, s13
         ldy s3, e6              ; em
-        ldi s13, #DQ_IR - 1
+        ldi s13, #IR - 1
         alu s13, s13, s6, #OP_ADD
         x17.mve e6, s13
         ldy s5, e6              ; 4 rem
